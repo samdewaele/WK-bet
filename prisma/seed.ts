@@ -2,7 +2,9 @@ import { PrismaBetterSqlite3 } from "@prisma/adapter-better-sqlite3";
 import { PrismaClient } from "../src/generated/prisma/client";
 import path from "path";
 
-const dbPath = path.resolve(process.cwd(), "dev.db");
+const url = process.env.DATABASE_URL ?? "file:./dev.db";
+const filePath = url.replace(/^file:/, "");
+const dbPath = path.isAbsolute(filePath) ? filePath : path.resolve(process.cwd(), filePath);
 const adapter = new PrismaBetterSqlite3({ url: dbPath });
 const db = new PrismaClient({ adapter } as any);
 
@@ -115,8 +117,12 @@ async function main() {
   }
   console.log(`✓ ${TEAMS.length} teams seeded`);
 
-  // Clear existing matches
-  await db.match.deleteMany();
+  // Only seed matches on first run — don't overwrite admin-entered scores
+  const existingMatchCount = await db.match.count();
+  if (existingMatchCount > 0) {
+    console.log(`✓ Matches already seeded (${existingMatchCount}), skipping`);
+    return;
+  }
 
   const teamMap = new Map(
     (await db.team.findMany()).map((t) => [t.name, t.id])
