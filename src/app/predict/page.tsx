@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { auth } from "@/../../auth";
+import { auth } from "@auth";
 import { db } from "@/lib/db";
 import Navbar from "@/components/Navbar";
 import PredictionsClient from "@/components/PredictionsClient";
