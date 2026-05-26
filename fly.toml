@@ -1,4 +1,4 @@
-app = "wk-bet-2026"
+app = "wk-bet"
 primary_region = "ams"
 
 [build]
@@ -7,7 +7,7 @@ primary_region = "ams"
   PORT         = "3000"
   NODE_ENV     = "production"
   DATABASE_URL = "file:/data/prod.db"
-  NEXT_PUBLIC_BASE_URL = "https://wk-bet-2026.fly.dev"
+  NEXT_PUBLIC_BASE_URL = "https://wk-bet.fly.dev"
 
 [http_service]
   internal_port        = 3000
