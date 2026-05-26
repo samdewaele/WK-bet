@@ -1,36 +1,68 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# WK-Bet
 
-## Getting Started
+A Next.js betting app with Google authentication, deployed on Fly.io with a persistent SQLite database.
 
-First, run the development server:
+## Local Development
+
+### Prerequisites
+
+- Node.js 20+
+- A Google OAuth app ([create one here](https://console.cloud.google.com/apis/credentials))
+
+### Setup
+
+1. Clone the repo and install dependencies:
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+git clone https://github.com/samdewaele/wk-bet.git
+cd wk-bet
+npm install
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+2. Create a `.env` file in the root:
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```env
+DATABASE_URL="file:./dev.db"
+AUTH_SECRET="any-random-string-for-local-dev"
+GOOGLE_CLIENT_ID="your-google-client-id"
+GOOGLE_CLIENT_SECRET="your-google-client-secret"
+NEXTAUTH_URL="http://localhost:3000"
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+3. Run migrations, seed, and start:
 
-## Learn More
+```bash
+npx prisma migrate deploy
+npx tsx prisma/seed.ts
+npm run dev
+```
 
-To learn more about Next.js, take a look at the following resources:
+Open [http://localhost:3000](http://localhost:3000).
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+---
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Deploy to Fly.io
 
-## Deploy on Vercel
+### Prerequisites
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+- [flyctl](https://fly.io/docs/hands-on/install-flyctl/) installed
+- A [Fly.io account](https://fly.io) with a credit card on file (required for volumes)
+- Google OAuth credentials with `https://wk-bet.fly.dev/api/auth/callback/google` as an authorized redirect URI
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+### First-time setup
+
+```bash
+fly auth login
+fly apps create wk-bet
+fly volumes create wkbet_data --size 1 --region ams --app wk-bet
+fly secrets set AUTH_SECRET=$(openssl rand -base64 32) GOOGLE_CLIENT_ID=your-id GOOGLE_CLIENT_SECRET=your-secret --app wk-bet
+fly deploy
+```
+
+### Subsequent deploys
+
+```bash
+fly deploy
+```
+
+> Use `fly deploy`, not `fly launch`. The launch wizard auto-provisions unwanted services like Tigris object storage.
