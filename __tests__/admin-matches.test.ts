@@ -21,7 +21,7 @@ import { db } from '@/lib/db';
 import { PATCH } from '../src/app/api/admin/matches/[matchId]/route';
 
 const mockAuth = vi.mocked(auth);
-const mockDb = vi.mocked(db);
+const mockDb = db as any;
 
 function makeRequest(body: unknown): NextRequest {
   return new NextRequest('http://localhost/api/admin/matches/m1', {
@@ -35,7 +35,7 @@ const defaultParams = { params: Promise.resolve({ matchId: 'm1' }) };
 
 describe('PATCH /api/admin/matches/[matchId]', () => {
   it('returns 401 when unauthenticated', async () => {
-    mockAuth.mockResolvedValue(null);
+    mockAuth.mockResolvedValue(null as any);
     const res = await PATCH(makeRequest({ status: 'live' }), defaultParams);
     expect(res.status).toBe(401);
     const json = await res.json();

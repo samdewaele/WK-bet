@@ -99,14 +99,15 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // Upsert all valid predictions
+  // Upsert all valid predictions (roomId null = global / not room-scoped)
   const upserted = await Promise.all(
     valid.map((pred) =>
       db.prediction.upsert({
         where: {
-          userId_matchId: {
+          userId_matchId_roomId: {
             userId,
             matchId: pred.matchId,
+            roomId: null as unknown as string,
           },
         },
         create: {
@@ -114,11 +115,11 @@ export async function POST(req: NextRequest) {
           matchId: pred.matchId,
           homeScore: pred.homeScore,
           awayScore: pred.awayScore,
+          roomId: null,
         },
         update: {
           homeScore: pred.homeScore,
           awayScore: pred.awayScore,
-          // Clear old points when prediction is updated
           points: null,
         },
       })

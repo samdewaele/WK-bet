@@ -22,7 +22,7 @@ import { db } from '@/lib/db';
 import { GET, POST } from '@/app/api/predictions/route';
 
 const mockAuth = vi.mocked(auth);
-const mockDb = vi.mocked(db);
+const mockDb = db as any;
 
 function makeRequest(body?: unknown, method = 'POST'): NextRequest {
   return new NextRequest('http://localhost/api/predictions', {
@@ -34,7 +34,7 @@ function makeRequest(body?: unknown, method = 'POST'): NextRequest {
 
 describe('GET /api/predictions', () => {
   it('returns 401 when no session', async () => {
-    mockAuth.mockResolvedValue(null);
+    mockAuth.mockResolvedValue(null as any);
     const res = await GET();
     expect(res.status).toBe(401);
     const json = await res.json();
@@ -86,7 +86,7 @@ describe('GET /api/predictions', () => {
 
 describe('POST /api/predictions', () => {
   it('returns 401 when unauthenticated', async () => {
-    mockAuth.mockResolvedValue(null);
+    mockAuth.mockResolvedValue(null as any);
     const res = await POST(makeRequest({ predictions: [] }));
     expect(res.status).toBe(401);
   });

@@ -115,18 +115,19 @@ model Match {
   @@unique([matchNumber])
 }
 
-// Knockout match predictions (one per user per match per room)
+// Knockout match predictions (one per user per match per room, or globally if roomId is null)
 model Prediction {
   id           String   @id @default(cuid())
   userId       String
   matchId      String
-  roomId       String
+  roomId       String?
   homeScore    Int
   awayScore    Int
+  points       Int?
   earnedAmount Float?
   user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   match        Match    @relation(fields: [matchId], references: [id], onDelete: Cascade)
-  room         Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  room         Room?    @relation(fields: [roomId], references: [id], onDelete: Cascade)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 

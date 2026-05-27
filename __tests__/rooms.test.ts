@@ -24,7 +24,7 @@ import { db } from '@/lib/db';
 import { GET, POST, PUT } from '@/app/api/rooms/route';
 
 const mockAuth = vi.mocked(auth);
-const mockDb = vi.mocked(db);
+const mockDb = db as any;
 
 function makeRequest(body: unknown, method = 'POST'): NextRequest {
   return new NextRequest('http://localhost/api/rooms', {
@@ -36,7 +36,7 @@ function makeRequest(body: unknown, method = 'POST'): NextRequest {
 
 describe('GET /api/rooms', () => {
   it('returns 401 when no session', async () => {
-    mockAuth.mockResolvedValue(null);
+    mockAuth.mockResolvedValue(null as any);
     const res = await GET();
     expect(res.status).toBe(401);
     const json = await res.json();
@@ -84,7 +84,7 @@ describe('GET /api/rooms', () => {
 
 describe('POST /api/rooms', () => {
   it('returns 401 when unauthenticated', async () => {
-    mockAuth.mockResolvedValue(null);
+    mockAuth.mockResolvedValue(null as any);
     const res = await POST(makeRequest({ name: 'My Room' }));
     expect(res.status).toBe(401);
   });
@@ -116,7 +116,7 @@ describe('POST /api/rooms', () => {
     const now = new Date('2025-06-01T12:00:00Z');
     const createdRoom = { id: 'r1', name: 'My Room', inviteCode: 'XYZ', createdAt: now };
 
-    mockDb.$transaction.mockImplementation(async (fn) => fn(mockDb as never));
+    mockDb.$transaction.mockImplementation(async (fn: (tx: unknown) => unknown) => fn(mockDb));
     (mockDb.room.create as ReturnType<typeof vi.fn>).mockResolvedValue(createdRoom);
     (mockDb.roomMember.create as ReturnType<typeof vi.fn>).mockResolvedValue({} as never);
 
@@ -133,7 +133,7 @@ describe('POST /api/rooms', () => {
 
 describe('PUT /api/rooms', () => {
   it('returns 401 when unauthenticated', async () => {
-    mockAuth.mockResolvedValue(null);
+    mockAuth.mockResolvedValue(null as any);
     const res = await PUT(makeRequest({ inviteCode: 'ABC' }, 'PUT'));
     expect(res.status).toBe(401);
   });
