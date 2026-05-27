@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import Navbar from "@/components/Navbar";
 import AdminMatchList from "@/components/AdminMatchList";
 import SyncButton from "@/components/SyncButton";
+import TestTournamentPanel from "@/components/TestTournamentPanel";
 
 export default async function AdminPage() {
   const session = await auth();
@@ -53,6 +54,9 @@ export default async function AdminPage() {
             </span>
           </div>
           <SyncButton />
+        </div>
+        <div className="mb-10">
+          <TestTournamentPanel />
         </div>
         <AdminMatchList matches={serialized} />
       </div>
