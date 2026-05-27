@@ -18,7 +18,7 @@ vi.mock('@/lib/db', () => ({
 
 import { auth } from '@auth';
 import { db } from '@/lib/db';
-import { PATCH } from './route';
+import { PATCH } from '../src/app/api/admin/matches/[matchId]/route';
 
 const mockAuth = vi.mocked(auth);
 const mockDb = vi.mocked(db);

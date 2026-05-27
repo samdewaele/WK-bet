@@ -6,7 +6,7 @@ import {
   ROUND_ORDER,
   ROUND_LABELS,
   type Round,
-} from './points';
+} from '@/lib/points';
 
 describe('ROUND_ORDER', () => {
   it('contains all 7 rounds in the correct order', () => {

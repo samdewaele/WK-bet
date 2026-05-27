@@ -19,7 +19,7 @@ vi.mock('@/lib/db', () => ({
 
 import { auth } from '@auth';
 import { db } from '@/lib/db';
-import { GET, POST } from './route';
+import { GET, POST } from '@/app/api/predictions/route';
 
 const mockAuth = vi.mocked(auth);
 const mockDb = vi.mocked(db);
