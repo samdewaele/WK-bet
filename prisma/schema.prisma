@@ -43,25 +43,39 @@ model VerificationToken {
 }
 
 model User {
-  id            String       @id @default(cuid())
-  name          String?
-  email         String?      @unique
-  emailVerified DateTime?
-  image         String?
-  role          String       @default("user")
-  accounts      Account[]
-  sessions      Session[]
-  predictions   Prediction[]
-  memberships   RoomMember[]
-  createdAt     DateTime     @default(now())
+  id                      String                   @id @default(cuid())
+  name                    String?
+  email                   String?                  @unique
+  emailVerified           DateTime?
+  image                   String?
+  role                    String                   @default("user")
+  accounts                Account[]
+  sessions                Session[]
+  predictions             Prediction[]
+  memberships             RoomMember[]
+  groupPredictions        GroupStandingPrediction[]
+  sideBetEntries          SideBetEntry[]
+  p2pBetsProposed         P2PSideBet[]             @relation("P2PProposer")
+  p2pBetsAccepted         P2PSideBet[]             @relation("P2PAcceptor")
+  createdRooms            Room[]                   @relation("RoomCreator")
+  createdAt               DateTime                 @default(now())
 }
 
 model Room {
-  id          String       @id @default(cuid())
-  name        String
-  inviteCode  String       @unique @default(cuid())
-  members     RoomMember[]
-  createdAt   DateTime     @default(now())
+  id               String                   @id @default(cuid())
+  name             String
+  inviteCode       String                   @unique @default(cuid())
+  creatorId        String?
+  entryFee         Float                    @default(0)
+  // setup | open | locked | active | finished
+  status           String                   @default("setup")
+  members          RoomMember[]
+  groupPredictions GroupStandingPrediction[]
+  predictions      Prediction[]
+  sideBets         SideBet[]
+  p2pBets          P2PSideBet[]
+  creator          User?                    @relation("RoomCreator", fields: [creatorId], references: [id])
+  createdAt        DateTime                 @default(now())
 }
 
 model RoomMember {
@@ -101,17 +115,84 @@ model Match {
   @@unique([matchNumber])
 }
 
+// Knockout match predictions (one per user per match per room)
 model Prediction {
   id           String   @id @default(cuid())
   userId       String
   matchId      String
+  roomId       String
   homeScore    Int
   awayScore    Int
-  points       Int?
+  earnedAmount Float?
   user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   match        Match    @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  room         Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  @@unique([userId, matchId])
+  @@unique([userId, matchId, roomId])
+}
+
+// Group stage: predict final standings (1st–4th) for each of the 12 WC groups
+model GroupStandingPrediction {
+  id           String   @id @default(cuid())
+  userId       String
+  roomId       String
+  wcGroup      String   // "A" – "L"
+  position1    String   // teamId
+  position2    String
+  position3    String
+  position4    String
+  earnedAmount Float?
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  room         Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@unique([userId, roomId, wcGroup])
+}
+
+// Tournament-wide side bets (admin-created, funded equally from Uber Pot)
+model SideBet {
+  id          String         @id @default(cuid())
+  roomId      String
+  title       String
+  description String?
+  // open | settled
+  status      String         @default("open")
+  winnerEntryId String?
+  room        Room           @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  entries     SideBetEntry[]
+  createdAt   DateTime       @default(now())
+}
+
+// A user's answer/prediction for a side bet
+model SideBetEntry {
+  id        String   @id @default(cuid())
+  sideBetId String
+  userId    String
+  answer    String
+  sideBet   SideBet  @relation(fields: [sideBetId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([sideBetId, userId])
+}
+
+// Player-to-player side bets (separate from main pot)
+model P2PSideBet {
+  id          String   @id @default(cuid())
+  roomId      String
+  proposerId  String
+  acceptorId  String?
+  amount      Float
+  description String
+  // proposed | accepted | declined | settled
+  status      String   @default("proposed")
+  // "proposer" | "acceptor" — who won
+  winner      String?
+  room        Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  proposer    User     @relation("P2PProposer", fields: [proposerId], references: [id])
+  acceptor    User?    @relation("P2PAcceptor", fields: [acceptorId], references: [id])
+  createdAt   DateTime @default(now())
 }
