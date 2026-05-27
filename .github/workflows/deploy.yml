@@ -1,7 +1,7 @@
 name: Deploy
 on:
   push:
-    branches: [main]
+    branches: [main, "claude/betting-webapp-friends-fD4yG"]
 jobs:
   deploy:
     runs-on: ubuntu-latest
