@@ -3,6 +3,7 @@ import Link from "next/link";
 import { auth } from "@auth";
 import { db } from "@/lib/db";
 import Navbar from "@/components/Navbar";
+import CreateJoinGroupForms from "@/components/CreateJoinGroupForms";
 import { calculatePot } from "@/lib/pot";
 
 export default async function GroupsPage() {
@@ -60,56 +61,7 @@ export default async function GroupsPage() {
           <p className="text-gray-400 mt-1">Create a group or join one with an invite code.</p>
         </div>
 
-        <div className="grid gap-4 md:grid-cols-2 mb-10">
-          {/* Create group form */}
-          <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
-            <h2 className="text-lg font-semibold text-amber-400 mb-4">Create Group</h2>
-            <form action="/api/groups" method="POST" className="space-y-3">
-              <input
-                type="text"
-                name="name"
-                placeholder="Group name"
-                maxLength={50}
-                required
-                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white placeholder-gray-500 focus:outline-none focus:border-amber-400"
-              />
-              <input
-                type="number"
-                name="entryFee"
-                placeholder="Entry fee (€)"
-                min={0}
-                step={0.01}
-                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white placeholder-gray-500 focus:outline-none focus:border-amber-400"
-              />
-              <button
-                type="submit"
-                className="w-full bg-amber-400 hover:bg-amber-300 text-gray-900 font-semibold py-2 rounded-lg transition-colors"
-              >
-                Create Group
-              </button>
-            </form>
-          </div>
-
-          {/* Join group form */}
-          <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
-            <h2 className="text-lg font-semibold text-amber-400 mb-4">Join Group</h2>
-            <form action="/api/groups" method="PUT" className="space-y-3">
-              <input
-                type="text"
-                name="inviteCode"
-                placeholder="Invite code"
-                required
-                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white placeholder-gray-500 focus:outline-none focus:border-amber-400"
-              />
-              <button
-                type="submit"
-                className="w-full bg-gray-700 hover:bg-gray-600 text-white font-semibold py-2 rounded-lg transition-colors"
-              >
-                Join Group
-              </button>
-            </form>
-          </div>
-        </div>
+        <CreateJoinGroupForms />
 
         {groups.length === 0 ? (
           <div className="text-center py-16 text-gray-500">

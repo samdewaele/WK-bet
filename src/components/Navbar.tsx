@@ -20,22 +20,16 @@ export default function Navbar() {
           {/* Nav Links */}
           <div className="hidden md:flex items-center gap-6">
             <Link
-              href="/predict"
+              href="/groups"
               className="text-gray-300 hover:text-amber-400 transition-colors font-medium"
             >
-              Predictions
+              My Groups
             </Link>
             <Link
               href="/leaderboard"
               className="text-gray-300 hover:text-amber-400 transition-colors font-medium"
             >
               Leaderboard
-            </Link>
-            <Link
-              href="/rooms"
-              className="text-gray-300 hover:text-amber-400 transition-colors font-medium"
-            >
-              Rooms
             </Link>
           </div>
 
@@ -70,7 +64,7 @@ export default function Navbar() {
               </div>
             ) : (
               <button
-                onClick={() => signIn("google", { callbackUrl: "/predict" })}
+                onClick={() => signIn("google", { callbackUrl: "/groups" })}
                 className="bg-amber-400 hover:bg-amber-300 text-gray-900 font-semibold px-4 py-2 rounded-lg text-sm transition-colors"
               >
                 Sign In
@@ -81,14 +75,11 @@ export default function Navbar() {
 
         {/* Mobile nav */}
         <div className="md:hidden flex gap-4 pb-3">
-          <Link href="/predict" className="text-gray-300 hover:text-amber-400 text-sm transition-colors">
-            Predictions
+          <Link href="/groups" className="text-gray-300 hover:text-amber-400 text-sm transition-colors">
+            My Groups
           </Link>
           <Link href="/leaderboard" className="text-gray-300 hover:text-amber-400 text-sm transition-colors">
             Leaderboard
-          </Link>
-          <Link href="/rooms" className="text-gray-300 hover:text-amber-400 text-sm transition-colors">
-            Rooms
           </Link>
         </div>
       </div>
