@@ -20,7 +20,7 @@ export async function syncMatches(): Promise<SyncResult> {
   );
 
   if (actionable.length === 0) {
-    return { updated: 0, predictionsScored: 0, message: "No live or finished matches yet" };
+    return { updated: 0, predictionsScored: 0, notificationsSent: [], message: "No live or finished matches yet" };
   }
 
   const dbMatches = await db.match.findMany({

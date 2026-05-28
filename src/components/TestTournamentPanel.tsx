@@ -109,20 +109,6 @@ export default function TestTournamentPanel() {
 
       {state.phase === "done" && (
         <div className="mt-4 space-y-4">
-          {/* Match results */}
-          <div>
-            <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Simulated Results</h3>
-            <div className="flex flex-wrap gap-3">
-              {state.report.matches.map((m, i) => (
-                <div key={i} className="bg-gray-800 rounded-lg px-4 py-2 text-sm text-center">
-                  <span className="text-gray-300">{m.homeTeam}</span>
-                  <span className="text-amber-400 font-bold mx-2">{m.score}</span>
-                  <span className="text-gray-300">{m.awayTeam}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-
           {/* Leaderboard */}
           <div>
             <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">
@@ -135,35 +121,18 @@ export default function TestTournamentPanel() {
                     <th className="text-left px-3 py-2">#</th>
                     <th className="text-left px-3 py-2">Player</th>
                     <th className="text-right px-3 py-2">Points</th>
-                    <th className="text-right px-3 py-2">Est. share</th>
-                    <th className="text-left px-3 py-2 hidden sm:table-cell">Breakdown</th>
+                    <th className="text-right px-3 py-2">Earned</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {(() => {
-                    const totalPts = state.report.leaderboard.reduce((s, p) => s + p.points, 0);
-                    return state.report.leaderboard.map((player, i) => {
-                      const share = totalPts > 0 ? (player.points / totalPts) * state.report.potTotal : 0;
-                      return (
-                        <tr key={i} className="border-b border-gray-800 last:border-0 hover:bg-gray-800/50">
-                          <td className="px-3 py-2 text-gray-500 font-mono">{i + 1}</td>
-                          <td className="px-3 py-2 text-white font-medium">{player.name}</td>
-                          <td className="px-3 py-2 text-right text-amber-400 font-bold">{player.points}</td>
-                          <td className="px-3 py-2 text-right text-green-400">€{share.toFixed(2)}</td>
-                          <td className="px-3 py-2 text-gray-400 text-xs hidden sm:table-cell">
-                            {player.breakdown.map((b, j) => (
-                              <span key={j} className="mr-3 whitespace-nowrap">
-                                {b.matchLabel.split(" vs ")[0]} pred {b.predicted} actual {b.actual}{" "}
-                                <span className={b.pts > 0 ? "text-green-400" : "text-gray-600"}>
-                                  +{b.pts}
-                                </span>
-                              </span>
-                            ))}
-                          </td>
-                        </tr>
-                      );
-                    });
-                  })()}
+                  {state.report.leaderboard.map((player, i) => (
+                    <tr key={i} className="border-b border-gray-800 last:border-0 hover:bg-gray-800/50">
+                      <td className="px-3 py-2 text-gray-500 font-mono">{i + 1}</td>
+                      <td className="px-3 py-2 text-white font-medium">{player.name}</td>
+                      <td className="px-3 py-2 text-right text-amber-400 font-bold">{player.points}</td>
+                      <td className="px-3 py-2 text-right text-green-400">€{player.earned.toFixed(2)}</td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
             </div>

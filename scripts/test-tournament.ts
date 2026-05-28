@@ -30,26 +30,13 @@ async function main() {
 
     header("RESULTS");
 
-    console.log("\n  SIMULATED MATCH RESULTS");
-    sep();
-    for (const m of report.matches) {
-      console.log(`  ${m.homeTeam.padEnd(15)} ${m.score}  ${m.awayTeam}`);
-    }
-
     console.log("\n  LEADERBOARD");
     sep();
-    const totalPts = report.leaderboard.reduce((s, p) => s + p.points, 0);
     report.leaderboard.forEach((p, i) => {
-      const share = totalPts > 0 ? (p.points / totalPts) * report.potTotal : 0;
-      console.log(`  ${i + 1}. ${p.name.padEnd(25)} ${String(p.points).padStart(2)} pts  →  €${share.toFixed(2)}`);
-      for (const b of p.breakdown) {
-        console.log(`     ${b.matchLabel.padEnd(22)} pred ${b.predicted}  actual ${b.actual}  +${b.pts}`);
-      }
+      console.log(`  ${i + 1}. ${p.name.padEnd(25)} ${String(p.points).padStart(3)} pts  →  €${p.earned.toFixed(2)}`);
     });
 
-    const sumCheck = report.leaderboard.reduce((s, p) => {
-      return s + (totalPts > 0 ? (p.points / totalPts) * report.potTotal : 0);
-    }, 0);
+    const sumCheck = report.leaderboard.reduce((s, p) => s + p.earned, 0);
     console.log();
     sep("-");
     console.log(`  Pot total: €${report.potTotal.toFixed(2)}   Distributed: €${sumCheck.toFixed(2)}   ${Math.abs(sumCheck - report.potTotal) < 0.01 ? "✓ OK" : "✗ MISMATCH"}`);
