@@ -3,6 +3,9 @@ import { emailGroupStageComplete, emailRoundComplete, emailIncompleteReminder } 
 
 const ROUNDS_IN_ORDER = ["Group", "R32", "R16", "QF", "SF", "3rd", "Final"] as const;
 type Round = (typeof ROUNDS_IN_ORDER)[number];
+// Group match score predictions are bonus-only, so we don't remind about them.
+// Only KO rounds are required/expected predictions.
+const REMINDER_ROUNDS = ["R32", "R16", "QF", "SF", "3rd", "Final"] as const;
 
 async function isRoundComplete(round: string): Promise<boolean> {
   const total = await db.match.count({ where: { round } });
@@ -131,7 +134,7 @@ export async function checkAndSendIncompleteReminders(): Promise<{ round: string
     },
   });
 
-  for (const round of ROUNDS_IN_ORDER) {
+  for (const round of REMINDER_ROUNDS) {
     const key = `reminder:${round}`;
     if (await wasNotified(key)) continue;
 

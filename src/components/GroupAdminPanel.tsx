@@ -270,7 +270,7 @@ export default function GroupAdminPanel({
               <div>
                 <h3 className="text-xs font-bold text-violet-400 uppercase tracking-wide mb-3">Transfer Ownership</h3>
                 <p className="text-xs text-gray-400 mb-2">
-                  Make another member the group creator. You'll lose admin controls for this group.
+                  Make another member the group creator. You&apos;ll lose admin controls for this group.
                 </p>
                 <div className="flex gap-2">
                   <select
@@ -378,7 +378,10 @@ export default function GroupAdminPanel({
                   <thead>
                     <tr className="border-b border-gray-700 bg-gray-800/50">
                       <th className="text-left px-3 py-2 text-gray-500 font-medium">Member</th>
-                      <th className="text-center px-2 py-2 text-gray-500 font-medium">Group preds</th>
+                      <th className="text-center px-2 py-2 text-gray-500 font-medium">
+                        Match scores
+                        <span className="ml-1 text-gray-600 font-normal">(bonus)</span>
+                      </th>
                       <th className="text-center px-2 py-2 text-gray-500 font-medium">KO preds</th>
                       <th className="text-center px-2 py-2 text-gray-500 font-medium">Standings</th>
                       <th className="text-center px-2 py-2 text-gray-500 font-medium">Paid</th>
@@ -390,14 +393,16 @@ export default function GroupAdminPanel({
                       const groupComplete = m.groupPredictions >= m.totalGroupMatches;
                       const koComplete = m.totalKOMatches === 0 || m.koPredictions >= m.totalKOMatches;
                       const standingsComplete = m.groupStandingGroups >= m.totalGroupStandingGroups;
-                      const isIncomplete = !groupComplete || !standingsComplete;
+                      // #12: isIncomplete only checks standings (group match scores are bonus only)
+                      const isIncomplete = !standingsComplete;
                       return (
                         <tr key={m.userId} className={`border-b border-gray-800 last:border-0 ${m.excludedFromPot ? "opacity-50" : ""}`}>
                           <td className="px-3 py-2 text-white font-medium">
                             {m.name ?? m.email ?? m.userId}
                             {m.excludedFromPot && <span className="ml-1.5 text-red-400 font-normal">(excluded)</span>}
                           </td>
-                          <td className={`px-2 py-2 text-center ${groupComplete ? "text-green-400" : "text-amber-400"}`}>
+                          {/* Group match scores — gray if incomplete (bonus only, not a warning) */}
+                          <td className={`px-2 py-2 text-center ${groupComplete ? "text-green-400" : "text-gray-500"}`}>
                             {m.groupPredictions}/{m.totalGroupMatches}
                           </td>
                           <td className={`px-2 py-2 text-center ${koComplete ? "text-green-400" : "text-gray-500"}`}>
@@ -432,9 +437,9 @@ export default function GroupAdminPanel({
                     })}
                   </tbody>
                 </table>
-                {memberStats.some((m) => !m.excludedFromPot && (m.groupPredictions < m.totalGroupMatches || m.groupStandingGroups < m.totalGroupStandingGroups)) && (
+                {memberStats.some((m) => !m.excludedFromPot && m.groupStandingGroups < m.totalGroupStandingGroups) && (
                   <p className="text-xs text-amber-400/70 px-3 py-2 border-t border-gray-700">
-                    Members with amber counts have incomplete predictions. Excluding them removes their share from the pot.
+                    Members with amber standings counts have not completed all group predictions. Excluding them removes their share from the pot.
                   </p>
                 )}
               </div>

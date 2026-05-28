@@ -35,6 +35,16 @@ export default function HomePage() {
             Bet with{" "}
             <span className="text-amber-400">friends.</span>
           </h1>
+
+          {/* Date callout */}
+          <div className="inline-flex items-center gap-2 bg-amber-400/10 border border-amber-400/30 rounded-xl px-4 py-2 mb-6">
+            <span className="text-amber-400 font-semibold text-sm">
+              June 11 – July 19, 2026
+            </span>
+            <span className="text-gray-500 text-sm">·</span>
+            <span className="text-gray-400 text-sm">48 teams, 12 groups, full knockout</span>
+          </div>
+
           <p className="text-gray-400 text-xl max-w-2xl mx-auto mb-10">
             Create a private betting group, set an entry fee, invite your mates,
             and compete across the full tournament — group stage standings,
@@ -116,7 +126,7 @@ export default function HomePage() {
         <div className="bg-gradient-to-r from-amber-400/20 via-amber-400/10 to-amber-400/20 border border-amber-400/30 rounded-xl p-10">
           <h2 className="text-3xl font-bold text-white mb-4">Ready to play?</h2>
           <p className="text-gray-400 mb-8">
-            Create your group before the first whistle — June 2026.
+            Create your group before the first whistle — tournament starts <strong className="text-white">June 11, 2026</strong>.
           </p>
           <button
             onClick={() => signIn("google", { callbackUrl: "/groups" })}

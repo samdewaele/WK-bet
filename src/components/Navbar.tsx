@@ -25,12 +25,6 @@ export default function Navbar() {
             >
               My Groups
             </Link>
-            <Link
-              href="/leaderboard"
-              className="text-gray-300 hover:text-amber-400 transition-colors font-medium"
-            >
-              Leaderboard
-            </Link>
           </div>
 
           {/* User area */}
@@ -52,9 +46,12 @@ export default function Navbar() {
                     {session.user.name?.[0]?.toUpperCase() ?? "U"}
                   </div>
                 )}
-                <span className="text-gray-300 text-sm hidden sm:block">
-                  {session.user.name}
-                </span>
+                <Link
+                  href="/profile"
+                  className="text-gray-300 text-sm hidden sm:block hover:text-amber-400 transition-colors"
+                >
+                  My account
+                </Link>
                 <button
                   onClick={() => signOut({ callbackUrl: "/" })}
                   className="text-sm text-gray-400 hover:text-red-400 transition-colors"
@@ -77,9 +74,6 @@ export default function Navbar() {
         <div className="md:hidden flex gap-4 pb-3">
           <Link href="/groups" className="text-gray-300 hover:text-amber-400 text-sm transition-colors">
             My Groups
-          </Link>
-          <Link href="/leaderboard" className="text-gray-300 hover:text-amber-400 text-sm transition-colors">
-            Leaderboard
           </Link>
         </div>
       </div>

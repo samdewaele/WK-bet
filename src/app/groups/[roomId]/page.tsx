@@ -24,7 +24,9 @@ export default async function GroupDetailPage({ params, searchParams }: Props) {
   if (!session?.user?.id) redirect("/auth/signin");
 
   const { roomId } = await params;
-  const { tab = "predictions" } = await searchParams;
+  const { tab: rawTab = "predictions" } = await searchParams;
+  // Backward compat: "leaderboard" → "standings"
+  const tab = rawTab === "leaderboard" ? "standings" : rawTab;
   const userId = session.user.id;
 
   const membership = await db.roomMember.findUnique({
@@ -67,11 +69,10 @@ export default async function GroupDetailPage({ params, searchParams }: Props) {
 
   const tabs = [
     { key: "predictions", label: "Predictions" },
-    { key: "leaderboard", label: "Leaderboard" },
-    { key: "sidebets", label: "Uber Pot Bets" },
-    { key: "p2p", label: "P2P Bets" },
+    { key: "standings", label: "Standings" },
+    { key: "sidebets-p2p", label: "Side Bets" },
     { key: "members", label: `Members (${room.members.length})` },
-    { key: "rules", label: "Rules" },
+    { key: "rules", label: "How to play" },
   ];
 
   return (
@@ -152,7 +153,7 @@ export default async function GroupDetailPage({ params, searchParams }: Props) {
         {tournamentStarted && (
           <div className="mb-6 flex items-center gap-2 text-sm text-amber-400 bg-amber-400/10 border border-amber-400/20 rounded-xl px-4 py-3">
             <span>🔒</span>
-            <span>Tournament in progress — membership locked. Only P2P bets can still be placed.</span>
+            <span>Tournament in progress — membership locked. Only Side Bets can still be placed.</span>
           </div>
         )}
 
@@ -167,24 +168,27 @@ export default async function GroupDetailPage({ params, searchParams }: Props) {
               <h2 className="text-xl font-bold text-white mb-4">Knockout Predictions</h2>
               <KnockoutPredictions roomId={roomId} />
             </div>
+            <div>
+              <h2 className="text-xl font-bold text-white mb-2">Uber Pot Bets</h2>
+              <p className="text-sm text-gray-400 mb-4">
+                Enter your answer for each bet below — the pot is split among winners when settled.
+              </p>
+              <SideBetsPanel
+                roomId={roomId}
+                currentUserId={userId}
+                isManager={isManager}
+                tournamentStarted={tournamentStarted}
+                totalPot={pot.totalPot}
+              />
+            </div>
           </div>
         )}
 
-        {tab === "leaderboard" && (
+        {tab === "standings" && (
           <GroupLeaderboard roomId={roomId} currentUserId={userId} totalPot={pot.totalPot} />
         )}
 
-        {tab === "sidebets" && (
-          <SideBetsPanel
-            roomId={roomId}
-            currentUserId={userId}
-            isManager={isManager}
-            tournamentStarted={tournamentStarted}
-            totalPot={pot.totalPot}
-          />
-        )}
-
-        {tab === "p2p" && (
+        {tab === "sidebets-p2p" && (
           <P2PBetsPanel
             roomId={roomId}
             currentUserId={userId}
