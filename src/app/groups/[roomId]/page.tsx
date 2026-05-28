@@ -59,6 +59,9 @@ export default async function GroupDetailPage({ params, searchParams }: Props) {
 
   const pot = calculatePot(room.entryFee, room.members.length);
 
+  const isPlatformAdmin = session.user.role === "admin";
+  const isManager = room.creatorId === userId || isPlatformAdmin;
+
   const tabs = [
     { key: "predictions", label: "Predictions" },
     { key: "leaderboard", label: "Leaderboard" },
@@ -81,12 +84,13 @@ export default async function GroupDetailPage({ params, searchParams }: Props) {
           </Link>
           <div className="flex items-start justify-between gap-4 mt-2">
             <h1 className="text-3xl font-bold text-white">{room.name}</h1>
-            {session.user.role === "admin" && (
+            {isManager && (
               <GroupAdminPanel
                 roomId={roomId}
                 initialName={room.name}
                 initialFee={room.entryFee}
                 initialStatus={room.status}
+                isPlatformAdmin={isPlatformAdmin}
               />
             )}
           </div>
@@ -167,7 +171,7 @@ export default async function GroupDetailPage({ params, searchParams }: Props) {
           <SideBetsPanel
             roomId={roomId}
             currentUserId={userId}
-            isAdmin={session.user.role === "admin"}
+            isAdmin={isManager}
             sideBetCount={room.sideBets.length}
           />
         )}

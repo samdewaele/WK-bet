@@ -4,18 +4,21 @@ import { db } from "@/lib/db";
 
 type Params = { params: Promise<{ roomId: string }> };
 
-async function requireAdmin() {
-  const session = await auth();
-  if (!session?.user?.id) return null;
-  if (session.user.role !== "admin") return null;
-  return session.user;
-}
-
 export async function PATCH(req: NextRequest, { params }: Params) {
-  const user = await requireAdmin();
-  if (!user) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  const session = await auth();
+  if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const { roomId } = await params;
+
+  // Allow group creator or platform admin
+  const room = await db.room.findUnique({ where: { id: roomId }, select: { creatorId: true } });
+  if (!room) return NextResponse.json({ error: "Not found" }, { status: 404 });
+
+  const isCreator = room.creatorId === session.user.id;
+  const isPlatformAdmin = session.user.role === "admin";
+  if (!isCreator && !isPlatformAdmin) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
 
   let body: { name?: string; entryFee?: number; status?: string };
   try { body = await req.json(); } catch {
@@ -32,6 +35,6 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     return NextResponse.json({ error: "Nothing to update" }, { status: 400 });
   }
 
-  const room = await db.room.update({ where: { id: roomId }, data });
-  return NextResponse.json({ id: room.id, name: room.name, entryFee: room.entryFee, status: room.status });
+  const updated = await db.room.update({ where: { id: roomId }, data });
+  return NextResponse.json({ id: updated.id, name: updated.name, entryFee: updated.entryFee, status: updated.status });
 }

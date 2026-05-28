@@ -26,11 +26,13 @@ export default function GroupAdminPanel({
   initialName,
   initialFee,
   initialStatus,
+  isPlatformAdmin,
 }: {
   roomId: string;
   initialName: string;
   initialFee: number;
   initialStatus: string;
+  isPlatformAdmin: boolean;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -199,8 +201,8 @@ export default function GroupAdminPanel({
             </div>
           </div>
 
-          {/* Right: Test simulation */}
-          <div>
+          {/* Right: Test simulation — platform admin only */}
+          {isPlatformAdmin && <div>
             <h3 className="text-sm font-bold text-violet-400 uppercase tracking-wide mb-3">
               Test Simulation
             </h3>
@@ -292,7 +294,7 @@ export default function GroupAdminPanel({
                 </div>
               </div>
             )}
-          </div>
+          </div>}
         </div>
       )}
     </div>
