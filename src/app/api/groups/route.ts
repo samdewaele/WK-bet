@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@auth";
 import { db } from "@/lib/db";
+import { isTournamentStarted } from "@/lib/tournament-lock";
+import { emailMemberJoined } from "@/lib/email";
 
 export async function GET() {
   const session = await auth();
@@ -12,10 +14,7 @@ export async function GET() {
     where: { userId: session.user.id },
     include: {
       room: {
-        include: {
-          members: true,
-          sideBets: true,
-        },
+        include: { members: true, sideBets: true },
       },
     },
   });
@@ -40,6 +39,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  if (await isTournamentStarted()) {
+    return NextResponse.json(
+      { error: "Tournament has started — no new groups can be created" },
+      { status: 403 },
+    );
+  }
+
   let body: { name?: string; entryFee?: number };
   try {
     body = await req.json();
@@ -51,7 +57,7 @@ export async function POST(req: NextRequest) {
   if (!name || name.length < 1 || name.length > 50) {
     return NextResponse.json(
       { error: "Group name must be between 1 and 50 characters" },
-      { status: 400 }
+      { status: 400 },
     );
   }
 
@@ -61,14 +67,11 @@ export async function POST(req: NextRequest) {
   }
 
   const userId = session.user.id;
-
   const room = await db.$transaction(async (tx) => {
     const newRoom = await tx.room.create({
       data: { name, entryFee, creatorId: userId, status: "setup" },
     });
-    await tx.roomMember.create({
-      data: { userId, roomId: newRoom.id },
-    });
+    await tx.roomMember.create({ data: { userId, roomId: newRoom.id } });
     return newRoom;
   });
 
@@ -90,6 +93,13 @@ export async function PUT(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  if (await isTournamentStarted()) {
+    return NextResponse.json(
+      { error: "Tournament has started — groups are locked" },
+      { status: 403 },
+    );
+  }
+
   let body: { inviteCode?: string };
   try {
     body = await req.json();
@@ -104,7 +114,11 @@ export async function PUT(req: NextRequest) {
 
   const room = await db.room.findUnique({
     where: { inviteCode },
-    include: { members: true, sideBets: true },
+    include: {
+      members: true,
+      sideBets: true,
+      creator: { select: { email: true } },
+    },
   });
 
   if (!room) {
@@ -113,8 +127,20 @@ export async function PUT(req: NextRequest) {
 
   const userId = session.user.id;
   const alreadyMember = room.members.some((m) => m.userId === userId);
+
   if (!alreadyMember) {
     await db.roomMember.create({ data: { userId, roomId: room.id } });
+
+    // Email creator
+    const joiner = await db.user.findUnique({ where: { id: userId }, select: { name: true } });
+    if (room.creator?.email) {
+      emailMemberJoined(
+        room.creator.email,
+        joiner?.name ?? "Someone",
+        room.name,
+        room.id,
+      ).catch(() => {});
+    }
   }
 
   return NextResponse.json({

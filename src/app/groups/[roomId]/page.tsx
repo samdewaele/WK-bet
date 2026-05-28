@@ -10,6 +10,8 @@ import GroupLeaderboard from "@/components/GroupLeaderboard";
 import SideBetsPanel from "@/components/SideBetsPanel";
 import P2PBetsPanel from "@/components/P2PBetsPanel";
 import GroupAdminPanel from "@/components/GroupAdminPanel";
+import MemberList from "@/components/MemberList";
+import { isTournamentStarted } from "@/lib/tournament-lock";
 
 type Props = {
   params: Promise<{ roomId: string }>;
@@ -61,12 +63,14 @@ export default async function GroupDetailPage({ params, searchParams }: Props) {
 
   const isPlatformAdmin = session.user.role === "admin";
   const isManager = room.creatorId === userId || isPlatformAdmin;
+  const tournamentStarted = await isTournamentStarted();
 
   const tabs = [
     { key: "predictions", label: "Predictions" },
     { key: "leaderboard", label: "Leaderboard" },
     { key: "sidebets", label: "Side Bets" },
     { key: "p2p", label: "P2P Bets" },
+    { key: "members", label: `Members (${room.members.length})` },
     { key: "rules", label: "Rules" },
   ];
 
@@ -145,6 +149,14 @@ export default async function GroupDetailPage({ params, searchParams }: Props) {
           )}
         </div>
 
+        {/* Tournament lock banner */}
+        {tournamentStarted && (
+          <div className="mb-6 flex items-center gap-2 text-sm text-amber-400 bg-amber-400/10 border border-amber-400/20 rounded-xl px-4 py-3">
+            <span>🔒</span>
+            <span>Tournament in progress — group membership is locked. Only P2P bets can still be placed.</span>
+          </div>
+        )}
+
         {/* Tab content */}
         {tab === "predictions" && (
           <div className="space-y-8">
@@ -185,6 +197,21 @@ export default async function GroupDetailPage({ params, searchParams }: Props) {
               name: m.user.name ?? "",
               image: m.user.image ?? null,
             }))}
+          />
+        )}
+
+        {tab === "members" && (
+          <MemberList
+            roomId={roomId}
+            members={room.members.map((m) => ({
+              userId: m.userId,
+              name: m.user.name,
+              image: m.user.image,
+            }))}
+            currentUserId={userId}
+            creatorId={room.creatorId}
+            isManager={isManager}
+            tournamentStarted={tournamentStarted}
           />
         )}
       </div>
