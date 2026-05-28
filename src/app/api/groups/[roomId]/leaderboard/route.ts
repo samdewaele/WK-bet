@@ -36,7 +36,10 @@ export async function GET(
     return NextResponse.json({ error: "Room not found" }, { status: 404 });
   }
 
-  const pot = calculatePot(room.entryFee, room.members.length);
+  const activeMemberCount = room.members.filter((m) => !m.excludedFromPot).length;
+  const pot = calculatePot(room.entryFee, activeMemberCount);
+
+  const excludedIds = new Set(room.members.filter((m) => m.excludedFromPot).map((m) => m.userId));
 
   const groupPredictions = await db.groupStandingPrediction.findMany({
     where: { roomId },
@@ -60,15 +63,21 @@ export async function GET(
     koEarnings.set(p.userId, current + (p.earnedAmount ?? 0));
   }
 
-  const totalGroupDistributed = [...groupEarnings.values()].reduce((a, b) => a + b, 0);
-  const totalKODistributed = [...koEarnings.values()].reduce((a, b) => a + b, 0);
+  // Only count non-excluded members' earnings when computing the remaining uber pot
+  const totalGroupDistributed = [...groupEarnings.entries()]
+    .filter(([uid]) => !excludedIds.has(uid))
+    .reduce((a, [, v]) => a + v, 0);
+  const totalKODistributed = [...koEarnings.entries()]
+    .filter(([uid]) => !excludedIds.has(uid))
+    .reduce((a, [, v]) => a + v, 0);
   const uberPot = Math.max(
     0,
     pot.totalPot - totalGroupDistributed - totalKODistributed
   );
 
   const settledSideBets = room.sideBets.filter((sb) => sb.status === "settled");
-  const sideBetCount = room.sideBets.length;
+  // Divide uber pot only among settled bets — open/proposed shares are reserved for future winners
+  const sideBetCount = settledSideBets.length;
   const prizeEach = prizePerSideBet(uberPot, sideBetCount);
 
   const sideBetEarnings = new Map<string, number>();

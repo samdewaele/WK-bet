@@ -210,8 +210,11 @@ export async function PATCH(
     if (bet.status !== "accepted") {
       return NextResponse.json({ error: "Bet must be accepted before settling" }, { status: 400 });
     }
-    if (session.user.role !== "admin" && bet.proposerId !== userId) {
-      return NextResponse.json({ error: "Only the proposer or admin can settle" }, { status: 403 });
+    // Only a neutral party (room creator or platform admin) may settle to prevent self-awarding
+    const room = await db.room.findUnique({ where: { id: roomId }, select: { creatorId: true } });
+    const isManager = session.user.role === "admin" || room?.creatorId === userId;
+    if (!isManager) {
+      return NextResponse.json({ error: "Only the room creator or admin can settle P2P bets" }, { status: 403 });
     }
     if (winner !== "proposer" && winner !== "acceptor") {
       return NextResponse.json({ error: "winner must be 'proposer' or 'acceptor'" }, { status: 400 });

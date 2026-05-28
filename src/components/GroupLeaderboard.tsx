@@ -12,6 +12,7 @@ type LeaderboardEntry = {
   knockout: number;
   sideBets: number;
   totalEarned: number;
+  excludedFromPot: boolean;
 };
 
 type Props = {
@@ -82,7 +83,11 @@ export default function GroupLeaderboard({ roomId, currentUserId, totalPot }: Pr
                 <tr
                   key={entry.userId}
                   className={`${
-                    isCurrentUser ? "bg-amber-400/5 border border-amber-400/20 rounded-xl" : ""
+                    entry.excludedFromPot
+                      ? "opacity-50"
+                      : isCurrentUser
+                      ? "bg-amber-400/5 border border-amber-400/20 rounded-xl"
+                      : ""
                   }`}
                 >
                   <td className="py-4 pr-4">
@@ -118,6 +123,9 @@ export default function GroupLeaderboard({ roomId, currentUserId, totalPot }: Pr
                       <span className={`font-medium ${isCurrentUser ? "text-amber-400" : "text-white"}`}>
                         {entry.name ?? "Unknown"}
                         {isCurrentUser && <span className="text-xs text-gray-500 ml-1">(you)</span>}
+                        {entry.excludedFromPot && (
+                          <span className="ml-1.5 text-xs text-red-400 font-normal bg-red-900/30 border border-red-800/50 rounded px-1">excluded</span>
+                        )}
                       </span>
                     </div>
                   </td>

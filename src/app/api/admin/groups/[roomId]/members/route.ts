@@ -30,8 +30,9 @@ export async function GET(_req: Request, { params }: Params) {
 
   const stats = await Promise.all(
     members.map(async (m) => {
+      // Group predictions are stored globally (roomId: null) via /api/predictions
       const groupPredictions = await db.prediction.count({
-        where: { userId: m.userId, roomId, match: { round: "Group" } },
+        where: { userId: m.userId, roomId: null, match: { round: "Group" } },
       });
       const koPredictions = await db.prediction.count({
         where: { userId: m.userId, roomId, match: { round: { not: "Group" } } },

@@ -129,7 +129,12 @@ export async function PUT(req: NextRequest) {
   const alreadyMember = room.members.some((m) => m.userId === userId);
 
   if (!alreadyMember) {
-    await db.roomMember.create({ data: { userId, roomId: room.id } });
+    try {
+      await db.roomMember.create({ data: { userId, roomId: room.id } });
+    } catch (e: unknown) {
+      // Concurrent join — unique constraint hit; treat as already-joined (success)
+      if ((e as { code?: string }).code !== "P2002") throw e;
+    }
 
     // Email creator
     const joiner = await db.user.findUnique({ where: { id: userId }, select: { name: true } });

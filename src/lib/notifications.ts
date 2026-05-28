@@ -107,7 +107,12 @@ function formatDeadline(date: Date): string {
 
 async function countMissingPredictions(userId: string, roomId: string, round: string): Promise<number> {
   const totalMatches = await db.match.count({ where: { round } });
-  const submitted = await db.prediction.count({ where: { userId, roomId, match: { round } } });
+  // Group match predictions are stored globally (roomId: null via /api/predictions)
+  // KO predictions are stored per-room (via /api/groups/[roomId]/knockout)
+  const effectiveRoomId = round === "Group" ? null : roomId;
+  const submitted = await db.prediction.count({
+    where: { userId, roomId: effectiveRoomId, match: { round } },
+  });
   return Math.max(0, totalMatches - submitted);
 }
 

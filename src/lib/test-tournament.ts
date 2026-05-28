@@ -117,7 +117,7 @@ export async function runTestTournament(adminUserId?: string): Promise<TestTourn
   const memberIds = [...users.map((u) => u.id), ...(adminUserId ? [adminUserId] : [])];
   await Promise.all(memberIds.map((uid) => db.roomMember.create({ data: { userId: uid, roomId: room.id } })));
 
-  const memberCount = users.length;
+  const memberCount = memberIds.length;
   await _simulate(room.id, users, ENTRY_FEE, memberCount);
 
   return buildReport(room.id);
@@ -165,6 +165,14 @@ async function _simulate(
   entryFee: number,
   memberCount: number,
 ): Promise<void> {
+  // Refuse to run if real match results already exist — cleanup would wipe them
+  const hasRealResults = await db.match.count({ where: { status: "finished" } });
+  if (hasRealResults > 0) {
+    throw new Error(
+      "Cannot simulate: the real tournament already has scored matches. " +
+      "Run cleanup first, or only use this before tournament kick-off."
+    );
+  }
   await _seedGroupStageRandomly(roomId, users, entryFee, memberCount);
   await _seedKORoundsRandomly(roomId, users, entryFee, memberCount);
   await _seedUberPotBets(roomId, users);
@@ -341,10 +349,10 @@ async function _seedKORoundsRandomly(
 
   // Random results + predictions for each KO match
   for (const match of koMatches) {
-    const actualHome = randomGoals();
+    let actualHome = randomGoals();
     // KO can't draw — if drawn, home wins on penalties (represented as +1)
-    let actualAway = randomGoals();
-    if (actualHome === actualAway) actualAway = Math.max(0, actualAway - 1);
+    const actualAway = randomGoals();
+    if (actualHome === actualAway) actualHome += 1; // KO can't draw — home wins by 1
 
     await db.match.update({
       where: { id: match.id },
@@ -494,6 +502,8 @@ export async function cleanupTestInRoom(roomId: string): Promise<void> {
 
   await db.sideBetEntry.deleteMany({ where: { sideBet: { roomId }, userId: { in: ids } } });
   await db.sideBet.deleteMany({ where: { roomId, proposedByUserId: { in: ids } } });
+  await db.p2PSideBet.deleteMany({ where: { roomId, proposerId: { in: ids } } });
+  await db.p2PSideBet.deleteMany({ where: { roomId, acceptorId: { in: ids } } });
   await db.prediction.deleteMany({ where: { roomId, userId: { in: ids } } });
   await db.groupStandingPrediction.deleteMany({ where: { roomId, userId: { in: ids } } });
   await db.roomMember.deleteMany({ where: { roomId, userId: { in: ids } } });

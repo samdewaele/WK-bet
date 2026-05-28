@@ -86,11 +86,32 @@ export async function DELETE(_req: Request, { params }: Params) {
   // Cascading removal within the room
   await db.prediction.deleteMany({ where: { userId: targetUserId, roomId } });
   await db.groupStandingPrediction.deleteMany({ where: { userId: targetUserId, roomId } });
+
+  // Before deleting entries: un-settle any side bet whose winner was this member
+  // (so the prize doesn't silently vanish from the leaderboard)
+  const memberEntries = await db.sideBetEntry.findMany({
+    where: { userId: targetUserId, sideBet: { roomId } },
+    select: { id: true },
+  });
+  if (memberEntries.length > 0) {
+    const entryIds = memberEntries.map((e) => e.id);
+    await db.sideBet.updateMany({
+      where: { roomId, winnerEntryId: { in: entryIds } },
+      data: { winnerEntryId: null, status: "open" },
+    });
+  }
   await db.sideBetEntry.deleteMany({ where: { userId: targetUserId, sideBet: { roomId } } });
+
+  // Cancel all P2P bets where this member is proposer or acceptor (any status)
   await db.p2PSideBet.updateMany({
-    where: { roomId, proposerId: targetUserId, status: "proposed" },
+    where: { roomId, proposerId: targetUserId, status: { not: "settled" } },
     data: { status: "declined" },
   });
+  await db.p2PSideBet.updateMany({
+    where: { roomId, acceptorId: targetUserId, status: { not: "settled" } },
+    data: { status: "declined" },
+  });
+
   await db.roomMember.delete({ where: { userId_roomId: { userId: targetUserId, roomId } } });
 
   // Emails — fire-and-forget
