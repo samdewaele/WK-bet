@@ -14,7 +14,8 @@ vi.mock("@/lib/db", () => ({
     roomMember: { delete: vi.fn(), update: vi.fn() },
     prediction: { deleteMany: vi.fn() },
     groupStandingPrediction: { deleteMany: vi.fn() },
-    sideBetEntry: { deleteMany: vi.fn() },
+    sideBet: { updateMany: vi.fn() },
+    sideBetEntry: { findMany: vi.fn(), deleteMany: vi.fn() },
     p2PSideBet: { updateMany: vi.fn() },
   },
 }));
@@ -55,6 +56,8 @@ beforeEach(() => {
   mockTournamentStarted.mockResolvedValue(false);
   mockDb.prediction.deleteMany.mockResolvedValue({});
   mockDb.groupStandingPrediction.deleteMany.mockResolvedValue({});
+  mockDb.sideBet.updateMany.mockResolvedValue({});
+  mockDb.sideBetEntry.findMany.mockResolvedValue([]);
   mockDb.sideBetEntry.deleteMany.mockResolvedValue({});
   mockDb.p2PSideBet.updateMany.mockResolvedValue({});
   mockDb.roomMember.delete.mockResolvedValue({});
@@ -125,7 +128,10 @@ describe("DELETE /api/groups/[roomId]/members/[targetUserId]", () => {
     expect(mockDb.groupStandingPrediction.deleteMany).toHaveBeenCalledWith({ where: { userId: "u2", roomId: "r1" } });
     expect(mockDb.sideBetEntry.deleteMany).toHaveBeenCalled();
     expect(mockDb.p2PSideBet.updateMany).toHaveBeenCalledWith(
-      expect.objectContaining({ where: expect.objectContaining({ proposerId: "u2", status: "proposed" }) }),
+      expect.objectContaining({ where: expect.objectContaining({ proposerId: "u2", status: { not: "settled" } }) }),
+    );
+    expect(mockDb.p2PSideBet.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ acceptorId: "u2", status: { not: "settled" } }) }),
     );
   });
 });

@@ -4,6 +4,7 @@ import { NextRequest } from "next/server";
 vi.mock("@auth", () => ({ auth: vi.fn() }));
 vi.mock("@/lib/db", () => ({
   db: {
+    room: { findUnique: vi.fn() },
     roomMember: {
       findUnique: vi.fn(),
     },
@@ -262,6 +263,7 @@ describe("PATCH /api/groups/[roomId]/p2p — accept/decline/settle", () => {
   it("settles a bet with proposer as winner", async () => {
     mockAuth.mockResolvedValue({ user: { id: "u1" } } as never);
     mockDb.roomMember.findUnique.mockResolvedValue({ id: "rm1" } as never);
+    mockDb.room.findUnique.mockResolvedValue({ creatorId: "u1" } as never);
     mockDb.p2PSideBet.findFirst.mockResolvedValue({
       ...mockBet,
       status: "accepted",
@@ -286,6 +288,7 @@ describe("PATCH /api/groups/[roomId]/p2p — accept/decline/settle", () => {
   it("settles a bet with acceptor as winner", async () => {
     mockAuth.mockResolvedValue({ user: { id: "u1" } } as never);
     mockDb.roomMember.findUnique.mockResolvedValue({ id: "rm1" } as never);
+    mockDb.room.findUnique.mockResolvedValue({ creatorId: "u1" } as never);
     mockDb.p2PSideBet.findFirst.mockResolvedValue({
       ...mockBet,
       status: "accepted",
@@ -309,6 +312,7 @@ describe("PATCH /api/groups/[roomId]/p2p — accept/decline/settle", () => {
   it("returns 400 when settling with invalid winner value", async () => {
     mockAuth.mockResolvedValue({ user: { id: "u1" } } as never);
     mockDb.roomMember.findUnique.mockResolvedValue({ id: "rm1" } as never);
+    mockDb.room.findUnique.mockResolvedValue({ creatorId: "u1" } as never);
     mockDb.p2PSideBet.findFirst.mockResolvedValue({
       ...mockBet,
       status: "accepted",
@@ -337,6 +341,26 @@ describe("PATCH /api/groups/[roomId]/p2p — accept/decline/settle", () => {
       { params: PARAMS }
     );
     expect(res.status).toBe(400);
+  });
+
+  it("returns 403 when proposer tries to self-settle", async () => {
+    mockAuth.mockResolvedValue({ user: { id: "u1" } } as never);
+    mockDb.roomMember.findUnique.mockResolvedValue({ id: "rm1" } as never);
+    // room creator is u3 (a neutral party), not u1 (the proposer)
+    mockDb.room.findUnique.mockResolvedValue({ creatorId: "u3" } as never);
+    mockDb.p2PSideBet.findFirst.mockResolvedValue({
+      ...mockBet,
+      status: "accepted",
+      proposerId: "u1",
+      acceptorId: "u2",
+    } as never);
+
+    const res = await PATCH(
+      makePatchRequest({ betId: "bet1", action: "settle", winner: "proposer" }),
+      { params: PARAMS }
+    );
+    expect(res.status).toBe(403);
+    expect((await res.json()).error).toMatch(/creator|admin/i);
   });
 
   it("returns 400 for unknown action", async () => {
