@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import type { TestTournamentReport } from "@/lib/test-tournament";
 
@@ -14,11 +14,21 @@ type TestState =
 
 type Member = { userId: string; name: string | null };
 
-const STATUS_OPTIONS = ["setup", "open", "locked", "active", "finished"];
-const STATUS_COLORS: Record<string, string> = {
-  setup: "text-gray-400", open: "text-green-400", locked: "text-yellow-400",
-  active: "text-blue-400", finished: "text-purple-400",
+type MemberStat = {
+  userId: string;
+  name: string | null;
+  email: string | null;
+  paid: boolean;
+  excludedFromPot: boolean;
+  groupPredictions: number;
+  totalGroupMatches: number;
+  koPredictions: number;
+  totalKOMatches: number;
+  groupStandingGroups: number;
+  totalGroupStandingGroups: number;
 };
+
+const STATUS_OPTIONS = ["setup", "open", "locked", "active", "finished"];
 
 export default function GroupAdminPanel({
   roomId,
@@ -55,18 +65,35 @@ export default function GroupAdminPanel({
   // Disband
   const [disbanding, setDisbanding] = useState(false);
 
+  // Members stats
+  const [memberStats, setMemberStats] = useState<MemberStat[]>([]);
+  const [memberStatsLoading, setMemberStatsLoading] = useState(false);
+  const [togglingMember, setTogglingMember] = useState<string | null>(null);
+
   // Test simulation
   const [testState, setTestState] = useState<TestState>({ phase: "checking" });
   const [testError, setTestError] = useState("");
 
-  useEffect(() => {
-    if (!open || !isPlatformAdmin) return;
-    setTestState({ phase: "checking" });
-    fetch(`/api/admin/groups/${roomId}/test`)
+  const loadMemberStats = useCallback(() => {
+    setMemberStatsLoading(true);
+    fetch(`/api/admin/groups/${roomId}/members`)
       .then((r) => r.json())
-      .then((d) => setTestState(d.seeded ? { phase: "seeded", report: d.report } : { phase: "idle" }))
-      .catch(() => setTestState({ phase: "idle" }));
-  }, [open, roomId, isPlatformAdmin]);
+      .then((d) => setMemberStats(Array.isArray(d) ? d : []))
+      .catch(() => {})
+      .finally(() => setMemberStatsLoading(false));
+  }, [roomId]);
+
+  useEffect(() => {
+    if (!open) return;
+    if (isPlatformAdmin) {
+      setTestState({ phase: "checking" });
+      fetch(`/api/admin/groups/${roomId}/test`)
+        .then((r) => r.json())
+        .then((d) => setTestState(d.seeded ? { phase: "seeded", report: d.report } : { phase: "idle" }))
+        .catch(() => setTestState({ phase: "idle" }));
+    }
+    loadMemberStats();
+  }, [open, roomId, isPlatformAdmin, loadMemberStats]);
 
   async function patch(body: Record<string, unknown>) {
     return fetch(`/api/admin/groups/${roomId}`, {
@@ -120,6 +147,21 @@ export default function GroupAdminPanel({
       const res = await fetch(`/api/admin/groups/${roomId}`, { method: "DELETE" });
       if (res.ok) router.push("/groups");
     } finally { setDisbanding(false); }
+  }
+
+  async function handleToggleExclude(userId: string, currentlyExcluded: boolean) {
+    setTogglingMember(userId);
+    try {
+      await fetch(`/api/admin/groups/${roomId}/members`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId, excludedFromPot: !currentlyExcluded }),
+      });
+      setMemberStats((prev) =>
+        prev.map((m) => m.userId === userId ? { ...m, excludedFromPot: !currentlyExcluded } : m)
+      );
+      router.refresh();
+    } finally { setTogglingMember(null); }
   }
 
   async function handleSeed() {
@@ -261,7 +303,7 @@ export default function GroupAdminPanel({
                 <div>
                   <h3 className="text-xs font-bold text-violet-400 uppercase tracking-wide mb-2">Test Simulation</h3>
                   <p className="text-xs text-gray-400 mb-2">
-                    Seed 5 fake players + Group A results to test the UI.
+                    Seed 5 fake players + random results for the full tournament (group stage, KO rounds, Uber Pot bets).
                   </p>
                   {testError && <p className="text-xs text-red-400 mb-1">{testError}</p>}
                   <div className="flex gap-2 mb-2">
@@ -318,6 +360,85 @@ export default function GroupAdminPanel({
                 </div>
               )}
             </div>
+          </div>
+
+          {/* Members section */}
+          <div>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-xs font-bold text-violet-400 uppercase tracking-wide">Members & Prize Pool</h3>
+              <button onClick={loadMemberStats} className="text-xs text-gray-500 hover:text-gray-300 transition-colors">
+                ↻ Refresh
+              </button>
+            </div>
+            {memberStatsLoading ? (
+              <p className="text-xs text-gray-500">Loading…</p>
+            ) : (
+              <div className="rounded-lg border border-gray-700 overflow-hidden">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="border-b border-gray-700 bg-gray-800/50">
+                      <th className="text-left px-3 py-2 text-gray-500 font-medium">Member</th>
+                      <th className="text-center px-2 py-2 text-gray-500 font-medium">Group preds</th>
+                      <th className="text-center px-2 py-2 text-gray-500 font-medium">KO preds</th>
+                      <th className="text-center px-2 py-2 text-gray-500 font-medium">Standings</th>
+                      <th className="text-center px-2 py-2 text-gray-500 font-medium">Paid</th>
+                      <th className="text-right px-3 py-2 text-gray-500 font-medium">Pot</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {memberStats.map((m) => {
+                      const groupComplete = m.groupPredictions >= m.totalGroupMatches;
+                      const koComplete = m.totalKOMatches === 0 || m.koPredictions >= m.totalKOMatches;
+                      const standingsComplete = m.groupStandingGroups >= m.totalGroupStandingGroups;
+                      const isIncomplete = !groupComplete || !standingsComplete;
+                      return (
+                        <tr key={m.userId} className={`border-b border-gray-800 last:border-0 ${m.excludedFromPot ? "opacity-50" : ""}`}>
+                          <td className="px-3 py-2 text-white font-medium">
+                            {m.name ?? m.email ?? m.userId}
+                            {m.excludedFromPot && <span className="ml-1.5 text-red-400 font-normal">(excluded)</span>}
+                          </td>
+                          <td className={`px-2 py-2 text-center ${groupComplete ? "text-green-400" : "text-amber-400"}`}>
+                            {m.groupPredictions}/{m.totalGroupMatches}
+                          </td>
+                          <td className={`px-2 py-2 text-center ${koComplete ? "text-green-400" : "text-gray-500"}`}>
+                            {m.koPredictions}/{m.totalKOMatches}
+                          </td>
+                          <td className={`px-2 py-2 text-center ${standingsComplete ? "text-green-400" : "text-amber-400"}`}>
+                            {m.groupStandingGroups}/{m.totalGroupStandingGroups}
+                          </td>
+                          <td className="px-2 py-2 text-center">
+                            <span className={m.paid ? "text-green-400" : "text-gray-600"}>
+                              {m.paid ? "✓" : "–"}
+                            </span>
+                          </td>
+                          <td className="px-3 py-2 text-right">
+                            <button
+                              onClick={() => handleToggleExclude(m.userId, m.excludedFromPot)}
+                              disabled={togglingMember === m.userId}
+                              title={m.excludedFromPot ? "Re-include in pot" : "Exclude from pot"}
+                              className={`text-xs px-2 py-0.5 rounded transition-colors disabled:opacity-40 ${
+                                m.excludedFromPot
+                                  ? "bg-gray-700 hover:bg-gray-600 text-gray-300"
+                                  : isIncomplete
+                                    ? "bg-amber-800/60 hover:bg-amber-800 text-amber-300 border border-amber-700/50"
+                                    : "bg-gray-800 hover:bg-gray-700 text-gray-400"
+                              }`}
+                            >
+                              {m.excludedFromPot ? "Re-include" : "Exclude"}
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+                {memberStats.some((m) => !m.excludedFromPot && (m.groupPredictions < m.totalGroupMatches || m.groupStandingGroups < m.totalGroupStandingGroups)) && (
+                  <p className="text-xs text-amber-400/70 px-3 py-2 border-t border-gray-700">
+                    Members with amber counts have incomplete predictions. Excluding them removes their share from the pot.
+                  </p>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Danger zone */}

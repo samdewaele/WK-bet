@@ -1,0 +1,1 @@
+ALTER TABLE "RoomMember" ADD COLUMN "excludedFromPot" BOOLEAN NOT NULL DEFAULT 0;

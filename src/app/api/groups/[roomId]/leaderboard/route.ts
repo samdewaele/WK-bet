@@ -83,9 +83,10 @@ export async function GET(
 
   const leaderboard = room.members
     .map((m) => {
-      const groupStage = groupEarnings.get(m.userId) ?? 0;
-      const knockout = koEarnings.get(m.userId) ?? 0;
-      const sideBets = sideBetEarnings.get(m.userId) ?? 0;
+      const excluded = m.excludedFromPot;
+      const groupStage = excluded ? 0 : (groupEarnings.get(m.userId) ?? 0);
+      const knockout = excluded ? 0 : (koEarnings.get(m.userId) ?? 0);
+      const sideBets = excluded ? 0 : (sideBetEarnings.get(m.userId) ?? 0);
       const totalEarned = groupStage + knockout + sideBets;
       return {
         userId: m.userId,
@@ -95,9 +96,13 @@ export async function GET(
         knockout,
         sideBets,
         totalEarned,
+        excludedFromPot: excluded,
       };
     })
-    .sort((a, b) => b.totalEarned - a.totalEarned)
+    .sort((a, b) => {
+      if (a.excludedFromPot !== b.excludedFromPot) return a.excludedFromPot ? 1 : -1;
+      return b.totalEarned - a.totalEarned;
+    })
     .map((entry, idx) => ({ rank: idx + 1, ...entry }));
 
   return NextResponse.json(leaderboard);

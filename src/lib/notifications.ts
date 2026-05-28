@@ -1,5 +1,5 @@
 import { db } from "@/lib/db";
-import { emailGroupStageComplete, emailRoundComplete } from "@/lib/email";
+import { emailGroupStageComplete, emailRoundComplete, emailIncompleteReminder } from "@/lib/email";
 
 const ROUNDS_IN_ORDER = ["Group", "R32", "R16", "QF", "SF", "3rd", "Final"] as const;
 type Round = (typeof ROUNDS_IN_ORDER)[number];
@@ -92,4 +92,71 @@ export async function checkAndSendRoundNotifications(): Promise<{ round: string;
 
 export async function resetNotification(round: string): Promise<void> {
   await db.notification.deleteMany({ where: { type: `round_complete:${round}` } });
+}
+
+// ---------------------------------------------------------------------------
+// 24h incomplete-prediction reminders
+// ---------------------------------------------------------------------------
+
+function formatDeadline(date: Date): string {
+  return date.toLocaleString("en-GB", {
+    weekday: "short", day: "numeric", month: "short",
+    hour: "2-digit", minute: "2-digit", timeZone: "Europe/Brussels",
+  });
+}
+
+async function countMissingPredictions(userId: string, roomId: string, round: string): Promise<number> {
+  const totalMatches = await db.match.count({ where: { round } });
+  const submitted = await db.prediction.count({ where: { userId, roomId, match: { round } } });
+  return Math.max(0, totalMatches - submitted);
+}
+
+export async function checkAndSendIncompleteReminders(): Promise<{ round: string; sent: number }[]> {
+  const results: { round: string; sent: number }[] = [];
+  const now = new Date();
+  const in24h = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+
+  const rooms = await db.room.findMany({
+    where: { status: { in: ["open", "locked", "active"] } },
+    include: {
+      members: {
+        where: { excludedFromPot: false },
+        include: { user: { select: { id: true, name: true, email: true } } },
+      },
+    },
+  });
+
+  for (const round of ROUNDS_IN_ORDER) {
+    const key = `reminder:${round}`;
+    if (await wasNotified(key)) continue;
+
+    // Find the first upcoming match of this round
+    const firstMatch = await db.match.findFirst({
+      where: { round, kickoff: { gt: now } },
+      orderBy: { kickoff: "asc" },
+    });
+    if (!firstMatch) continue;
+    if (firstMatch.kickoff > in24h) continue;
+
+    const deadline = formatDeadline(firstMatch.kickoff);
+    let sent = 0;
+
+    for (const room of rooms) {
+      for (const member of room.members) {
+        const { email, name } = member.user;
+        if (!email) continue;
+        const missing = await countMissingPredictions(member.userId, room.id, round);
+        if (missing === 0) continue;
+        emailIncompleteReminder(
+          email, name ?? "there", round, room.name, room.id, deadline, missing
+        ).catch(() => {});
+        sent++;
+      }
+    }
+
+    await db.notification.create({ data: { type: key } });
+    results.push({ round, sent });
+  }
+
+  return results;
 }

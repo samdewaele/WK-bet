@@ -117,7 +117,8 @@ export async function emailGroupStageComplete(
   );
 }
 
-const ROUND_LABELS: Record<string, string> = {
+export const ROUND_LABELS: Record<string, string> = {
+  Group: "Group stage",
   R32: "Round of 32", R16: "Round of 16", QF: "Quarter-finals",
   SF: "Semi-finals", "3rd": "Third-place play-off", Final: "Final",
 };
@@ -143,5 +144,25 @@ export async function emailRoundComplete(
             : `<p>Keep an eye on your predictions for the next round.</p>
                <p><a href="${APP_URL}/groups/${groupId}?tab=leaderboard" style="display:inline-block;background:#f59e0b;color:#111;font-weight:700;padding:10px 20px;border-radius:8px;text-decoration:none">View Full Leaderboard →</a></p>`
           }`),
+  );
+}
+
+export async function emailIncompleteReminder(
+  to: string,
+  name: string,
+  round: string,
+  groupName: string,
+  groupId: string,
+  deadline: string,
+  missingCount: number,
+): Promise<void> {
+  const label = ROUND_LABELS[round] ?? round;
+  await send(
+    to,
+    `⏰ ${label} starts soon — you have ${missingCount} missing prediction${missingCount > 1 ? "s" : ""}! (${groupName})`,
+    wrap(`<p>Hi ${name},</p>
+          <p>The <strong>${label}</strong> kicks off <strong>${deadline}</strong> and you still have <strong>${missingCount} missing prediction${missingCount > 1 ? "s" : ""}</strong> in <strong>${groupName}</strong>.</p>
+          <p>Predictions lock the moment each match kicks off — don't miss your chance!</p>
+          <p><a href="${APP_URL}/groups/${groupId}?tab=predictions" style="display:inline-block;background:#f59e0b;color:#111;font-weight:700;padding:10px 20px;border-radius:8px;text-decoration:none">Submit Predictions Now →</a></p>`),
   );
 }

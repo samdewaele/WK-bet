@@ -1,7 +1,7 @@
 import { db } from "@/lib/db";
 import { fetchWCMatches, mapStatus } from "@/lib/football-data";
 import { calculatePoints, type Round } from "@/lib/points";
-import { checkAndSendRoundNotifications } from "@/lib/notifications";
+import { checkAndSendRoundNotifications, checkAndSendIncompleteReminders } from "@/lib/notifications";
 
 export type SyncResult = {
   updated: number;
@@ -85,7 +85,10 @@ export async function syncMatches(): Promise<SyncResult> {
     }
   }
 
-  const notificationsSent = updated > 0 ? await checkAndSendRoundNotifications() : [];
+  const [notificationsSent] = await Promise.all([
+    checkAndSendRoundNotifications(),
+    checkAndSendIncompleteReminders(),
+  ]);
 
   return {
     updated,

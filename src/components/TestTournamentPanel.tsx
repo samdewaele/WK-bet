@@ -57,7 +57,7 @@ export default function TestTournamentPanel() {
         <div>
           <h2 className="text-lg font-bold text-white">Test Tournament</h2>
           <p className="text-xs text-gray-400 mt-0.5">
-            Seeds 5 fake players with varying prediction quality, simulates 3 Group A matches, leaves data in DB so you can browse the real UI.
+            Seeds 5 fake players with random predictions through the full tournament — group stage, KO rounds, and Uber Pot bets — and leaves all data in DB so you can browse the real UI.
           </p>
         </div>
 

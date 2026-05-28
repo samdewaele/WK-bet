@@ -207,9 +207,9 @@ async function _seedGroupStageRandomly(
     await db.match.update({ where: { id: matchId }, data: { homeScore: home, awayScore: away, status: "finished" } });
   }
 
-  // Score match predictions (points only — no earnedAmount for group matches)
+  // Score match predictions for ALL room members (points only — no earnedAmount for group matches)
   const allPreds = await db.prediction.findMany({
-    where: { roomId, userId: { in: users.map((u) => u.id) } },
+    where: { roomId },
     include: { match: true },
   });
   await Promise.all(
@@ -241,7 +241,7 @@ async function _seedGroupStageRandomly(
     if (groupTeams.length < 4) continue;
     const actual = actualStandings.get(group) ?? groupTeams;
 
-    // Each test user gets a random prediction
+    // Test users get random predictions
     const userPreds: { userId: string; predicted: string[] }[] = users.map((u) => ({
       userId: u.id,
       predicted: shuffle(groupTeams).slice(0, 4),
@@ -255,24 +255,34 @@ async function _seedGroupStageRandomly(
       });
     }
 
-    // Score and set earnedAmount
+    // Score and set earnedAmount for ALL members who submitted a standing prediction for this group
     const p4 = (p: string[]) => [p[0], p[1], p[2], p[3]] as [string, string, string, string];
     const a4 = p4(actual.slice(0, 4));
 
-    // Group by scoreMultiplier to compute winnersCount
-    const scored = userPreds.map((up) => ({
-      userId: up.userId,
-      multiplier: scoreGroupStanding(p4(up.predicted), a4).scoreMultiplier,
+    const allGroupPreds = await db.groupStandingPrediction.findMany({
+      where: { roomId, wcGroup: group },
+    });
+    const allScored = allGroupPreds.map((gp) => ({
+      userId: gp.userId,
+      predicted: [gp.position1, gp.position2, gp.position3, gp.position4],
+      multiplier: scoreGroupStanding(
+        [gp.position1, gp.position2, gp.position3, gp.position4] as [string, string, string, string],
+        a4
+      ).scoreMultiplier,
     }));
     const byMultiplier = new Map<number, number>();
-    for (const s of scored) byMultiplier.set(s.multiplier, (byMultiplier.get(s.multiplier) ?? 0) + 1);
+    for (const s of allScored) byMultiplier.set(s.multiplier, (byMultiplier.get(s.multiplier) ?? 0) + 1);
 
-    for (const up of userPreds) {
-      const multiplier = scored.find((s) => s.userId === up.userId)!.multiplier;
-      const winnersCount = byMultiplier.get(multiplier) ?? 1;
-      const earnedAmount = earnedFromGroupStanding(p4(up.predicted), a4, prizePerGroup, multiplier > 0 ? winnersCount : 0);
+    for (const s of allScored) {
+      const winnersCount = byMultiplier.get(s.multiplier) ?? 1;
+      const earnedAmount = earnedFromGroupStanding(
+        s.predicted as [string, string, string, string],
+        a4,
+        prizePerGroup,
+        s.multiplier > 0 ? winnersCount : 0
+      );
       await db.groupStandingPrediction.update({
-        where: { userId_roomId_wcGroup: { userId: up.userId, roomId, wcGroup: group } },
+        where: { userId_roomId_wcGroup: { userId: s.userId, roomId, wcGroup: group } },
         data: { earnedAmount },
       });
     }
@@ -341,8 +351,8 @@ async function _seedKORoundsRandomly(
       data: { homeScore: actualHome, awayScore: actualAway, status: "finished" },
     });
 
+    // Create random predictions for test users
     const userPreds = users.map((u) => ({ userId: u.id, home: randomGoals(), away: randomGoals() }));
-
     for (const pred of userPreds) {
       await db.prediction.upsert({
         where: { userId_matchId_roomId: { userId: pred.userId, matchId: match.id, roomId } },
@@ -351,25 +361,21 @@ async function _seedKORoundsRandomly(
       });
     }
 
-    // Score points
-    for (const pred of userPreds) {
-      const pts = calculatePoints(match.round as Round, pred.home, pred.away, actualHome, actualAway);
-      await db.prediction.update({
-        where: { userId_matchId_roomId: { userId: pred.userId, matchId: match.id, roomId } },
-        data: { points: pts },
-      });
-    }
-
-    // Compute earnedAmount — split per scoreMultiplier level
+    // Score ALL predictions for this match (test users + real members who submitted)
     const matchPrize = pot.prizePerKOMatch[match.round as KORound] ?? 0;
-    const scored = userPreds.map((pred) => {
-      const { scoreMultiplier } = { scoreMultiplier: (() => {
-        if (pred.home === actualHome && pred.away === actualAway) return 1.0;
-        const pWin = pred.home > pred.away ? "home" : pred.home < pred.away ? "away" : "draw";
+    const allMatchPreds = await db.prediction.findMany({
+      where: { matchId: match.id, roomId },
+    });
+
+    const scored = allMatchPreds.map((pred) => {
+      const scoreMultiplier = (() => {
+        if (pred.homeScore === actualHome && pred.awayScore === actualAway) return 1.0;
+        const pWin = pred.homeScore > pred.awayScore ? "home" : pred.homeScore < pred.awayScore ? "away" : "draw";
         const aWin = actualHome > actualAway ? "home" : actualHome < actualAway ? "away" : "draw";
         return pWin === aWin ? 0.75 : 0;
-      })() };
-      return { userId: pred.userId, home: pred.home, away: pred.away, scoreMultiplier };
+      })();
+      const pts = calculatePoints(match.round as Round, pred.homeScore, pred.awayScore, actualHome, actualAway);
+      return { id: pred.id, homeScore: pred.homeScore, awayScore: pred.awayScore, scoreMultiplier, pts };
     });
 
     const byMultiplier = new Map<number, number>();
@@ -377,14 +383,13 @@ async function _seedKORoundsRandomly(
       if (s.scoreMultiplier > 0) byMultiplier.set(s.scoreMultiplier, (byMultiplier.get(s.scoreMultiplier) ?? 0) + 1);
     }
 
-    for (const s of scored) {
-      const winnersCount = byMultiplier.get(s.scoreMultiplier) ?? 0;
-      const earnedAmount = earnedFromKOMatch(s.home, s.away, actualHome, actualAway, matchPrize, winnersCount);
-      await db.prediction.update({
-        where: { userId_matchId_roomId: { userId: s.userId, matchId: match.id, roomId } },
-        data: { earnedAmount },
-      });
-    }
+    await Promise.all(
+      scored.map((s) => {
+        const winnersCount = byMultiplier.get(s.scoreMultiplier) ?? 0;
+        const earnedAmount = earnedFromKOMatch(s.homeScore, s.awayScore, actualHome, actualAway, matchPrize, winnersCount);
+        return db.prediction.update({ where: { id: s.id }, data: { points: s.pts, earnedAmount } });
+      })
+    );
   }
 }
 
@@ -443,22 +448,17 @@ async function _seedUberPotBets(roomId: string, users: { id: string }[]): Promis
 export async function buildReport(roomId: string): Promise<TestTournamentReport> {
   const room = await db.room.findUniqueOrThrow({ where: { id: roomId } });
 
-  const testEmails = TEST_USERS.map((u) => u.email);
-  const testUsers = await db.user.findMany({
-    where: { email: { in: testEmails } },
-    select: { id: true, name: true },
+  const members = await db.roomMember.findMany({
+    where: { roomId },
+    include: { user: { select: { id: true, name: true } } },
   });
 
-  const predictions = await db.prediction.findMany({
-    where: { roomId, userId: { in: testUsers.map((u) => u.id) } },
-  });
-  const groupPreds = await db.groupStandingPrediction.findMany({
-    where: { roomId, userId: { in: testUsers.map((u) => u.id) } },
-  });
+  const predictions = await db.prediction.findMany({ where: { roomId } });
+  const groupPreds = await db.groupStandingPrediction.findMany({ where: { roomId } });
 
   const byUser = new Map<string, LeaderboardEntry>();
-  for (const u of testUsers) {
-    byUser.set(u.id, { name: u.name ?? u.id, points: 0, earned: 0 });
+  for (const m of members) {
+    byUser.set(m.userId, { name: m.user.name ?? m.userId, points: 0, earned: 0 });
   }
 
   for (const pred of predictions) {
@@ -474,7 +474,7 @@ export async function buildReport(roomId: string): Promise<TestTournamentReport>
   }
 
   const leaderboard = [...byUser.values()].sort((a, b) => b.earned - a.earned || b.points - a.points);
-  const potTotal = room.entryFee * TEST_USERS.length;
+  const potTotal = room.entryFee * members.length;
 
   return { roomId, roomName: room.name, leaderboard, potTotal };
 }
@@ -497,6 +497,10 @@ export async function cleanupTestInRoom(roomId: string): Promise<void> {
   await db.prediction.deleteMany({ where: { roomId, userId: { in: ids } } });
   await db.groupStandingPrediction.deleteMany({ where: { roomId, userId: { in: ids } } });
   await db.roomMember.deleteMany({ where: { roomId, userId: { in: ids } } });
+
+  // Reset scores on real member predictions that were scored against test match results
+  await db.prediction.updateMany({ where: { roomId }, data: { points: null, earnedAmount: null } });
+  await db.groupStandingPrediction.updateMany({ where: { roomId }, data: { earnedAmount: null } });
 
   for (const id of ids) {
     const remaining = await db.roomMember.count({ where: { userId: id } });
