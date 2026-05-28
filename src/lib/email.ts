@@ -88,3 +88,60 @@ export async function emailMemberRemovedByAdmin(
           <p><a href="${APP_URL}/groups/${groupId}">View group →</a></p>`),
   );
 }
+
+type LeaderboardRow = { name: string; rank: number; earned: number };
+
+function leaderboardHtml(rows: LeaderboardRow[]): string {
+  if (rows.length === 0) return "";
+  const items = rows
+    .map((r) => `<tr><td style="padding:4px 8px;color:#9ca3af">${r.rank}</td><td style="padding:4px 8px;color:#fff;font-weight:600">${r.name}</td><td style="padding:4px 8px;color:#f59e0b;font-weight:700;text-align:right">€${r.earned.toFixed(2)}</td></tr>`)
+    .join("");
+  return `<table style="width:100%;border-collapse:collapse;margin:12px 0;background:#111827;border-radius:8px;overflow:hidden"><thead><tr style="border-bottom:1px solid #374151"><th style="padding:6px 8px;color:#6b7280;font-weight:normal;text-align:left">#</th><th style="padding:6px 8px;color:#6b7280;font-weight:normal;text-align:left">Player</th><th style="padding:6px 8px;color:#6b7280;font-weight:normal;text-align:right">Earned</th></tr></thead><tbody>${items}</tbody></table>`;
+}
+
+export async function emailGroupStageComplete(
+  to: string,
+  name: string,
+  groupName: string,
+  groupId: string,
+  leaderboard: LeaderboardRow[],
+): Promise<void> {
+  await send(
+    to,
+    `⚽ Group stage done — submit your knockout predictions! (${groupName})`,
+    wrap(`<p>Hi ${name},</p>
+          <p>The <strong>group stage</strong> is complete! Here's the current standing in <strong>${groupName}</strong>:</p>
+          ${leaderboardHtml(leaderboard)}
+          <p style="margin-top:16px">Now it's time to submit your <strong>knockout stage predictions</strong> — don't wait, they lock when each match kicks off!</p>
+          <p><a href="${APP_URL}/groups/${groupId}?tab=predictions" style="display:inline-block;background:#f59e0b;color:#111;font-weight:700;padding:10px 20px;border-radius:8px;text-decoration:none">Submit Knockout Predictions →</a></p>`),
+  );
+}
+
+const ROUND_LABELS: Record<string, string> = {
+  R32: "Round of 32", R16: "Round of 16", QF: "Quarter-finals",
+  SF: "Semi-finals", "3rd": "Third-place play-off", Final: "Final",
+};
+
+export async function emailRoundComplete(
+  to: string,
+  name: string,
+  round: string,
+  groupName: string,
+  groupId: string,
+  leaderboard: LeaderboardRow[],
+): Promise<void> {
+  const label = ROUND_LABELS[round] ?? round;
+  const isFinal = round === "Final";
+  await send(
+    to,
+    `🏆 ${label} complete — see your standing! (${groupName})`,
+    wrap(`<p>Hi ${name},</p>
+          <p>The <strong>${label}</strong> is finished! Here's how <strong>${groupName}</strong> looks right now:</p>
+          ${leaderboardHtml(leaderboard)}
+          ${isFinal
+            ? `<p>The tournament is over — final payouts will be calculated shortly. Thanks for playing!</p>`
+            : `<p>Keep an eye on your predictions for the next round.</p>
+               <p><a href="${APP_URL}/groups/${groupId}?tab=leaderboard" style="display:inline-block;background:#f59e0b;color:#111;font-weight:700;padding:10px 20px;border-radius:8px;text-decoration:none">View Full Leaderboard →</a></p>`
+          }`),
+  );
+}

@@ -1,10 +1,12 @@
 import { db } from "@/lib/db";
 import { fetchWCMatches, mapStatus } from "@/lib/football-data";
 import { calculatePoints, type Round } from "@/lib/points";
+import { checkAndSendRoundNotifications } from "@/lib/notifications";
 
 export type SyncResult = {
   updated: number;
   predictionsScored: number;
+  notificationsSent: { round: string; sent: number }[];
   message: string;
 };
 
@@ -83,9 +85,12 @@ export async function syncMatches(): Promise<SyncResult> {
     }
   }
 
+  const notificationsSent = updated > 0 ? await checkAndSendRoundNotifications() : [];
+
   return {
     updated,
     predictionsScored,
+    notificationsSent,
     message: `Updated ${updated} match${updated !== 1 ? "es" : ""}, scored ${predictionsScored} prediction${predictionsScored !== 1 ? "s" : ""}`,
   };
 }

@@ -19,37 +19,27 @@ export type TestTournamentReport = {
   roomId: string;
   roomName: string;
   leaderboard: LeaderboardEntry[];
-  matches: Array<{ homeTeam: string; awayTeam: string; score: string }>;
   potTotal: number;
 };
 
-// ---------------------------------------------------------------------------
-// Test scenario data
-// ---------------------------------------------------------------------------
-
 const TEST_USERS = [
-  { name: "Alice (perfect)",      email: `${TEST_PREFIX}alice@test.local` },
-  { name: "Bob (right result)",   email: `${TEST_PREFIX}bob@test.local` },
-  { name: "Charlie (mixed)",      email: `${TEST_PREFIX}charlie@test.local` },
-  { name: "Diana (mostly wrong)", email: `${TEST_PREFIX}diana@test.local` },
-  { name: "Eve (all wrong)",      email: `${TEST_PREFIX}eve@test.local` },
+  { name: "Alice",   email: `${TEST_PREFIX}alice@test.local` },
+  { name: "Bob",     email: `${TEST_PREFIX}bob@test.local` },
+  { name: "Charlie", email: `${TEST_PREFIX}charlie@test.local` },
+  { name: "Diana",   email: `${TEST_PREFIX}diana@test.local` },
+  { name: "Eve",     email: `${TEST_PREFIX}eve@test.local` },
 ];
 
 const ENTRY_FEE = 10;
 
-const SIM_MATCHES = [
-  { homeTeam: "USA",    awayTeam: "Panama",   actualHome: 2, actualAway: 0 },
-  { homeTeam: "USA",    awayTeam: "Honduras",  actualHome: 1, actualAway: 1 },
-  { homeTeam: "Panama", awayTeam: "Honduras",  actualHome: 0, actualAway: 1 },
-] as const;
-
-const PREDICTIONS: Record<string, Array<{ home: number; away: number }>> = {
-  "Alice (perfect)":      [{ home: 2, away: 0 }, { home: 1, away: 1 }, { home: 0, away: 1 }],
-  "Bob (right result)":   [{ home: 1, away: 0 }, { home: 2, away: 2 }, { home: 0, away: 2 }],
-  "Charlie (mixed)":      [{ home: 2, away: 0 }, { home: 0, away: 0 }, { home: 1, away: 0 }],
-  "Diana (mostly wrong)": [{ home: 0, away: 2 }, { home: 1, away: 0 }, { home: 1, away: 0 }],
-  "Eve (all wrong)":      [{ home: 0, away: 1 }, { home: 0, away: 2 }, { home: 2, away: 0 }],
-};
+function randomGoals(): number {
+  const r = Math.random();
+  if (r < 0.28) return 0;
+  if (r < 0.60) return 1;
+  if (r < 0.82) return 2;
+  if (r < 0.95) return 3;
+  return 4;
+}
 
 // ---------------------------------------------------------------------------
 // Status check
@@ -61,22 +51,19 @@ export async function getTestTournamentStatus(): Promise<{ exists: boolean; room
 }
 
 // ---------------------------------------------------------------------------
-// Seed + simulate (leaves data in DB)
+// Standalone test room (CLI / platform admin)
 // ---------------------------------------------------------------------------
 
 export async function runTestTournament(adminUserId?: string): Promise<TestTournamentReport> {
-  // Cleanup any leftover data first
   await cleanupTestTournament();
 
-  // 1. Create test users
   const users = await Promise.all(
     TEST_USERS.map((u) => db.user.create({ data: { name: u.name, email: u.email } }))
   );
 
-  // 2. Create room and add test users + the admin as member
   const room = await db.room.create({
     data: {
-      name: `${TEST_PREFIX}Group A Demo`,
+      name: `${TEST_PREFIX}Full Group Stage Demo`,
       inviteCode: TEST_ROOM_INVITE,
       entryFee: ENTRY_FEE,
       status: "active",
@@ -85,189 +72,15 @@ export async function runTestTournament(adminUserId?: string): Promise<TestTourn
   });
 
   const memberIds = [...users.map((u) => u.id), ...(adminUserId ? [adminUserId] : [])];
-  await Promise.all(
-    memberIds.map((uid) =>
-      db.roomMember.create({ data: { userId: uid, roomId: room.id } })
-    )
-  );
+  await Promise.all(memberIds.map((uid) => db.roomMember.create({ data: { userId: uid, roomId: room.id } })));
 
-  // 3. Look up Group A matches
-  const matchRows = await db.match.findMany({
-    where: { group: "A", round: "Group" },
-    include: { homeTeam: true, awayTeam: true },
-    orderBy: { matchNumber: "asc" },
-  });
-
-  const simMatchIds: string[] = [];
-  for (const sim of SIM_MATCHES) {
-    const row = matchRows.find(
-      (m) => m.homeTeam?.name === sim.homeTeam && m.awayTeam?.name === sim.awayTeam
-    );
-    if (!row) throw new Error(`Match ${sim.homeTeam} vs ${sim.awayTeam} not found — run db:seed first`);
-    simMatchIds.push(row.id);
-  }
-
-  // 4. Submit predictions for each test user
-  for (const user of users) {
-    const preds = PREDICTIONS[user.name!];
-    for (let i = 0; i < simMatchIds.length; i++) {
-      await db.prediction.create({
-        data: {
-          userId: user.id,
-          matchId: simMatchIds[i],
-          roomId: room.id,
-          homeScore: preds[i].home,
-          awayScore: preds[i].away,
-        },
-      });
-    }
-  }
-
-  // 5. Create admin side bets
-  const sideBet1 = await db.sideBet.create({
-    data: { roomId: room.id, title: "Who scores first?", status: "open" },
-  });
-  const sideBet2 = await db.sideBet.create({
-    data: { roomId: room.id, title: "Goals in Group A total?", status: "open" },
-  });
-
-  const sb1Answers = ["Pulisic", "Pulisic", "Ruiz", "Almada", "Larin"];
-  const sb2Answers = ["8", "10", "8", "6", "12"];
-  for (let i = 0; i < users.length; i++) {
-    await db.sideBetEntry.create({
-      data: { sideBetId: sideBet1.id, userId: users[i].id, answer: sb1Answers[i] },
-    });
-    await db.sideBetEntry.create({
-      data: { sideBetId: sideBet2.id, userId: users[i].id, answer: sb2Answers[i] },
-    });
-  }
-
-  // Settle side bets
-  const sb1Winner = await db.sideBetEntry.findFirst({
-    where: { sideBetId: sideBet1.id, answer: "Pulisic", userId: users[0].id },
-  });
-  await db.sideBet.update({
-    where: { id: sideBet1.id },
-    data: { status: "settled", winnerEntryId: sb1Winner!.id },
-  });
-  const sb2Winner = await db.sideBetEntry.findFirst({
-    where: { sideBetId: sideBet2.id, answer: "8", userId: users[0].id },
-  });
-  await db.sideBet.update({
-    where: { id: sideBet2.id },
-    data: { status: "settled", winnerEntryId: sb2Winner!.id },
-  });
-
-  // 6. Create P2P bet (Alice vs Bob)
-  await db.p2PSideBet.create({
-    data: {
-      roomId: room.id,
-      proposerId: users[0].id,
-      acceptorId: users[1].id,
-      amount: 5,
-      description: "USA wins Group A",
-      status: "settled",
-      winner: "proposer",
-    },
-  });
-
-  // 7. Simulate match results
-  for (let i = 0; i < SIM_MATCHES.length; i++) {
-    const sim = SIM_MATCHES[i];
-    await db.match.update({
-      where: { id: simMatchIds[i] },
-      data: { homeScore: sim.actualHome, awayScore: sim.actualAway, status: "finished" },
-    });
-  }
-
-  // 8. Score predictions
-  const allPredictions = await db.prediction.findMany({
-    where: { roomId: room.id },
-    include: { match: { include: { homeTeam: true, awayTeam: true } } },
-  });
-
-  for (const pred of allPredictions) {
-    const m = pred.match;
-    if (m.status !== "finished" || m.homeScore === null || m.awayScore === null) continue;
-    const points = calculatePoints(
-      m.round as Round,
-      pred.homeScore,
-      pred.awayScore,
-      m.homeScore,
-      m.awayScore
-    );
-    await db.prediction.update({ where: { id: pred.id }, data: { points } });
-  }
+  await _seedGroupStageRandomly(room.id, users);
 
   return buildReport(room.id);
 }
 
 // ---------------------------------------------------------------------------
-// Build report from existing DB state
-// ---------------------------------------------------------------------------
-
-export async function buildReport(roomId: string): Promise<TestTournamentReport> {
-  const room = await db.room.findUniqueOrThrow({
-    where: { id: roomId },
-    include: { members: true },
-  });
-
-  const predictions = await db.prediction.findMany({
-    where: { roomId },
-    include: {
-      user: true,
-      match: { include: { homeTeam: true, awayTeam: true } },
-    },
-  });
-
-  // Filter to only test users
-  const byUser = new Map<string, LeaderboardEntry>();
-  for (const pred of predictions) {
-    if (!pred.user.email?.startsWith(TEST_PREFIX)) continue;
-    const uid = pred.userId;
-    if (!byUser.has(uid)) {
-      byUser.set(uid, { name: pred.user.name ?? uid, points: 0, breakdown: [] });
-    }
-    const entry = byUser.get(uid)!;
-    const pts = pred.points ?? 0;
-    entry.points += pts;
-    const homeTeam = pred.match.homeTeam?.name ?? "?";
-    const awayTeam = pred.match.awayTeam?.name ?? "?";
-    entry.breakdown.push({
-      matchLabel: `${homeTeam} vs ${awayTeam}`,
-      predicted: `${pred.homeScore}–${pred.awayScore}`,
-      actual:
-        pred.match.homeScore !== null && pred.match.awayScore !== null
-          ? `${pred.match.homeScore}–${pred.match.awayScore}`
-          : "—",
-      pts,
-    });
-  }
-
-  const leaderboard = [...byUser.values()].sort((a, b) => b.points - a.points);
-
-  const matchRows = await db.match.findMany({
-    where: { group: "A", round: "Group", status: "finished" },
-    include: { homeTeam: true, awayTeam: true },
-    orderBy: { matchNumber: "asc" },
-    take: 3,
-  });
-
-  const matches = matchRows.map((m) => ({
-    homeTeam: m.homeTeam?.name ?? "?",
-    awayTeam: m.awayTeam?.name ?? "?",
-    score: `${m.homeScore}–${m.awayScore}`,
-  }));
-
-  // Only count test users for pot (admin was added as observer)
-  const testMemberCount = TEST_USERS.length;
-  const potTotal = room.entryFee * testMemberCount;
-
-  return { roomId, roomName: room.name, leaderboard, matches, potTotal };
-}
-
-// ---------------------------------------------------------------------------
-// Room-scoped seed/simulate (adds test players to an existing room)
+// Room-scoped seed (group admin UI)
 // ---------------------------------------------------------------------------
 
 export async function getTestInRoomStatus(roomId: string): Promise<boolean> {
@@ -279,10 +92,8 @@ export async function getTestInRoomStatus(roomId: string): Promise<boolean> {
 }
 
 export async function seedIntoRoom(roomId: string): Promise<TestTournamentReport> {
-  // Remove any previous test data in this room first
   await cleanupTestInRoom(roomId);
 
-  // Upsert test users (may already exist from a global test run)
   const users = await Promise.all(
     TEST_USERS.map((u) =>
       db.user.upsert({
@@ -293,7 +104,6 @@ export async function seedIntoRoom(roomId: string): Promise<TestTournamentReport
     )
   );
 
-  // Add as members (skip if already a member)
   for (const user of users) {
     await db.roomMember.upsert({
       where: { userId_roomId: { userId: user.id, roomId } },
@@ -302,70 +112,114 @@ export async function seedIntoRoom(roomId: string): Promise<TestTournamentReport
     });
   }
 
-  // Look up Group A matches
-  const matchRows = await db.match.findMany({
-    where: { group: "A", round: "Group" },
+  await _seedGroupStageRandomly(roomId, users);
+
+  return buildReport(roomId);
+}
+
+// ---------------------------------------------------------------------------
+// Core: random group stage simulation (shared by both entry points)
+// ---------------------------------------------------------------------------
+
+async function _seedGroupStageRandomly(
+  roomId: string,
+  users: { id: string; name: string | null }[]
+): Promise<void> {
+  const groupMatches = await db.match.findMany({
+    where: { round: "Group" },
     include: { homeTeam: true, awayTeam: true },
     orderBy: { matchNumber: "asc" },
   });
 
-  const simMatchIds: string[] = [];
-  for (const sim of SIM_MATCHES) {
-    const row = matchRows.find(
-      (m) => m.homeTeam?.name === sim.homeTeam && m.awayTeam?.name === sim.awayTeam
-    );
-    if (!row) throw new Error(`Match ${sim.homeTeam} vs ${sim.awayTeam} not found — run db:seed first`);
-    simMatchIds.push(row.id);
+  if (groupMatches.length === 0) {
+    throw new Error("No group matches found — run db:seed first");
   }
 
-  // Submit predictions
-  for (const user of users) {
-    const preds = PREDICTIONS[user.name!];
-    for (let i = 0; i < simMatchIds.length; i++) {
+  // Generate random results for every group match
+  const results = groupMatches.map((m) => ({
+    matchId: m.id,
+    home: randomGoals(),
+    away: randomGoals(),
+  }));
+
+  // Create predictions for each test user (random guesses)
+  const userPredictions = users.map((user) => ({
+    userId: user.id,
+    preds: results.map(() => ({ home: randomGoals(), away: randomGoals() })),
+  }));
+
+  for (const { userId, preds } of userPredictions) {
+    for (let i = 0; i < groupMatches.length; i++) {
       await db.prediction.upsert({
-        where: { userId_matchId_roomId: { userId: user.id, matchId: simMatchIds[i], roomId } },
-        create: {
-          userId: user.id,
-          matchId: simMatchIds[i],
-          roomId,
-          homeScore: preds[i].home,
-          awayScore: preds[i].away,
-        },
+        where: { userId_matchId_roomId: { userId, matchId: groupMatches[i].id, roomId } },
+        create: { userId, matchId: groupMatches[i].id, roomId, homeScore: preds[i].home, awayScore: preds[i].away },
         update: { homeScore: preds[i].home, awayScore: preds[i].away, points: null },
       });
     }
   }
 
-  // Simulate match results
-  for (let i = 0; i < SIM_MATCHES.length; i++) {
-    const sim = SIM_MATCHES[i];
+  // Apply match results
+  for (const { matchId, home, away } of results) {
     await db.match.update({
-      where: { id: simMatchIds[i] },
-      data: { homeScore: sim.actualHome, awayScore: sim.actualAway, status: "finished" },
+      where: { id: matchId },
+      data: { homeScore: home, awayScore: away, status: "finished" },
     });
   }
 
-  // Score predictions in this room
-  const allPredictions = await db.prediction.findMany({
+  // Score predictions
+  const allPreds = await db.prediction.findMany({
     where: { roomId, userId: { in: users.map((u) => u.id) } },
-    include: { match: { include: { homeTeam: true, awayTeam: true } } },
+    include: { match: true },
   });
 
-  for (const pred of allPredictions) {
-    const m = pred.match;
-    if (m.status !== "finished" || m.homeScore === null || m.awayScore === null) continue;
-    const points = calculatePoints(
-      m.round as Round,
-      pred.homeScore,
-      pred.awayScore,
-      m.homeScore,
-      m.awayScore
-    );
-    await db.prediction.update({ where: { id: pred.id }, data: { points } });
+  await Promise.all(
+    allPreds.map((pred) => {
+      const m = pred.match;
+      if (m.homeScore === null || m.awayScore === null) return null;
+      const pts = calculatePoints(m.round as Round, pred.homeScore, pred.awayScore, m.homeScore, m.awayScore);
+      return db.prediction.update({ where: { id: pred.id }, data: { points: pts } });
+    }).filter(Boolean)
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Report
+// ---------------------------------------------------------------------------
+
+export async function buildReport(roomId: string): Promise<TestTournamentReport> {
+  const room = await db.room.findUniqueOrThrow({ where: { id: roomId } });
+
+  const predictions = await db.prediction.findMany({
+    where: { roomId },
+    include: {
+      user: true,
+      match: { include: { homeTeam: true, awayTeam: true } },
+    },
+  });
+
+  const byUser = new Map<string, LeaderboardEntry>();
+  for (const pred of predictions) {
+    if (!pred.user.email?.startsWith(TEST_PREFIX)) continue;
+    const entry = byUser.get(pred.userId) ?? { name: pred.user.name ?? pred.userId, points: 0, breakdown: [] };
+    entry.points += pred.points ?? 0;
+    entry.breakdown.push({
+      matchLabel: `${pred.match.homeTeam?.name ?? "?"} vs ${pred.match.awayTeam?.name ?? "?"}`,
+      predicted: `${pred.homeScore}–${pred.awayScore}`,
+      actual: pred.match.homeScore !== null ? `${pred.match.homeScore}–${pred.match.awayScore}` : "—",
+      pts: pred.points ?? 0,
+    });
+    byUser.set(pred.userId, entry);
   }
 
-  return buildReport(roomId);
+  const leaderboard = [...byUser.values()].sort((a, b) => b.points - a.points);
+  const potTotal = room.entryFee * TEST_USERS.length;
+
+  return { roomId, roomName: room.name, leaderboard, potTotal };
 }
+
+// ---------------------------------------------------------------------------
+// Cleanup
+// ---------------------------------------------------------------------------
 
 export async function cleanupTestInRoom(roomId: string): Promise<void> {
   const testEmails = TEST_USERS.map((u) => u.email);
@@ -377,55 +231,29 @@ export async function cleanupTestInRoom(roomId: string): Promise<void> {
 
   const ids = testUsers.map((u) => u.id);
 
-  // Reset the match scores we set (only if still at the fake values)
-  for (const sim of SIM_MATCHES) {
-    const match = await db.match.findFirst({
-      where: {
-        homeTeam: { name: sim.homeTeam },
-        awayTeam: { name: sim.awayTeam },
-        homeScore: sim.actualHome,
-        awayScore: sim.actualAway,
-        status: "finished",
-      },
-    });
-    if (match) {
-      await db.match.update({
-        where: { id: match.id },
-        data: { homeScore: null, awayScore: null, status: "scheduled" },
-      });
-    }
-  }
+  // Reset group match scores we touched
+  await db.match.updateMany({
+    where: { round: "Group", status: "finished" },
+    data: { homeScore: null, awayScore: null, status: "scheduled" },
+  });
 
   await db.prediction.deleteMany({ where: { roomId, userId: { in: ids } } });
   await db.roomMember.deleteMany({ where: { roomId, userId: { in: ids } } });
 
-  // Remove test users only if they have no remaining memberships
   for (const id of ids) {
     const remaining = await db.roomMember.count({ where: { userId: id } });
-    if (remaining === 0) {
-      await db.user.delete({ where: { id } });
-    }
+    if (remaining === 0) await db.user.delete({ where: { id } });
   }
 }
-
-// ---------------------------------------------------------------------------
-// Cleanup
-// ---------------------------------------------------------------------------
 
 export async function cleanupTestTournament(): Promise<void> {
   const room = await db.room.findUnique({ where: { inviteCode: TEST_ROOM_INVITE } });
 
   if (room) {
-    // Reset match scores first
-    const predictions = await db.prediction.findMany({ where: { roomId: room.id }, include: { match: true } });
-    const matchIds = [...new Set(predictions.map((p) => p.matchId))];
-    for (const matchId of matchIds) {
-      await db.match.update({
-        where: { id: matchId },
-        data: { homeScore: null, awayScore: null, status: "scheduled" },
-      });
-    }
-
+    await db.match.updateMany({
+      where: { round: "Group", status: "finished" },
+      data: { homeScore: null, awayScore: null, status: "scheduled" },
+    });
     await db.sideBetEntry.deleteMany({ where: { sideBet: { roomId: room.id } } });
     await db.sideBet.deleteMany({ where: { roomId: room.id } });
     await db.p2PSideBet.deleteMany({ where: { roomId: room.id } });

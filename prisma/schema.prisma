@@ -184,7 +184,12 @@ model SideBetEntry {
   @@unique([sideBetId, userId])
 }
 
-// Player-to-player side bets (separate from main pot)
+// Tracks which round-complete notification emails have been sent (prevents duplicates)
+model Notification {
+  id     String   @id @default(cuid())
+  type   String   @unique // e.g. "round_complete:Group" | "round_complete:R32"
+  sentAt DateTime @default(now())
+}
 model P2PSideBet {
   id          String   @id @default(cuid())
   roomId      String

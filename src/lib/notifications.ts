@@ -1,0 +1,95 @@
+import { db } from "@/lib/db";
+import { emailGroupStageComplete, emailRoundComplete } from "@/lib/email";
+
+const ROUNDS_IN_ORDER = ["Group", "R32", "R16", "QF", "SF", "3rd", "Final"] as const;
+type Round = (typeof ROUNDS_IN_ORDER)[number];
+
+async function isRoundComplete(round: string): Promise<boolean> {
+  const total = await db.match.count({ where: { round } });
+  if (total === 0) return false;
+  const finished = await db.match.count({ where: { round, status: "finished" } });
+  return total === finished;
+}
+
+async function wasNotified(type: string): Promise<boolean> {
+  const n = await db.notification.findUnique({ where: { type } });
+  return n !== null;
+}
+
+type LeaderboardRow = { name: string; rank: number; earned: number };
+
+async function buildRoomLeaderboard(roomId: string): Promise<LeaderboardRow[]> {
+  const members = await db.roomMember.findMany({
+    where: { roomId },
+    include: { user: { select: { id: true, name: true } } },
+  });
+
+  const groupEarned = await db.groupStandingPrediction.groupBy({
+    by: ["userId"],
+    where: { roomId },
+    _sum: { earnedAmount: true },
+  });
+  const koEarned = await db.prediction.groupBy({
+    by: ["userId"],
+    where: { roomId },
+    _sum: { earnedAmount: true },
+  });
+
+  const earnedMap = new Map<string, number>();
+  for (const row of groupEarned) earnedMap.set(row.userId, row._sum.earnedAmount ?? 0);
+  for (const row of koEarned) earnedMap.set(row.userId, (earnedMap.get(row.userId) ?? 0) + (row._sum.earnedAmount ?? 0));
+
+  const sorted = members
+    .map((m) => ({ name: m.user.name ?? "Unknown", earned: earnedMap.get(m.userId) ?? 0 }))
+    .sort((a, b) => b.earned - a.earned)
+    .slice(0, 5)
+    .map((r, i) => ({ ...r, rank: i + 1 }));
+
+  return sorted;
+}
+
+async function sendRoundEmails(round: Round): Promise<number> {
+  const rooms = await db.room.findMany({
+    where: { status: { in: ["open", "locked", "active"] } },
+    include: {
+      members: { include: { user: { select: { id: true, name: true, email: true } } } },
+    },
+  });
+
+  let sent = 0;
+  for (const room of rooms) {
+    const leaderboard = await buildRoomLeaderboard(room.id);
+    for (const member of room.members) {
+      const { email, name } = member.user;
+      if (!email) continue;
+      const displayName = name ?? "there";
+      if (round === "Group") {
+        emailGroupStageComplete(email, displayName, room.name, room.id, leaderboard).catch(() => {});
+      } else {
+        emailRoundComplete(email, displayName, round, room.name, room.id, leaderboard).catch(() => {});
+      }
+      sent++;
+    }
+  }
+  return sent;
+}
+
+export async function checkAndSendRoundNotifications(): Promise<{ round: string; sent: number }[]> {
+  const results: { round: string; sent: number }[] = [];
+
+  for (const round of ROUNDS_IN_ORDER) {
+    const key = `round_complete:${round}`;
+    if (await wasNotified(key)) continue;
+    if (!(await isRoundComplete(round))) continue;
+
+    const sent = await sendRoundEmails(round);
+    await db.notification.create({ data: { type: key } });
+    results.push({ round, sent });
+  }
+
+  return results;
+}
+
+export async function resetNotification(round: string): Promise<void> {
+  await db.notification.deleteMany({ where: { type: `round_complete:${round}` } });
+}
