@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@auth";
 import { db } from "@/lib/db";
 import { isTournamentStarted } from "@/lib/tournament-lock";
@@ -7,6 +7,36 @@ import {
   emailRemovedFromGroup,
   emailMemberRemovedByAdmin,
 } from "@/lib/email";
+
+export async function PATCH(req: NextRequest, { params }: { params: Promise<{ roomId: string; targetUserId: string }> }) {
+  const session = await auth();
+  if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const { roomId, targetUserId } = await params;
+
+  const room = await db.room.findUnique({ where: { id: roomId }, select: { creatorId: true } });
+  if (!room) return NextResponse.json({ error: "Not found" }, { status: 404 });
+
+  const isCreator = room.creatorId === session.user.id;
+  const isPlatformAdmin = session.user.role === "admin";
+  if (!isCreator && !isPlatformAdmin) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+
+  let body: { paid?: boolean };
+  try { body = await req.json(); } catch {
+    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+  }
+
+  if (typeof body.paid !== "boolean") {
+    return NextResponse.json({ error: "paid must be a boolean" }, { status: 400 });
+  }
+
+  const updated = await db.roomMember.update({
+    where: { userId_roomId: { userId: targetUserId, roomId } },
+    data: { paid: body.paid },
+  });
+
+  return NextResponse.json({ userId: updated.userId, paid: updated.paid });
+}
 
 type Params = { params: Promise<{ roomId: string; targetUserId: string }> };
 

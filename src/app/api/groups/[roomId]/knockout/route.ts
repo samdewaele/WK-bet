@@ -81,6 +81,11 @@ export async function POST(
     return NextResponse.json({ error: "Not a member" }, { status: 403 });
   }
 
+  const room = await db.room.findUnique({ where: { id: roomId }, select: { status: true } });
+  if (room && ["locked", "active", "finished"].includes(room.status)) {
+    return NextResponse.json({ error: "Predictions are locked for this group" }, { status: 403 });
+  }
+
   let body: { predictions: KOPredictionInput[] };
   try {
     body = await req.json();

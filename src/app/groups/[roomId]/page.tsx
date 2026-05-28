@@ -11,6 +11,7 @@ import SideBetsPanel from "@/components/SideBetsPanel";
 import P2PBetsPanel from "@/components/P2PBetsPanel";
 import GroupAdminPanel from "@/components/GroupAdminPanel";
 import MemberList from "@/components/MemberList";
+import InviteButton from "@/components/InviteButton";
 import { isTournamentStarted } from "@/lib/tournament-lock";
 
 type Props = {
@@ -20,9 +21,7 @@ type Props = {
 
 export default async function GroupDetailPage({ params, searchParams }: Props) {
   const session = await auth();
-  if (!session?.user?.id) {
-    redirect("/auth/signin");
-  }
+  if (!session?.user?.id) redirect("/auth/signin");
 
   const { roomId } = await params;
   const { tab = "predictions" } = await searchParams;
@@ -31,9 +30,7 @@ export default async function GroupDetailPage({ params, searchParams }: Props) {
   const membership = await db.roomMember.findUnique({
     where: { userId_roomId: { userId, roomId } },
   });
-  if (!membership) {
-    redirect("/groups");
-  }
+  if (!membership) redirect("/groups");
 
   const room = await db.room.findUnique({
     where: { id: roomId },
@@ -54,16 +51,19 @@ export default async function GroupDetailPage({ params, searchParams }: Props) {
       },
     },
   });
-
-  if (!room) {
-    redirect("/groups");
-  }
+  if (!room) redirect("/groups");
 
   const pot = calculatePot(room.entryFee, room.members.length);
-
   const isPlatformAdmin = session.user.role === "admin";
   const isManager = room.creatorId === userId || isPlatformAdmin;
   const tournamentStarted = await isTournamentStarted();
+
+  // Fetch paid status for all members
+  const membersPaid = await db.roomMember.findMany({
+    where: { roomId },
+    select: { userId: true, paid: true },
+  });
+  const paidMap = new Map(membersPaid.map((m) => [m.userId, m.paid]));
 
   const tabs = [
     { key: "predictions", label: "Predictions" },
@@ -73,9 +73,6 @@ export default async function GroupDetailPage({ params, searchParams }: Props) {
     { key: "members", label: `Members (${room.members.length})` },
     { key: "rules", label: "Rules" },
   ];
-
-  const groupStagePct = room.members.length > 0 ? 50 : 0;
-  const knockoutPct = room.members.length > 0 ? 50 : 0;
 
   return (
     <div className="min-h-screen bg-[#0a0f1e] text-white">
@@ -94,15 +91,17 @@ export default async function GroupDetailPage({ params, searchParams }: Props) {
                 initialName={room.name}
                 initialFee={room.entryFee}
                 initialStatus={room.status}
+                initialCreatorId={room.creatorId}
                 isPlatformAdmin={isPlatformAdmin}
+                members={room.members.map((m) => ({ userId: m.userId, name: m.user.name }))}
               />
             )}
           </div>
-          <div className="flex flex-wrap gap-4 text-sm text-gray-400 mt-1">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-gray-400 mt-1">
             <span>{room.members.length} members</span>
             <span>Entry: €{room.entryFee.toFixed(2)}</span>
             <span className="text-amber-400 font-semibold">Total pot: €{pot.totalPot.toFixed(2)}</span>
-            <span className="text-xs text-gray-600">Code: {room.inviteCode}</span>
+            {!tournamentStarted && <InviteButton inviteCode={room.inviteCode} />}
           </div>
         </div>
 
@@ -153,7 +152,7 @@ export default async function GroupDetailPage({ params, searchParams }: Props) {
         {tournamentStarted && (
           <div className="mb-6 flex items-center gap-2 text-sm text-amber-400 bg-amber-400/10 border border-amber-400/20 rounded-xl px-4 py-3">
             <span>🔒</span>
-            <span>Tournament in progress — group membership is locked. Only P2P bets can still be placed.</span>
+            <span>Tournament in progress — membership locked. Only P2P bets can still be placed.</span>
           </div>
         )}
 
@@ -172,11 +171,7 @@ export default async function GroupDetailPage({ params, searchParams }: Props) {
         )}
 
         {tab === "leaderboard" && (
-          <GroupLeaderboard
-            roomId={roomId}
-            currentUserId={userId}
-            totalPot={pot.totalPot}
-          />
+          <GroupLeaderboard roomId={roomId} currentUserId={userId} totalPot={pot.totalPot} />
         )}
 
         {tab === "sidebets" && (
@@ -207,11 +202,13 @@ export default async function GroupDetailPage({ params, searchParams }: Props) {
               userId: m.userId,
               name: m.user.name,
               image: m.user.image,
+              paid: paidMap.get(m.userId) ?? false,
             }))}
             currentUserId={userId}
             creatorId={room.creatorId}
             isManager={isManager}
             tournamentStarted={tournamentStarted}
+            inviteCode={room.inviteCode}
           />
         )}
       </div>
