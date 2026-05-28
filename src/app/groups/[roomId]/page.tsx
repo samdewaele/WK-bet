@@ -68,7 +68,7 @@ export default async function GroupDetailPage({ params, searchParams }: Props) {
   const tabs = [
     { key: "predictions", label: "Predictions" },
     { key: "leaderboard", label: "Leaderboard" },
-    { key: "sidebets", label: "Side Bets" },
+    { key: "sidebets", label: "Uber Pot Bets" },
     { key: "p2p", label: "P2P Bets" },
     { key: "members", label: `Members (${room.members.length})` },
     { key: "rules", label: "Rules" },
@@ -178,8 +178,9 @@ export default async function GroupDetailPage({ params, searchParams }: Props) {
           <SideBetsPanel
             roomId={roomId}
             currentUserId={userId}
-            isAdmin={isManager}
-            sideBetCount={room.sideBets.length}
+            isManager={isManager}
+            tournamentStarted={tournamentStarted}
+            totalPot={pot.totalPot}
           />
         )}
 

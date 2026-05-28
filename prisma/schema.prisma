@@ -55,6 +55,7 @@ model User {
   memberships             RoomMember[]
   groupPredictions        GroupStandingPrediction[]
   sideBetEntries          SideBetEntry[]
+  proposedSideBets        SideBet[]                @relation("SideBetProposer")
   p2pBetsProposed         P2PSideBet[]             @relation("P2PProposer")
   p2pBetsAccepted         P2PSideBet[]             @relation("P2PAcceptor")
   createdRooms            Room[]                   @relation("RoomCreator")
@@ -154,18 +155,20 @@ model GroupStandingPrediction {
   @@unique([userId, roomId, wcGroup])
 }
 
-// Tournament-wide side bets (admin-created, funded equally from Uber Pot)
+// Uber Pot bets (any member can propose, admin/creator accepts)
 model SideBet {
-  id          String         @id @default(cuid())
-  roomId      String
-  title       String
-  description String?
-  // open | settled
-  status      String         @default("open")
-  winnerEntryId String?
-  room        Room           @relation(fields: [roomId], references: [id], onDelete: Cascade)
-  entries     SideBetEntry[]
-  createdAt   DateTime       @default(now())
+  id               String         @id @default(cuid())
+  roomId           String
+  proposedByUserId String?
+  title            String
+  description      String?
+  // proposed | open | settled
+  status           String         @default("proposed")
+  winnerEntryId    String?
+  room             Room           @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  proposedBy       User?          @relation("SideBetProposer", fields: [proposedByUserId], references: [id], onDelete: SetNull)
+  entries          SideBetEntry[]
+  createdAt        DateTime       @default(now())
 }
 
 // A user's answer/prediction for a side bet
