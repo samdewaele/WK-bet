@@ -5,6 +5,7 @@ const nextConfig: NextConfig = {
     remotePatterns: [
       { protocol: "https", hostname: "lh3.googleusercontent.com" },
       { protocol: "https", hostname: "avatars.githubusercontent.com" },
+      { protocol: "https", hostname: "flagcdn.com" },
     ],
   },
   serverExternalPackages: ["better-sqlite3", "@prisma/adapter-better-sqlite3"],

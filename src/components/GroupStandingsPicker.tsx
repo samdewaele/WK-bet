@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import TeamFlag from "@/components/TeamFlag";
 
 const WC_GROUPS = ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L"];
 
@@ -31,7 +32,7 @@ type GroupState = {
   position4: string;
 };
 
-type SaveStatus = "idle" | "saving" | "saved" | "error";
+type SaveStatus = "idle" | "saving" | "saved" | "error" | "locked";
 
 export default function GroupStandingsPicker({ roomId }: Props) {
   const [teams, setTeams] = useState<Team[]>([]);
@@ -39,6 +40,7 @@ export default function GroupStandingsPicker({ roomId }: Props) {
   const [groupStates, setGroupStates] = useState<Record<string, GroupState>>({});
   const [lockedGroups, setLockedGroups] = useState<Set<string>>(new Set());
   const [saveStatus, setSaveStatus] = useState<Record<string, SaveStatus>>({});
+  const [saveError, setSaveError] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -127,12 +129,38 @@ export default function GroupStandingsPicker({ roomId }: Props) {
         }),
       });
 
-      if (!res.ok) throw new Error("Failed");
+      if (!res.ok) {
+        try {
+          const errData = await res.json();
+          if (errData.error && errData.error.toLowerCase().includes("locked")) {
+            setSaveStatus((prev) => ({ ...prev, [group]: "locked" }));
+            setSaveError((prev) => ({ ...prev, [group]: "Predictions are closed for this group" }));
+            setTimeout(() => {
+              setSaveStatus((prev) => ({ ...prev, [group]: "idle" }));
+              setSaveError((prev) => ({ ...prev, [group]: "" }));
+            }, 5000);
+            return;
+          }
+        } catch {
+          // ignore JSON parse errors
+        }
+        setSaveStatus((prev) => ({ ...prev, [group]: "error" }));
+        setSaveError((prev) => ({ ...prev, [group]: "Error — retry" }));
+        setTimeout(() => {
+          setSaveStatus((prev) => ({ ...prev, [group]: "idle" }));
+          setSaveError((prev) => ({ ...prev, [group]: "" }));
+        }, 3000);
+        return;
+      }
       setSaveStatus((prev) => ({ ...prev, [group]: "saved" }));
       setTimeout(() => setSaveStatus((prev) => ({ ...prev, [group]: "idle" })), 3000);
     } catch {
       setSaveStatus((prev) => ({ ...prev, [group]: "error" }));
-      setTimeout(() => setSaveStatus((prev) => ({ ...prev, [group]: "idle" })), 3000);
+      setSaveError((prev) => ({ ...prev, [group]: "Error — retry" }));
+      setTimeout(() => {
+        setSaveStatus((prev) => ({ ...prev, [group]: "idle" }));
+        setSaveError((prev) => ({ ...prev, [group]: "" }));
+      }, 3000);
     }
   };
 
@@ -155,6 +183,7 @@ export default function GroupStandingsPicker({ roomId }: Props) {
         const status = saveStatus[group] ?? "idle";
         const existingPred = predictions.find((p) => p.wcGroup === group);
         const isComplete = state.position1 && state.position2 && state.position3 && state.position4;
+        const errMsg = saveError[group] ?? "";
 
         return (
           <div
@@ -189,7 +218,7 @@ export default function GroupStandingsPicker({ roomId }: Props) {
                       <div className="flex-1 bg-gray-800 rounded-lg px-3 py-1.5 text-sm text-gray-300 flex items-center gap-2">
                         {selectedTeam ? (
                           <>
-                            <span>{selectedTeam.flag}</span>
+                            <TeamFlag flag={selectedTeam.flag} name={selectedTeam.name} size={20} />
                             <span>{selectedTeam.name}</span>
                           </>
                         ) : (
@@ -226,25 +255,34 @@ export default function GroupStandingsPicker({ roomId }: Props) {
             </div>
 
             {!isLocked && (
-              <button
-                onClick={() => handleSave(group)}
-                disabled={!isComplete || status === "saving"}
-                className={`mt-3 w-full py-1.5 rounded-lg text-sm font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
-                  status === "saved"
-                    ? "bg-green-500 text-white"
+              <>
+                {(status === "locked" || status === "error") && errMsg && (
+                  <p className={`mt-2 text-xs ${status === "locked" ? "text-amber-400" : "text-red-400"}`}>
+                    {status === "locked" ? "🔒 " : ""}{errMsg}
+                  </p>
+                )}
+                <button
+                  onClick={() => handleSave(group)}
+                  disabled={!isComplete || status === "saving"}
+                  className={`mt-3 w-full py-1.5 rounded-lg text-sm font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                    status === "saved"
+                      ? "bg-green-500 text-white"
+                      : status === "error" || status === "locked"
+                      ? "bg-red-500 text-white"
+                      : "bg-amber-400 hover:bg-amber-300 text-gray-900"
+                  }`}
+                >
+                  {status === "saving"
+                    ? "Saving..."
+                    : status === "saved"
+                    ? "Saved!"
                     : status === "error"
-                    ? "bg-red-500 text-white"
-                    : "bg-amber-400 hover:bg-amber-300 text-gray-900"
-                }`}
-              >
-                {status === "saving"
-                  ? "Saving..."
-                  : status === "saved"
-                  ? "Saved!"
-                  : status === "error"
-                  ? "Error — retry"
-                  : "Save"}
-              </button>
+                    ? "Error — retry"
+                    : status === "locked"
+                    ? "Predictions closed"
+                    : "Save"}
+                </button>
+              </>
             )}
           </div>
         );

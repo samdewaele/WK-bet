@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import TeamFlag from "@/components/TeamFlag";
 
 type Team = {
   id: string;
@@ -45,13 +46,15 @@ const ROUND_LABELS: Record<string, string> = {
 };
 
 type ScoreState = Record<string, { home: string; away: string }>;
+type RoundSaveStatus = "idle" | "saved" | "error" | "locked";
 
 export default function KnockoutPredictions({ roomId }: Props) {
   const [predictions, setPredictions] = useState<Prediction[]>([]);
   const [scores, setScores] = useState<ScoreState>({});
   const [activeRound, setActiveRound] = useState<string>("R32");
   const [saving, setSaving] = useState(false);
-  const [saveStatus, setSaveStatus] = useState<Record<string, "idle" | "saved" | "error">>({});
+  const [saveStatus, setSaveStatus] = useState<Record<string, RoundSaveStatus>>({});
+  const [saveError, setSaveError] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -133,12 +136,40 @@ export default function KnockoutPredictions({ roomId }: Props) {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ predictions: toSave }),
         });
-        if (!res.ok) throw new Error("Failed");
+        if (!res.ok) {
+          let errorMsg = "Error — try again";
+          try {
+            const errData = await res.json();
+            if (errData.error && errData.error.toLowerCase().includes("locked")) {
+              setSaveStatus((prev) => ({ ...prev, [round]: "locked" }));
+              setSaveError((prev) => ({ ...prev, [round]: "Predictions are closed for this group" }));
+              setTimeout(() => {
+                setSaveStatus((prev) => ({ ...prev, [round]: "idle" }));
+                setSaveError((prev) => ({ ...prev, [round]: "" }));
+              }, 5000);
+              return;
+            }
+            errorMsg = errData.error ?? errorMsg;
+          } catch {
+            // ignore JSON parse errors
+          }
+          setSaveStatus((prev) => ({ ...prev, [round]: "error" }));
+          setSaveError((prev) => ({ ...prev, [round]: errorMsg }));
+          setTimeout(() => {
+            setSaveStatus((prev) => ({ ...prev, [round]: "idle" }));
+            setSaveError((prev) => ({ ...prev, [round]: "" }));
+          }, 3000);
+          return;
+        }
         setSaveStatus((prev) => ({ ...prev, [round]: "saved" }));
         setTimeout(() => setSaveStatus((prev) => ({ ...prev, [round]: "idle" })), 3000);
       } catch {
         setSaveStatus((prev) => ({ ...prev, [round]: "error" }));
-        setTimeout(() => setSaveStatus((prev) => ({ ...prev, [round]: "idle" })), 3000);
+        setSaveError((prev) => ({ ...prev, [round]: "Error — try again" }));
+        setTimeout(() => {
+          setSaveStatus((prev) => ({ ...prev, [round]: "idle" }));
+          setSaveError((prev) => ({ ...prev, [round]: "" }));
+        }, 3000);
       } finally {
         setSaving(false);
       }
@@ -152,8 +183,13 @@ export default function KnockoutPredictions({ roomId }: Props) {
 
   if (availableRounds.length === 0) {
     return (
-      <div className="text-center py-12 text-gray-500">
-        <p>No knockout matches available yet.</p>
+      <div className="text-center py-12 bg-gray-900/50 border border-gray-800 rounded-xl">
+        <div className="text-4xl mb-3">🏆</div>
+        <p className="text-white font-semibold mb-2">Knockout bracket coming soon</p>
+        <p className="text-gray-500 text-sm max-w-xs mx-auto">
+          The Round of 32 opens once the group stage draw is confirmed.
+          Come back here to predict all 67 knockout matches.
+        </p>
       </div>
     );
   }
@@ -192,7 +228,11 @@ export default function KnockoutPredictions({ roomId }: Props) {
             <span className="text-sm font-semibold text-white text-right">
               {match.homeTeam?.name ?? "TBD"}
             </span>
-            <span className="text-2xl">{match.homeTeam?.flag ?? "🏳"}</span>
+            {match.homeTeam ? (
+              <TeamFlag flag={match.homeTeam.flag} name={match.homeTeam.name} size={28} />
+            ) : (
+              <span className="text-2xl">🏳</span>
+            )}
           </div>
 
           <div className="flex items-center gap-2">
@@ -232,7 +272,11 @@ export default function KnockoutPredictions({ roomId }: Props) {
           </div>
 
           <div className="flex items-center gap-2 flex-1 justify-start">
-            <span className="text-2xl">{match.awayTeam?.flag ?? "🏳"}</span>
+            {match.awayTeam ? (
+              <TeamFlag flag={match.awayTeam.flag} name={match.awayTeam.name} size={28} />
+            ) : (
+              <span className="text-2xl">🏳</span>
+            )}
             <span className="text-sm font-semibold text-white">{match.awayTeam?.name ?? "TBD"}</span>
           </div>
         </div>
@@ -263,6 +307,7 @@ export default function KnockoutPredictions({ roomId }: Props) {
   };
 
   const status = saveStatus[activeRound] ?? "idle";
+  const errMsg = saveError[activeRound] ?? "";
   const unlockedCount = roundMatches.filter((m) => !isLocked(m) && scores[m.id]).length;
 
   return (
@@ -291,14 +336,22 @@ export default function KnockoutPredictions({ roomId }: Props) {
         ) : (
           <>
             {roundMatches.map(renderMatch)}
-            <div className="flex justify-end pt-4">
+            <div className="flex flex-col items-end gap-2 pt-4">
+              {status === "locked" && errMsg && (
+                <p className="text-sm text-amber-400 bg-amber-400/10 border border-amber-400/20 rounded-lg px-3 py-2">
+                  🔒 {errMsg}
+                </p>
+              )}
+              {status === "error" && errMsg && (
+                <p className="text-sm text-red-400">{errMsg}</p>
+              )}
               <button
                 onClick={() => handleSave(activeRound)}
                 disabled={saving || unlockedCount === 0}
                 className={`px-6 py-2.5 rounded-xl font-semibold text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
                   status === "saved"
                     ? "bg-green-500 text-white"
-                    : status === "error"
+                    : status === "error" || status === "locked"
                     ? "bg-red-500 text-white"
                     : "bg-amber-400 hover:bg-amber-300 text-gray-900"
                 }`}
@@ -307,6 +360,8 @@ export default function KnockoutPredictions({ roomId }: Props) {
                   ? "Saved!"
                   : status === "error"
                   ? "Error — try again"
+                  : status === "locked"
+                  ? "Predictions closed"
                   : saving
                   ? "Saving..."
                   : "Save predictions"}

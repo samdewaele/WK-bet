@@ -9,6 +9,10 @@ import KnockoutPredictions from "@/components/KnockoutPredictions";
 import GroupLeaderboard from "@/components/GroupLeaderboard";
 import SideBetsPanel from "@/components/SideBetsPanel";
 import P2PBetsPanel from "@/components/P2PBetsPanel";
+import GroupAdminPanel from "@/components/GroupAdminPanel";
+import MemberList from "@/components/MemberList";
+import InviteButton from "@/components/InviteButton";
+import { isTournamentStarted } from "@/lib/tournament-lock";
 
 type Props = {
   params: Promise<{ roomId: string }>;
@@ -17,20 +21,18 @@ type Props = {
 
 export default async function GroupDetailPage({ params, searchParams }: Props) {
   const session = await auth();
-  if (!session?.user?.id) {
-    redirect("/auth/signin");
-  }
+  if (!session?.user?.id) redirect("/auth/signin");
 
   const { roomId } = await params;
-  const { tab = "predictions" } = await searchParams;
+  const { tab: rawTab = "predictions" } = await searchParams;
+  // Backward compat: "leaderboard" → "standings"
+  const tab = rawTab === "leaderboard" ? "standings" : rawTab;
   const userId = session.user.id;
 
   const membership = await db.roomMember.findUnique({
     where: { userId_roomId: { userId, roomId } },
   });
-  if (!membership) {
-    redirect("/groups");
-  }
+  if (!membership) redirect("/groups");
 
   const room = await db.room.findUnique({
     where: { id: roomId },
@@ -51,23 +53,27 @@ export default async function GroupDetailPage({ params, searchParams }: Props) {
       },
     },
   });
-
-  if (!room) {
-    redirect("/groups");
-  }
+  if (!room) redirect("/groups");
 
   const pot = calculatePot(room.entryFee, room.members.length);
+  const isPlatformAdmin = session.user.role === "admin";
+  const isManager = room.creatorId === userId || isPlatformAdmin;
+  const tournamentStarted = await isTournamentStarted();
+
+  // Fetch paid status for all members
+  const membersPaid = await db.roomMember.findMany({
+    where: { roomId },
+    select: { userId: true, paid: true },
+  });
+  const paidMap = new Map(membersPaid.map((m) => [m.userId, m.paid]));
 
   const tabs = [
     { key: "predictions", label: "Predictions" },
-    { key: "leaderboard", label: "Leaderboard" },
-    { key: "sidebets", label: "Side Bets" },
-    { key: "p2p", label: "P2P Bets" },
-    { key: "rules", label: "Rules" },
+    { key: "standings", label: "Standings" },
+    { key: "sidebets-p2p", label: "Side Bets" },
+    { key: "members", label: `Members (${room.members.length})` },
+    { key: "rules", label: "How to play" },
   ];
-
-  const groupStagePct = room.members.length > 0 ? 50 : 0;
-  const knockoutPct = room.members.length > 0 ? 50 : 0;
 
   return (
     <div className="min-h-screen bg-[#0a0f1e] text-white">
@@ -78,12 +84,25 @@ export default async function GroupDetailPage({ params, searchParams }: Props) {
           <Link href="/groups" className="text-gray-400 hover:text-amber-400 text-sm transition-colors">
             ← Back to groups
           </Link>
-          <h1 className="text-3xl font-bold text-white mt-2">{room.name}</h1>
-          <div className="flex flex-wrap gap-4 text-sm text-gray-400 mt-1">
+          <div className="flex items-start justify-between gap-4 mt-2">
+            <h1 className="text-3xl font-bold text-white">{room.name}</h1>
+            {isManager && (
+              <GroupAdminPanel
+                roomId={roomId}
+                initialName={room.name}
+                initialFee={room.entryFee}
+                initialStatus={room.status}
+                initialCreatorId={room.creatorId}
+                isPlatformAdmin={isPlatformAdmin}
+                members={room.members.map((m) => ({ userId: m.userId, name: m.user.name }))}
+              />
+            )}
+          </div>
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-gray-400 mt-1">
             <span>{room.members.length} members</span>
             <span>Entry: €{room.entryFee.toFixed(2)}</span>
             <span className="text-amber-400 font-semibold">Total pot: €{pot.totalPot.toFixed(2)}</span>
-            <span className="text-xs text-gray-600">Code: {room.inviteCode}</span>
+            {!tournamentStarted && <InviteButton inviteCode={room.inviteCode} />}
           </div>
         </div>
 
@@ -130,6 +149,14 @@ export default async function GroupDetailPage({ params, searchParams }: Props) {
           )}
         </div>
 
+        {/* Tournament lock banner */}
+        {tournamentStarted && (
+          <div className="mb-6 flex items-center gap-2 text-sm text-amber-400 bg-amber-400/10 border border-amber-400/20 rounded-xl px-4 py-3">
+            <span>🔒</span>
+            <span>Tournament in progress — membership locked. Only Side Bets can still be placed.</span>
+          </div>
+        )}
+
         {/* Tab content */}
         {tab === "predictions" && (
           <div className="space-y-8">
@@ -141,27 +168,27 @@ export default async function GroupDetailPage({ params, searchParams }: Props) {
               <h2 className="text-xl font-bold text-white mb-4">Knockout Predictions</h2>
               <KnockoutPredictions roomId={roomId} />
             </div>
+            <div>
+              <h2 className="text-xl font-bold text-white mb-2">Uber Pot Bets</h2>
+              <p className="text-sm text-gray-400 mb-4">
+                Enter your answer for each bet below — the pot is split among winners when settled.
+              </p>
+              <SideBetsPanel
+                roomId={roomId}
+                currentUserId={userId}
+                isManager={isManager}
+                tournamentStarted={tournamentStarted}
+                totalPot={pot.totalPot}
+              />
+            </div>
           </div>
         )}
 
-        {tab === "leaderboard" && (
-          <GroupLeaderboard
-            roomId={roomId}
-            currentUserId={userId}
-            totalPot={pot.totalPot}
-          />
+        {tab === "standings" && (
+          <GroupLeaderboard roomId={roomId} currentUserId={userId} totalPot={pot.totalPot} />
         )}
 
-        {tab === "sidebets" && (
-          <SideBetsPanel
-            roomId={roomId}
-            currentUserId={userId}
-            isAdmin={session.user.role === "admin"}
-            sideBetCount={room.sideBets.length}
-          />
-        )}
-
-        {tab === "p2p" && (
+        {tab === "sidebets-p2p" && (
           <P2PBetsPanel
             roomId={roomId}
             currentUserId={userId}
@@ -170,6 +197,23 @@ export default async function GroupDetailPage({ params, searchParams }: Props) {
               name: m.user.name ?? "",
               image: m.user.image ?? null,
             }))}
+          />
+        )}
+
+        {tab === "members" && (
+          <MemberList
+            roomId={roomId}
+            members={room.members.map((m) => ({
+              userId: m.userId,
+              name: m.user.name,
+              image: m.user.image,
+              paid: paidMap.get(m.userId) ?? false,
+            }))}
+            currentUserId={userId}
+            creatorId={room.creatorId}
+            isManager={isManager}
+            tournamentStarted={tournamentStarted}
+            inviteCode={room.inviteCode}
           />
         )}
       </div>
