@@ -7,6 +7,9 @@ vi.mock("@/lib/db", () => ({
     roomMember: {
       findUnique: vi.fn(),
     },
+    room: {
+      findUnique: vi.fn(),
+    },
     team: {
       findMany: vi.fn(),
     },
@@ -46,6 +49,7 @@ const validTeams = [
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockDb.room.findUnique.mockResolvedValue({ status: "open" });
 });
 
 describe("GET /api/groups/[roomId]/standings", () => {
@@ -167,6 +171,17 @@ describe("POST /api/groups/[roomId]/standings", () => {
     expect(res.status).toBe(400);
     const json = await res.json();
     expect(json.details?.[0]).toMatch(/locked/i);
+  });
+
+  it("returns 403 when room predictions are locked", async () => {
+    mockAuth.mockResolvedValue({ user: { id: "u1" } } as never);
+    mockDb.roomMember.findUnique.mockResolvedValue({ id: "rm1" } as never);
+    mockDb.room.findUnique.mockResolvedValue({ status: "locked" });
+
+    const pred = { wcGroup: "A", position1: "t1", position2: "t2", position3: "t3", position4: "t4" };
+    const res = await POST(makeRequest({ predictions: [pred] }), { params: PARAMS });
+    expect(res.status).toBe(403);
+    expect((await res.json()).error).toMatch(/locked/i);
   });
 
   it("upserts valid prediction", async () => {
