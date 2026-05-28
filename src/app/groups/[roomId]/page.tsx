@@ -9,6 +9,7 @@ import KnockoutPredictions from "@/components/KnockoutPredictions";
 import GroupLeaderboard from "@/components/GroupLeaderboard";
 import SideBetsPanel from "@/components/SideBetsPanel";
 import P2PBetsPanel from "@/components/P2PBetsPanel";
+import GroupAdminPanel from "@/components/GroupAdminPanel";
 
 type Props = {
   params: Promise<{ roomId: string }>;
@@ -78,7 +79,17 @@ export default async function GroupDetailPage({ params, searchParams }: Props) {
           <Link href="/groups" className="text-gray-400 hover:text-amber-400 text-sm transition-colors">
             ← Back to groups
           </Link>
-          <h1 className="text-3xl font-bold text-white mt-2">{room.name}</h1>
+          <div className="flex items-start justify-between gap-4 mt-2">
+            <h1 className="text-3xl font-bold text-white">{room.name}</h1>
+            {session.user.role === "admin" && (
+              <GroupAdminPanel
+                roomId={roomId}
+                initialName={room.name}
+                initialFee={room.entryFee}
+                initialStatus={room.status}
+              />
+            )}
+          </div>
           <div className="flex flex-wrap gap-4 text-sm text-gray-400 mt-1">
             <span>{room.members.length} members</span>
             <span>Entry: €{room.entryFee.toFixed(2)}</span>

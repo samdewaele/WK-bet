@@ -267,6 +267,148 @@ export async function buildReport(roomId: string): Promise<TestTournamentReport>
 }
 
 // ---------------------------------------------------------------------------
+// Room-scoped seed/simulate (adds test players to an existing room)
+// ---------------------------------------------------------------------------
+
+export async function getTestInRoomStatus(roomId: string): Promise<boolean> {
+  const testEmails = TEST_USERS.map((u) => u.email);
+  const count = await db.roomMember.count({
+    where: { roomId, user: { email: { in: testEmails } } },
+  });
+  return count > 0;
+}
+
+export async function seedIntoRoom(roomId: string): Promise<TestTournamentReport> {
+  // Remove any previous test data in this room first
+  await cleanupTestInRoom(roomId);
+
+  // Upsert test users (may already exist from a global test run)
+  const users = await Promise.all(
+    TEST_USERS.map((u) =>
+      db.user.upsert({
+        where: { email: u.email },
+        create: { name: u.name, email: u.email },
+        update: { name: u.name },
+      })
+    )
+  );
+
+  // Add as members (skip if already a member)
+  for (const user of users) {
+    await db.roomMember.upsert({
+      where: { userId_roomId: { userId: user.id, roomId } },
+      create: { userId: user.id, roomId },
+      update: {},
+    });
+  }
+
+  // Look up Group A matches
+  const matchRows = await db.match.findMany({
+    where: { group: "A", round: "Group" },
+    include: { homeTeam: true, awayTeam: true },
+    orderBy: { matchNumber: "asc" },
+  });
+
+  const simMatchIds: string[] = [];
+  for (const sim of SIM_MATCHES) {
+    const row = matchRows.find(
+      (m) => m.homeTeam?.name === sim.homeTeam && m.awayTeam?.name === sim.awayTeam
+    );
+    if (!row) throw new Error(`Match ${sim.homeTeam} vs ${sim.awayTeam} not found — run db:seed first`);
+    simMatchIds.push(row.id);
+  }
+
+  // Submit predictions
+  for (const user of users) {
+    const preds = PREDICTIONS[user.name!];
+    for (let i = 0; i < simMatchIds.length; i++) {
+      await db.prediction.upsert({
+        where: { userId_matchId_roomId: { userId: user.id, matchId: simMatchIds[i], roomId } },
+        create: {
+          userId: user.id,
+          matchId: simMatchIds[i],
+          roomId,
+          homeScore: preds[i].home,
+          awayScore: preds[i].away,
+        },
+        update: { homeScore: preds[i].home, awayScore: preds[i].away, points: null },
+      });
+    }
+  }
+
+  // Simulate match results
+  for (let i = 0; i < SIM_MATCHES.length; i++) {
+    const sim = SIM_MATCHES[i];
+    await db.match.update({
+      where: { id: simMatchIds[i] },
+      data: { homeScore: sim.actualHome, awayScore: sim.actualAway, status: "finished" },
+    });
+  }
+
+  // Score predictions in this room
+  const allPredictions = await db.prediction.findMany({
+    where: { roomId, userId: { in: users.map((u) => u.id) } },
+    include: { match: { include: { homeTeam: true, awayTeam: true } } },
+  });
+
+  for (const pred of allPredictions) {
+    const m = pred.match;
+    if (m.status !== "finished" || m.homeScore === null || m.awayScore === null) continue;
+    const points = calculatePoints(
+      m.round as Round,
+      pred.homeScore,
+      pred.awayScore,
+      m.homeScore,
+      m.awayScore
+    );
+    await db.prediction.update({ where: { id: pred.id }, data: { points } });
+  }
+
+  return buildReport(roomId);
+}
+
+export async function cleanupTestInRoom(roomId: string): Promise<void> {
+  const testEmails = TEST_USERS.map((u) => u.email);
+  const testUsers = await db.user.findMany({
+    where: { email: { in: testEmails } },
+    select: { id: true },
+  });
+  if (testUsers.length === 0) return;
+
+  const ids = testUsers.map((u) => u.id);
+
+  // Reset the match scores we set (only if still at the fake values)
+  for (const sim of SIM_MATCHES) {
+    const match = await db.match.findFirst({
+      where: {
+        homeTeam: { name: sim.homeTeam },
+        awayTeam: { name: sim.awayTeam },
+        homeScore: sim.actualHome,
+        awayScore: sim.actualAway,
+        status: "finished",
+      },
+    });
+    if (match) {
+      await db.match.update({
+        where: { id: match.id },
+        data: { homeScore: null, awayScore: null, status: "scheduled" },
+      });
+    }
+  }
+
+  await db.prediction.deleteMany({ where: { roomId, userId: { in: ids } } });
+  await db.roomMember.deleteMany({ where: { roomId, userId: { in: ids } } });
+
+  // Remove test users only if they have no remaining memberships
+  for (const id of ids) {
+    const remaining = await db.roomMember.count({ where: { userId: id } });
+    if (remaining === 0) {
+      await db.user.delete({ where: { id } });
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Cleanup
 // ---------------------------------------------------------------------------
 
