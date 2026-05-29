@@ -371,16 +371,16 @@ export default function GroupAdminPanel({
                       </button>
                     )}
                     {testState.phase === "seeded" && testState.simPhase === 1 && (() => {
-                      const koReadyCount = memberStats.filter(m => m.koPredictions >= m.totalKOMatches && m.totalKOMatches > 0).length;
-                      const totalMembers = memberStats.length;
                       const myStats = memberStats.find(m => m.userId === currentUserId);
-                      const adminHasKOPreds = myStats ? myStats.koPredictions > 0 : false;
+                      const myKO = myStats?.koPredictions ?? 0;
+                      const totalKO = myStats?.totalKOMatches ?? 0;
+                      const adminReady = myKO > 0 && myKO >= totalKO;
                       return (
                         <>
                           <span className="text-xs text-emerald-400 self-center">✓ Group stage</span>
                           <button onClick={() => handleSeed(2)}
-                            disabled={!adminHasKOPreds}
-                            title={!adminHasKOPreds ? "You must submit your KO predictions first" : undefined}
+                            disabled={!adminReady}
+                            title={!adminReady ? `Submit your KO predictions first (${myKO}/${totalKO})` : undefined}
                             className="bg-emerald-700 hover:bg-emerald-600 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-semibold px-3 py-2 rounded-lg transition-colors">
                             ▶ Phase 2: KO Round
                           </button>
@@ -388,12 +388,9 @@ export default function GroupAdminPanel({
                             className="ml-auto bg-red-800 hover:bg-red-700 text-white text-xs font-semibold px-3 py-2 rounded-lg transition-colors">
                             🗑 Cleanup
                           </button>
-                          <p className="w-full text-xs text-gray-500 mt-1">
-                            KO predictions ready: <span className={koReadyCount === totalMembers ? "text-emerald-400 font-semibold" : "text-amber-400 font-semibold"}>{koReadyCount}/{totalMembers}</span> members — wait for everyone before running Phase 2.
-                          </p>
-                          {!adminHasKOPreds && (
-                            <p className="w-full text-xs text-red-400 mt-1">
-                              ⚠ Submit your own KO predictions first before running Phase 2.
+                          {!adminReady && totalKO > 0 && (
+                            <p className="w-full text-xs text-amber-400 mt-1">
+                              Submit your KO predictions before running Phase 2 ({myKO}/{totalKO} done).
                             </p>
                           )}
                         </>
