@@ -14,6 +14,12 @@ type TestState =
 
 type Member = { userId: string; name: string | null };
 
+type BetEntry = { id: string; userId: string; userName: string | null; answer: string };
+type UberBet = {
+  id: string; title: string; status: string;
+  winnerEntryId: string | null; entries: BetEntry[];
+};
+
 type MemberStat = {
   userId: string;
   name: string | null;
@@ -73,6 +79,9 @@ export default function GroupAdminPanel({
   // Test simulation
   const [testState, setTestState] = useState<TestState>({ phase: "checking" });
   const [testError, setTestError] = useState("");
+  const [uberBets, setUberBets] = useState<UberBet[]>([]);
+  const [settlingBet, setSettlingBet] = useState<string | null>(null);
+  const [pendingWinner, setPendingWinner] = useState<{ betId: string; entryId: string } | null>(null);
 
   const loadMemberStats = useCallback(() => {
     setMemberStatsLoading(true);
@@ -83,6 +92,13 @@ export default function GroupAdminPanel({
       .finally(() => setMemberStatsLoading(false));
   }, [roomId]);
 
+  const loadUberBets = useCallback(() => {
+    fetch(`/api/groups/${roomId}/sidebets`)
+      .then((r) => r.json())
+      .then((d) => setUberBets(Array.isArray(d) ? d : []))
+      .catch(() => {});
+  }, [roomId]);
+
   useEffect(() => {
     if (!open) return;
     if (isPlatformAdmin) {
@@ -91,12 +107,14 @@ export default function GroupAdminPanel({
         .then((r) => r.json())
         .then((d) => {
           if (!d.seeded) { setTestState({ phase: "idle" }); return; }
-          setTestState({ phase: "seeded", simPhase: d.phase === 2 ? 2 : 1, report: d.report });
+          const simPhase = d.phase === 2 ? 2 : 1;
+          setTestState({ phase: "seeded", simPhase, report: d.report });
+          if (simPhase === 2) loadUberBets();
         })
         .catch(() => setTestState({ phase: "idle" }));
     }
     loadMemberStats();
-  }, [open, roomId, isPlatformAdmin, loadMemberStats]);
+  }, [open, roomId, isPlatformAdmin, loadMemberStats, loadUberBets]);
 
   async function patch(body: Record<string, unknown>) {
     return fetch(`/api/admin/groups/${roomId}`, {
@@ -167,6 +185,19 @@ export default function GroupAdminPanel({
     } finally { setTogglingMember(null); }
   }
 
+  async function handleSettleBet(betId: string, winnerEntryId: string) {
+    setPendingWinner(null);
+    setSettlingBet(betId);
+    try {
+      const res = await fetch(`/api/groups/${roomId}/sidebets`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sideBetId: betId, winnerEntryId }),
+      });
+      if (res.ok) { loadUberBets(); router.refresh(); }
+    } finally { setSettlingBet(null); }
+  }
+
   async function handleSeed(simPhase: 1 | 2) {
     const prevState = testState;
     setTestError(""); setTestState({ phase: "running" });
@@ -182,7 +213,10 @@ export default function GroupAdminPanel({
         setTestState(prevState.phase === "seeded" ? prevState : { phase: "idle" });
         return;
       }
-      setTestState({ phase: "seeded", simPhase, report: d.report }); router.refresh();
+      setTestState({ phase: "seeded", simPhase, report: d.report });
+      router.refresh();
+      loadMemberStats();
+      if (simPhase === 2) loadUberBets();
     } catch {
       setTestError("Network error");
       setTestState(prevState.phase === "seeded" ? prevState : { phase: "idle" });
@@ -318,7 +352,8 @@ export default function GroupAdminPanel({
                 <div>
                   <h3 className="text-xs font-bold text-violet-400 uppercase tracking-wide mb-2">Test Simulation</h3>
                   <p className="text-xs text-gray-400 mb-2">
-                    Seed 5 fake players + random results. Run Phase 1 (group stage), then Phase 2 (KO + Uber Pot).
+                    Adds 5 fake players + random results. <strong className="text-gray-300">Requires at least 1 open Uber Pot bet with answers first.</strong>
+                    {" "}Phase 1 simulates group stage. Then all members fill in KO predictions. Phase 2 simulates KO rounds. Then you settle the Uber Pot bets below.
                   </p>
                   {testError && <p className="text-xs text-red-400 mb-1">{testError}</p>}
                   <div className="flex flex-wrap gap-2 mb-2">
@@ -333,22 +368,29 @@ export default function GroupAdminPanel({
                         <span className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />Running…
                       </button>
                     )}
-                    {testState.phase === "seeded" && testState.simPhase === 1 && (
-                      <>
-                        <span className="text-xs text-emerald-400 self-center">✓ Group stage</span>
-                        <button onClick={() => handleSeed(2)}
-                          className="bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-semibold px-3 py-2 rounded-lg transition-colors">
-                          ▶ Phase 2: KO + Uber Pot
-                        </button>
-                        <button onClick={handleCleanupTest}
-                          className="ml-auto bg-red-800 hover:bg-red-700 text-white text-xs font-semibold px-3 py-2 rounded-lg transition-colors">
-                          🗑 Cleanup
-                        </button>
-                      </>
-                    )}
+                    {testState.phase === "seeded" && testState.simPhase === 1 && (() => {
+                      const koReadyCount = memberStats.filter(m => m.koPredictions >= m.totalKOMatches && m.totalKOMatches > 0).length;
+                      const totalMembers = memberStats.length;
+                      return (
+                        <>
+                          <span className="text-xs text-emerald-400 self-center">✓ Group stage</span>
+                          <button onClick={() => handleSeed(2)}
+                            className="bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-semibold px-3 py-2 rounded-lg transition-colors">
+                            ▶ Phase 2: KO Round
+                          </button>
+                          <button onClick={handleCleanupTest}
+                            className="ml-auto bg-red-800 hover:bg-red-700 text-white text-xs font-semibold px-3 py-2 rounded-lg transition-colors">
+                            🗑 Cleanup
+                          </button>
+                          <p className="w-full text-xs text-gray-500 mt-1">
+                            KO predictions ready: <span className={koReadyCount === totalMembers ? "text-emerald-400 font-semibold" : "text-amber-400 font-semibold"}>{koReadyCount}/{totalMembers}</span> members — wait for everyone before running Phase 2.
+                          </p>
+                        </>
+                      );
+                    })()}
                     {testState.phase === "seeded" && testState.simPhase === 2 && (
                       <>
-                        <span className="text-xs text-emerald-400 self-center">✓ Full simulation</span>
+                        <span className="text-xs text-emerald-400 self-center">✓ KO simulated</span>
                         <button onClick={handleCleanupTest}
                           className="ml-auto bg-red-800 hover:bg-red-700 text-white text-xs font-semibold px-3 py-2 rounded-lg transition-colors">
                           🗑 Cleanup
@@ -361,8 +403,10 @@ export default function GroupAdminPanel({
                       </button>
                     )}
                   </div>
+
+                  {/* Earnings report */}
                   {testState.phase === "seeded" && (
-                    <div className="rounded-lg border border-gray-700 overflow-hidden">
+                    <div className="rounded-lg border border-gray-700 overflow-hidden mb-3">
                       <table className="w-full text-xs">
                         <thead>
                           <tr className="border-b border-gray-700 text-gray-500">
@@ -381,6 +425,77 @@ export default function GroupAdminPanel({
                           ))}
                         </tbody>
                       </table>
+                    </div>
+                  )}
+
+                  {/* Uber Pot bet settlement — shown after Phase 2 */}
+                  {testState.phase === "seeded" && testState.simPhase === 2 && (
+                    <div className="border border-amber-500/30 rounded-lg p-3">
+                      <p className="text-xs font-semibold text-amber-400 mb-2">Settle Uber Pot Bets</p>
+                      {uberBets.filter(b => b.status !== "settled").length === 0 && uberBets.length > 0 ? (
+                        <p className="text-xs text-emerald-400">✓ All bets settled!</p>
+                      ) : uberBets.length === 0 ? (
+                        <p className="text-xs text-gray-500">No Uber Pot bets found.</p>
+                      ) : (
+                        uberBets.filter(b => b.status !== "settled").map(bet => (
+                          <div key={bet.id} className="mb-3 last:mb-0">
+                            <p className="text-xs text-white font-medium mb-1.5">{bet.title}</p>
+                            {bet.entries.length === 0 ? (
+                              <p className="text-xs text-gray-600 italic">No entries submitted.</p>
+                            ) : (
+                              <div className="space-y-1">
+                                {bet.entries.map(entry => {
+                                  const isPending = pendingWinner?.betId === bet.id && pendingWinner?.entryId === entry.id;
+                                  const isSettling = settlingBet === bet.id;
+                                  return (
+                                    <div key={entry.id} className={`flex items-center justify-between text-xs rounded px-2 py-1.5 ${isPending ? "bg-amber-500/10 border border-amber-500/30" : "bg-gray-800"}`}>
+                                      <span className="text-gray-300 flex-1 min-w-0 mr-2 truncate">
+                                        <span className="font-medium text-white">{entry.userName ?? "?"}</span>
+                                        : {entry.answer}
+                                      </span>
+                                      {!isPending ? (
+                                        <button
+                                          onClick={() => setPendingWinner({ betId: bet.id, entryId: entry.id })}
+                                          disabled={isSettling}
+                                          className="shrink-0 text-xs bg-gray-700 hover:bg-green-700 text-gray-300 hover:text-white px-2 py-0.5 rounded transition-colors disabled:opacity-40 border border-gray-600 hover:border-green-600"
+                                        >
+                                          Set winner
+                                        </button>
+                                      ) : (
+                                        <div className="flex items-center gap-1 shrink-0">
+                                          <span className="text-amber-300">Confirm?</span>
+                                          <button
+                                            onClick={() => handleSettleBet(bet.id, entry.id)}
+                                            disabled={isSettling}
+                                            className="text-xs bg-green-700 hover:bg-green-600 text-white px-2 py-0.5 rounded font-semibold disabled:opacity-40"
+                                          >
+                                            {isSettling ? "…" : "Yes"}
+                                          </button>
+                                          <button
+                                            onClick={() => setPendingWinner(null)}
+                                            className="text-xs bg-gray-700 text-gray-400 px-2 py-0.5 rounded"
+                                          >
+                                            No
+                                          </button>
+                                        </div>
+                                      )}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
+                          </div>
+                        ))
+                      )}
+                      {uberBets.filter(b => b.status === "settled").map(bet => {
+                        const winner = bet.entries.find(e => e.id === bet.winnerEntryId);
+                        return (
+                          <div key={bet.id} className="text-xs text-emerald-400/70 flex items-center gap-1 mt-1">
+                            <span>✓</span>
+                            <span className="truncate">{bet.title}: <strong>{winner?.userName}</strong> &ldquo;{winner?.answer}&rdquo;</span>
+                          </div>
+                        );
+                      })}
                     </div>
                   )}
                 </div>

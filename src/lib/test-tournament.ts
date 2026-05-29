@@ -177,6 +177,13 @@ export async function seedGroupStageInRoom(roomId: string): Promise<TestTourname
     );
   }
 
+  const openUberBets = await db.sideBet.count({ where: { roomId, status: "open" } });
+  if (openUberBets === 0) {
+    throw new Error(
+      "Create and accept at least 1 Uber Pot bet (with member answers) before running the simulation."
+    );
+  }
+
   await _seedGroupStageRandomly(roomId, users, room.entryFee, memberCount);
   return buildReport(roomId);
 }
@@ -196,7 +203,7 @@ export async function seedKOStageInRoom(roomId: string): Promise<TestTournamentR
   const memberCount = await db.roomMember.count({ where: { roomId } });
 
   await _seedKORoundsRandomly(roomId, users, room.entryFee, memberCount);
-  await _seedUberPotBets(roomId, users);
+  // Uber pot bets are NOT seeded here — admin settles real bets after Phase 2
 
   return buildReport(roomId);
 }
