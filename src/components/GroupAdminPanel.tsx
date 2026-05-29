@@ -43,6 +43,7 @@ export default function GroupAdminPanel({
   initialStatus,
   initialCreatorId,
   isPlatformAdmin,
+  currentUserId,
   members,
 }: {
   roomId: string;
@@ -51,6 +52,7 @@ export default function GroupAdminPanel({
   initialStatus: string;
   initialCreatorId: string | null;
   isPlatformAdmin: boolean;
+  currentUserId: string;
   members: Member[];
 }) {
   const router = useRouter();
@@ -371,11 +373,15 @@ export default function GroupAdminPanel({
                     {testState.phase === "seeded" && testState.simPhase === 1 && (() => {
                       const koReadyCount = memberStats.filter(m => m.koPredictions >= m.totalKOMatches && m.totalKOMatches > 0).length;
                       const totalMembers = memberStats.length;
+                      const myStats = memberStats.find(m => m.userId === currentUserId);
+                      const adminHasKOPreds = myStats ? myStats.koPredictions > 0 : false;
                       return (
                         <>
                           <span className="text-xs text-emerald-400 self-center">✓ Group stage</span>
                           <button onClick={() => handleSeed(2)}
-                            className="bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-semibold px-3 py-2 rounded-lg transition-colors">
+                            disabled={!adminHasKOPreds}
+                            title={!adminHasKOPreds ? "You must submit your KO predictions first" : undefined}
+                            className="bg-emerald-700 hover:bg-emerald-600 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-semibold px-3 py-2 rounded-lg transition-colors">
                             ▶ Phase 2: KO Round
                           </button>
                           <button onClick={handleCleanupTest}
@@ -385,6 +391,11 @@ export default function GroupAdminPanel({
                           <p className="w-full text-xs text-gray-500 mt-1">
                             KO predictions ready: <span className={koReadyCount === totalMembers ? "text-emerald-400 font-semibold" : "text-amber-400 font-semibold"}>{koReadyCount}/{totalMembers}</span> members — wait for everyone before running Phase 2.
                           </p>
+                          {!adminHasKOPreds && (
+                            <p className="w-full text-xs text-red-400 mt-1">
+                              ⚠ Submit your own KO predictions first before running Phase 2.
+                            </p>
+                          )}
                         </>
                       );
                     })()}

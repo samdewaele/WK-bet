@@ -587,6 +587,12 @@ export async function cleanupTestInRoom(roomId: string): Promise<void> {
 
   await db.sideBetEntry.deleteMany({ where: { sideBet: { roomId }, userId: { in: ids } } });
   await db.sideBet.deleteMany({ where: { roomId, proposedByUserId: { in: ids } } });
+
+  // Reset any real-user bets that were settled during the simulation
+  await db.sideBet.updateMany({
+    where: { roomId, proposedByUserId: { notIn: ids } },
+    data: { winnerEntryId: null, status: "open" },
+  });
   await db.p2PSideBet.deleteMany({ where: { roomId, proposerId: { in: ids } } });
   await db.p2PSideBet.deleteMany({ where: { roomId, acceptorId: { in: ids } } });
   await db.prediction.deleteMany({ where: { roomId, userId: { in: ids } } });

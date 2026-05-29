@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import Image from "next/image";
 
 type LeaderboardEntry = {
@@ -45,17 +45,19 @@ export default function GroupLeaderboard({ roomId, currentUserId, totalPot }: Pr
   const [breakdowns, setBreakdowns] = useState<Record<string, Breakdown>>({});
   const [loadingBreakdown, setLoadingBreakdown] = useState<string | null>(null);
 
-  useEffect(() => {
-    async function fetchData() {
-      try {
-        const res = await fetch(`/api/groups/${roomId}/leaderboard`);
-        if (res.ok) setEntries(await res.json());
-      } finally {
-        setLoading(false);
-      }
+  const fetchData = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/groups/${roomId}/leaderboard`);
+      if (res.ok) setEntries(await res.json());
+    } finally {
+      setLoading(false);
     }
-    fetchData();
   }, [roomId]);
+
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
 
   async function handleRowClick(userId: string) {
     if (expandedUserId === userId) {
@@ -103,7 +105,16 @@ export default function GroupLeaderboard({ roomId, currentUserId, totalPot }: Pr
         </div>
       )}
 
-      <p className="text-xs text-gray-500 mb-3">Click a player to see their earnings breakdown.</p>
+      <div className="flex items-center justify-between mb-3">
+        <p className="text-xs text-gray-500">Click a player to see their earnings breakdown.</p>
+        <button
+          onClick={fetchData}
+          disabled={loading}
+          className="text-xs text-gray-500 hover:text-gray-300 disabled:opacity-40 transition-colors"
+        >
+          ↻ Refresh
+        </button>
+      </div>
 
       <div className="overflow-x-auto">
         <table className="w-full text-sm">

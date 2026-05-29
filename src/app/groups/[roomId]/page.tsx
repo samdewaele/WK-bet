@@ -95,6 +95,7 @@ export default async function GroupDetailPage({ params, searchParams }: Props) {
                 initialStatus={room.status}
                 initialCreatorId={room.creatorId}
                 isPlatformAdmin={isPlatformAdmin}
+                currentUserId={userId}
                 members={room.members.map((m) => ({ userId: m.userId, name: m.user.name }))}
               />
             )}

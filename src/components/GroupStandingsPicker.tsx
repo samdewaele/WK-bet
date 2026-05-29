@@ -259,7 +259,7 @@ export default function GroupStandingsPicker({ roomId }: Props) {
                                   state.position4 === team.id)
                               }
                             >
-                              {team.flag} {team.name}
+                              {team.name}
                             </option>
                           ))}
                         </select>

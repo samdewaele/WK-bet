@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 import InviteButton from "@/components/InviteButton";
+import TeamFlag from "@/components/TeamFlag";
 
 type Member = {
   userId: string;
@@ -242,7 +243,7 @@ export default function MemberList({
                                 {g.positions.map((team, pos) => (
                                   <div key={team.id} className="flex items-center gap-1 text-xs text-gray-300 py-0.5">
                                     <span className="text-gray-600 w-3">{pos + 1}.</span>
-                                    <span>{team.flag}</span>
+                                    <TeamFlag flag={team.flag} name={team.name} size={14} />
                                     <span className="truncate">{team.name}</span>
                                   </div>
                                 ))}
@@ -261,10 +262,12 @@ export default function MemberList({
                             {memberPreds.knockoutPredictions.map((p) => (
                               <div key={p.matchId} className="flex items-center justify-between text-xs text-gray-300 bg-gray-800 rounded px-2 py-1.5">
                                 <span className="text-gray-500 w-8">{ROUND_LABELS[p.match.round] ?? p.match.round}</span>
-                                <span className="flex-1 text-center">
-                                  {p.match.homeTeam?.flag} {p.match.homeTeam?.name ?? "TBD"}
+                                <span className="flex-1 inline-flex items-center justify-center gap-1 flex-wrap">
+                                  {p.match.homeTeam && <TeamFlag flag={p.match.homeTeam.flag} name={p.match.homeTeam.name} size={14} />}
+                                  <span>{p.match.homeTeam?.name ?? "TBD"}</span>
                                   <span className="mx-1 text-white font-bold">{p.homeScore}–{p.awayScore}</span>
-                                  {p.match.awayTeam?.name ?? "TBD"} {p.match.awayTeam?.flag}
+                                  <span>{p.match.awayTeam?.name ?? "TBD"}</span>
+                                  {p.match.awayTeam && <TeamFlag flag={p.match.awayTeam.flag} name={p.match.awayTeam.name} size={14} />}
                                 </span>
                                 {p.earnedAmount != null && p.earnedAmount > 0 && (
                                   <span className="text-green-400 font-bold ml-2">+€{p.earnedAmount.toFixed(2)}</span>
