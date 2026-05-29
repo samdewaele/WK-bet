@@ -241,28 +241,35 @@ export default function GroupStandingsPicker({ roomId }: Props) {
                           )}
                         </div>
                       ) : (
-                        <select
-                          value={selected}
-                          onChange={(e) => handleChange(group, pos, e.target.value)}
-                          className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-2 py-1.5 text-sm text-white focus:outline-none focus:border-amber-400"
-                        >
-                          <option value="">— Pick team —</option>
-                          {groupTeams.map((team) => (
-                            <option
-                              key={team.id}
-                              value={team.id}
-                              disabled={
-                                team.id !== selected &&
-                                (state.position1 === team.id ||
-                                  state.position2 === team.id ||
-                                  state.position3 === team.id ||
-                                  state.position4 === team.id)
-                              }
-                            >
-                              {team.name}
-                            </option>
-                          ))}
-                        </select>
+                        <div className="relative flex items-center flex-1">
+                          {selectedTeam && (
+                            <span className="absolute left-2 z-10 pointer-events-none">
+                              <TeamFlag flag={selectedTeam.flag} name={selectedTeam.name} size={18} />
+                            </span>
+                          )}
+                          <select
+                            value={selected}
+                            onChange={(e) => handleChange(group, pos, e.target.value)}
+                            className={`w-full bg-gray-800 border border-gray-700 rounded-lg ${selectedTeam ? "pl-8" : "pl-2"} pr-2 py-1.5 text-sm text-white focus:outline-none focus:border-amber-400`}
+                          >
+                            <option value="">— Pick team —</option>
+                            {groupTeams.map((team) => (
+                              <option
+                                key={team.id}
+                                value={team.id}
+                                disabled={
+                                  team.id !== selected &&
+                                  (state.position1 === team.id ||
+                                    state.position2 === team.id ||
+                                    state.position3 === team.id ||
+                                    state.position4 === team.id)
+                                }
+                              >
+                                {team.name}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
                       )}
                     </div>
                   );
