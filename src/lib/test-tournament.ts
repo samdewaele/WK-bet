@@ -13,6 +13,7 @@ import {
   KO_ROUNDS,
   type KORound,
 } from "@/lib/pot";
+import { checkAndSendRoundNotifications, resetNotification } from "@/lib/notifications";
 
 export const TEST_PREFIX = "test-tournament-";
 const TEST_ROOM_INVITE = `${TEST_PREFIX}invite`;
@@ -185,6 +186,12 @@ export async function seedGroupStageInRoom(roomId: string): Promise<TestTourname
   }
 
   await _seedGroupStageRandomly(roomId, users, room.entryFee, memberCount);
+
+  // Trigger "group stage done → submit KO predictions" emails to all group members
+  await checkAndSendRoundNotifications().catch((err) =>
+    console.error("[simulation] notification error:", err)
+  );
+
   return buildReport(roomId);
 }
 
@@ -574,6 +581,9 @@ export async function cleanupTestInRoom(roomId: string): Promise<void> {
 
   // Reset ALL match scores that were set during the test
   await db.match.updateMany({ where: { status: "finished" }, data: { homeScore: null, awayScore: null, status: "scheduled" } });
+
+  // Reset round notifications so they can fire again on the next simulation
+  await resetNotification("Group").catch(() => {});
 
   await db.sideBetEntry.deleteMany({ where: { sideBet: { roomId }, userId: { in: ids } } });
   await db.sideBet.deleteMany({ where: { roomId, proposedByUserId: { in: ids } } });
