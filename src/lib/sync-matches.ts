@@ -2,6 +2,7 @@ import { db } from "@/lib/db";
 import { fetchWCMatches, mapStatus } from "@/lib/football-data";
 import { calculatePoints, type Round } from "@/lib/points";
 import { checkAndSendRoundNotifications, checkAndSendIncompleteReminders } from "@/lib/notifications";
+import { computeGroupStandings, populateR32Bracket } from "@/lib/ko-seeding";
 
 export type SyncResult = {
   updated: number;
@@ -83,6 +84,21 @@ export async function syncMatches(): Promise<SyncResult> {
         })
       );
       predictionsScored += dbMatch.predictions.length;
+    }
+  }
+
+  // Auto-populate R32 bracket when all 72 group matches are finished
+  // and the R32 slots haven't been filled yet.
+  if (updated > 0) {
+    const [finishedGroupCount, r32WithTeams] = await Promise.all([
+      db.match.count({ where: { round: "Group", status: "finished" } }),
+      db.match.count({ where: { round: "R32", homeTeamId: { not: null } } }),
+    ]);
+    if (finishedGroupCount === 72 && r32WithTeams === 0) {
+      const standings = await computeGroupStandings();
+      await populateR32Bracket(standings).catch((err) =>
+        console.error("[sync] R32 seeding failed:", err)
+      );
     }
   }
 

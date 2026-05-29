@@ -14,6 +14,7 @@ import {
   type KORound,
 } from "@/lib/pot";
 import { checkAndSendRoundNotifications, resetNotification } from "@/lib/notifications";
+import { buildStandingsFromMatches, populateR32Bracket, resetR32Bracket } from "@/lib/ko-seeding";
 
 export const TEST_PREFIX = "test-tournament-";
 const TEST_ROOM_INVITE = `${TEST_PREFIX}invite`;
@@ -305,13 +306,18 @@ async function _seedGroupStageRandomly(
   );
 
   // Compute actual group standings from results
-  const actualStandings = _computeActualStandings(groupMatches.map((m, i) => ({
+  const matchInputs = groupMatches.map((m, i) => ({
     homeTeamId: m.homeTeamId,
     awayTeamId: m.awayTeamId,
     group: m.group,
     homeScore: results[i].home,
     awayScore: results[i].away,
-  })));
+  }));
+  const actualStandings = _computeActualStandings(matchInputs);
+
+  // Populate R32 bracket with the seeded teams based on group standings
+  const koStandings = buildStandingsFromMatches(matchInputs);
+  await populateR32Bracket(koStandings);
 
   // Group standing predictions + earnedAmount
   const pot = calculatePot(entryFee, memberCount);
@@ -594,6 +600,9 @@ export async function cleanupTestInRoom(roomId: string): Promise<void> {
   // Reset ALL match scores that were set during the test
   await db.match.updateMany({ where: { status: "finished" }, data: { homeScore: null, awayScore: null, status: "scheduled" } });
 
+  // Reset R32 bracket team assignments
+  await resetR32Bracket();
+
   // Reset round notifications so they can fire again on the next simulation
   await resetNotification("Group").catch(() => {});
 
@@ -620,6 +629,7 @@ export async function cleanupTestTournament(): Promise<void> {
 
   if (room) {
     await db.match.updateMany({ where: { status: "finished" }, data: { homeScore: null, awayScore: null, status: "scheduled" } });
+    await resetR32Bracket();
     await db.sideBetEntry.deleteMany({ where: { sideBet: { roomId: room.id } } });
     await db.sideBet.deleteMany({ where: { roomId: room.id } });
     await db.p2PSideBet.deleteMany({ where: { roomId: room.id } });
