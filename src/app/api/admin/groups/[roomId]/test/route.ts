@@ -1,6 +1,12 @@
 import { NextResponse } from "next/server";
 import { auth } from "@auth";
-import { getTestInRoomStatus, seedIntoRoom, cleanupTestInRoom, buildReport } from "@/lib/test-tournament";
+import {
+  getTestPhase,
+  seedGroupStageInRoom,
+  seedKOStageInRoom,
+  cleanupTestInRoom,
+  buildReport,
+} from "@/lib/test-tournament";
 
 type Params = { params: Promise<{ roomId: string }> };
 
@@ -14,18 +20,26 @@ async function requireAdmin() {
 export async function GET(_req: Request, { params }: Params) {
   if (!await requireAdmin()) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   const { roomId } = await params;
-  const seeded = await getTestInRoomStatus(roomId);
-  if (!seeded) return NextResponse.json({ seeded: false });
+  const phase = await getTestPhase(roomId);
+  if (phase === 0) return NextResponse.json({ seeded: false, phase: 0 });
   const report = await buildReport(roomId);
-  return NextResponse.json({ seeded: true, report });
+  return NextResponse.json({ seeded: true, phase, report });
 }
 
-export async function POST(_req: Request, { params }: Params) {
+export async function POST(req: Request, { params }: Params) {
   if (!await requireAdmin()) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   const { roomId } = await params;
+  const body = await req.json().catch(() => ({}));
+  const phaseReq: number = body.phase ?? 1;
+
   try {
-    const report = await seedIntoRoom(roomId);
-    return NextResponse.json({ report });
+    if (phaseReq === 2) {
+      const report = await seedKOStageInRoom(roomId);
+      return NextResponse.json({ report });
+    } else {
+      const report = await seedGroupStageInRoom(roomId);
+      return NextResponse.json({ report });
+    }
   } catch (err) {
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "Seed failed" },

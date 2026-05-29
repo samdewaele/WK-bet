@@ -17,15 +17,17 @@ export default function Navbar() {
             <span>WK Bet 2026</span>
           </Link>
 
-          {/* Nav Links */}
-          <div className="hidden md:flex items-center gap-6">
-            <Link
-              href="/groups"
-              className="text-gray-300 hover:text-amber-400 transition-colors font-medium"
-            >
-              My Groups
-            </Link>
-          </div>
+          {/* Nav Links — only shown when authenticated */}
+          {session?.user && (
+            <div className="hidden md:flex items-center gap-6">
+              <Link
+                href="/groups"
+                className="text-gray-300 hover:text-amber-400 transition-colors font-medium"
+              >
+                My Groups
+              </Link>
+            </div>
+          )}
 
           {/* User area */}
           <div className="flex items-center gap-3">
@@ -70,12 +72,14 @@ export default function Navbar() {
           </div>
         </div>
 
-        {/* Mobile nav */}
-        <div className="md:hidden flex gap-4 pb-3">
-          <Link href="/groups" className="text-gray-300 hover:text-amber-400 text-sm transition-colors">
-            My Groups
-          </Link>
-        </div>
+        {/* Mobile nav — only shown when authenticated */}
+        {session?.user && (
+          <div className="md:hidden flex gap-4 pb-3">
+            <Link href="/groups" className="text-gray-300 hover:text-amber-400 text-sm transition-colors">
+              My Groups
+            </Link>
+          </div>
+        )}
       </div>
     </nav>
   );

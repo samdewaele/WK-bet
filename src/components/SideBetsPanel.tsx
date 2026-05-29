@@ -158,44 +158,7 @@ export default function SideBetsPanel({ roomId, currentUserId, isManager, tourna
         </div>
       )}
 
-      {/* Propose / create form */}
-      {!tournamentStarted && (
-        <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
-          <h3 className="text-sm font-semibold text-amber-400 mb-1">
-            {isManager ? "Create Uber Pot Bet" : "Propose an Uber Pot Bet"}
-          </h3>
-          {!isManager && (
-            <p className="text-xs text-gray-500 mb-3">The group admin will review your proposal before it goes live.</p>
-          )}
-          <div className="space-y-3 mt-3">
-            <input
-              type="text"
-              value={newTitle}
-              onChange={(e) => setNewTitle(e.target.value)}
-              placeholder="Question / title"
-              maxLength={200}
-              className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white placeholder-gray-500 focus:outline-none focus:border-amber-400 text-sm"
-            />
-            <input
-              type="text"
-              value={newDesc}
-              onChange={(e) => setNewDesc(e.target.value)}
-              placeholder="Description / clarification (optional)"
-              className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white placeholder-gray-500 focus:outline-none focus:border-amber-400 text-sm"
-            />
-            {createError && <p className="text-xs text-red-400">{createError}</p>}
-            <button
-              onClick={handleCreate}
-              disabled={creating || !newTitle.trim()}
-              className="bg-amber-400 hover:bg-amber-300 text-gray-900 font-semibold px-4 py-2 rounded-lg text-sm transition-colors disabled:opacity-50"
-            >
-              {creating ? "Submitting…" : isManager ? "Create" : "Propose"}
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Bet cards */}
+      {/* Bet cards — shown first */}
       {bets.map((bet) => {
         const myEntry = bet.entries.find((e) => e.userId === currentUserId);
         const isSettled = bet.status === "settled";
@@ -370,6 +333,44 @@ export default function SideBetsPanel({ roomId, currentUserId, isManager, tourna
       {bets.length === 0 && (
         <p className="text-sm text-gray-500 text-center py-8">No Uber Pot Bets yet.</p>
       )}
+
+      {/* Propose / create form — at bottom */}
+      {!tournamentStarted && (
+        <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
+          <h3 className="text-sm font-semibold text-amber-400 mb-1">
+            {isManager ? "Create Uber Pot Bet" : "Propose an Uber Pot Bet"}
+          </h3>
+          {!isManager && (
+            <p className="text-xs text-gray-500 mb-3">The group admin will review your proposal before it goes live.</p>
+          )}
+          <div className="space-y-3 mt-3">
+            <input
+              type="text"
+              value={newTitle}
+              onChange={(e) => setNewTitle(e.target.value)}
+              placeholder="Question / title"
+              maxLength={200}
+              className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white placeholder-gray-500 focus:outline-none focus:border-amber-400 text-sm"
+            />
+            <input
+              type="text"
+              value={newDesc}
+              onChange={(e) => setNewDesc(e.target.value)}
+              placeholder="Description / clarification (optional)"
+              className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white placeholder-gray-500 focus:outline-none focus:border-amber-400 text-sm"
+            />
+            {createError && <p className="text-xs text-red-400">{createError}</p>}
+            <button
+              onClick={handleCreate}
+              disabled={creating || !newTitle.trim()}
+              className="bg-amber-400 hover:bg-amber-300 text-gray-900 font-semibold px-4 py-2 rounded-lg text-sm transition-colors disabled:opacity-50"
+            >
+              {creating ? "Submitting…" : isManager ? "Create" : "Propose"}
+            </button>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }

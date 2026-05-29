@@ -9,7 +9,7 @@ type TestState =
   | { phase: "checking" }
   | { phase: "idle" }
   | { phase: "running" }
-  | { phase: "seeded"; report: TestTournamentReport }
+  | { phase: "seeded"; simPhase: 1 | 2; report: TestTournamentReport }
   | { phase: "cleaning" };
 
 type Member = { userId: string; name: string | null };
@@ -89,7 +89,10 @@ export default function GroupAdminPanel({
       setTestState({ phase: "checking" });
       fetch(`/api/admin/groups/${roomId}/test`)
         .then((r) => r.json())
-        .then((d) => setTestState(d.seeded ? { phase: "seeded", report: d.report } : { phase: "idle" }))
+        .then((d) => {
+          if (!d.seeded) { setTestState({ phase: "idle" }); return; }
+          setTestState({ phase: "seeded", simPhase: d.phase === 2 ? 2 : 1, report: d.report });
+        })
         .catch(() => setTestState({ phase: "idle" }));
     }
     loadMemberStats();
@@ -164,14 +167,26 @@ export default function GroupAdminPanel({
     } finally { setTogglingMember(null); }
   }
 
-  async function handleSeed() {
+  async function handleSeed(simPhase: 1 | 2) {
+    const prevState = testState;
     setTestError(""); setTestState({ phase: "running" });
     try {
-      const res = await fetch(`/api/admin/groups/${roomId}/test`, { method: "POST" });
+      const res = await fetch(`/api/admin/groups/${roomId}/test`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ phase: simPhase }),
+      });
       const d = await res.json();
-      if (!res.ok) { setTestError(d.error ?? "Failed"); setTestState({ phase: "idle" }); return; }
-      setTestState({ phase: "seeded", report: d.report }); router.refresh();
-    } catch { setTestError("Network error"); setTestState({ phase: "idle" }); }
+      if (!res.ok) {
+        setTestError(d.error ?? "Failed");
+        setTestState(prevState.phase === "seeded" ? prevState : { phase: "idle" });
+        return;
+      }
+      setTestState({ phase: "seeded", simPhase, report: d.report }); router.refresh();
+    } catch {
+      setTestError("Network error");
+      setTestState(prevState.phase === "seeded" ? prevState : { phase: "idle" });
+    }
   }
 
   async function handleCleanupTest() {
@@ -303,14 +318,14 @@ export default function GroupAdminPanel({
                 <div>
                   <h3 className="text-xs font-bold text-violet-400 uppercase tracking-wide mb-2">Test Simulation</h3>
                   <p className="text-xs text-gray-400 mb-2">
-                    Seed 5 fake players + random results for the full tournament (group stage, KO rounds, Uber Pot bets).
+                    Seed 5 fake players + random results. Run Phase 1 (group stage), then Phase 2 (KO + Uber Pot).
                   </p>
                   {testError && <p className="text-xs text-red-400 mb-1">{testError}</p>}
-                  <div className="flex gap-2 mb-2">
+                  <div className="flex flex-wrap gap-2 mb-2">
                     {(testState.phase === "idle" || testState.phase === "checking") && (
-                      <button onClick={handleSeed} disabled={testState.phase === "checking"}
+                      <button onClick={() => handleSeed(1)} disabled={testState.phase === "checking"}
                         className="bg-emerald-700 hover:bg-emerald-600 disabled:opacity-40 text-white text-xs font-semibold px-3 py-2 rounded-lg transition-colors">
-                        {testState.phase === "checking" ? "Checking…" : "▶ Seed & Simulate"}
+                        {testState.phase === "checking" ? "Checking…" : "▶ Phase 1: Group Stage"}
                       </button>
                     )}
                     {testState.phase === "running" && (
@@ -318,9 +333,22 @@ export default function GroupAdminPanel({
                         <span className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />Running…
                       </button>
                     )}
-                    {testState.phase === "seeded" && (
+                    {testState.phase === "seeded" && testState.simPhase === 1 && (
                       <>
-                        <span className="text-xs text-emerald-400 self-center">✓ Active</span>
+                        <span className="text-xs text-emerald-400 self-center">✓ Group stage</span>
+                        <button onClick={() => handleSeed(2)}
+                          className="bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-semibold px-3 py-2 rounded-lg transition-colors">
+                          ▶ Phase 2: KO + Uber Pot
+                        </button>
+                        <button onClick={handleCleanupTest}
+                          className="ml-auto bg-red-800 hover:bg-red-700 text-white text-xs font-semibold px-3 py-2 rounded-lg transition-colors">
+                          🗑 Cleanup
+                        </button>
+                      </>
+                    )}
+                    {testState.phase === "seeded" && testState.simPhase === 2 && (
+                      <>
+                        <span className="text-xs text-emerald-400 self-center">✓ Full simulation</span>
                         <button onClick={handleCleanupTest}
                           className="ml-auto bg-red-800 hover:bg-red-700 text-white text-xs font-semibold px-3 py-2 rounded-lg transition-colors">
                           🗑 Cleanup
@@ -378,10 +406,6 @@ export default function GroupAdminPanel({
                   <thead>
                     <tr className="border-b border-gray-700 bg-gray-800/50">
                       <th className="text-left px-3 py-2 text-gray-500 font-medium">Member</th>
-                      <th className="text-center px-2 py-2 text-gray-500 font-medium">
-                        Match scores
-                        <span className="ml-1 text-gray-600 font-normal">(bonus)</span>
-                      </th>
                       <th className="text-center px-2 py-2 text-gray-500 font-medium">KO preds</th>
                       <th className="text-center px-2 py-2 text-gray-500 font-medium">Standings</th>
                       <th className="text-center px-2 py-2 text-gray-500 font-medium">Paid</th>
@@ -390,7 +414,6 @@ export default function GroupAdminPanel({
                   </thead>
                   <tbody>
                     {memberStats.map((m) => {
-                      const groupComplete = m.groupPredictions >= m.totalGroupMatches;
                       const koComplete = m.totalKOMatches === 0 || m.koPredictions >= m.totalKOMatches;
                       const standingsComplete = m.groupStandingGroups >= m.totalGroupStandingGroups;
                       // #12: isIncomplete only checks standings (group match scores are bonus only)
@@ -400,10 +423,6 @@ export default function GroupAdminPanel({
                           <td className="px-3 py-2 text-white font-medium">
                             {m.name ?? m.email ?? m.userId}
                             {m.excludedFromPot && <span className="ml-1.5 text-red-400 font-normal">(excluded)</span>}
-                          </td>
-                          {/* Group match scores — gray if incomplete (bonus only, not a warning) */}
-                          <td className={`px-2 py-2 text-center ${groupComplete ? "text-green-400" : "text-gray-500"}`}>
-                            {m.groupPredictions}/{m.totalGroupMatches}
                           </td>
                           <td className={`px-2 py-2 text-center ${koComplete ? "text-green-400" : "text-gray-500"}`}>
                             {m.koPredictions}/{m.totalKOMatches}

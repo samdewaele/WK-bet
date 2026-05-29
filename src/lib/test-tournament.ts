@@ -93,6 +93,24 @@ export async function getTestInRoomStatus(roomId: string): Promise<boolean> {
   return count > 0;
 }
 
+export async function getTestPhase(roomId: string): Promise<0 | 1 | 2> {
+  const seeded = await getTestInRoomStatus(roomId);
+  if (!seeded) return 0;
+
+  const testEmails = TEST_USERS.map((u) => u.email);
+  const testUsers = await db.user.findMany({ where: { email: { in: testEmails } }, select: { id: true } });
+  if (testUsers.length === 0) return 0;
+
+  const koPredCount = await db.prediction.count({
+    where: {
+      roomId,
+      userId: { in: testUsers.map((u) => u.id) },
+      match: { round: { not: "Group" } },
+    },
+  });
+  return koPredCount > 0 ? 2 : 1;
+}
+
 // ---------------------------------------------------------------------------
 // Standalone test room (CLI)
 // ---------------------------------------------------------------------------
@@ -124,10 +142,10 @@ export async function runTestTournament(adminUserId?: string): Promise<TestTourn
 }
 
 // ---------------------------------------------------------------------------
-// Room-scoped seed (admin UI)
+// Room-scoped seed (admin UI) — two-phase
 // ---------------------------------------------------------------------------
 
-export async function seedIntoRoom(roomId: string): Promise<TestTournamentReport> {
+export async function seedGroupStageInRoom(roomId: string): Promise<TestTournamentReport> {
   await cleanupTestInRoom(roomId);
 
   const users = await Promise.all(
@@ -150,9 +168,42 @@ export async function seedIntoRoom(roomId: string): Promise<TestTournamentReport
 
   const room = await db.room.findUniqueOrThrow({ where: { id: roomId } });
   const memberCount = await db.roomMember.count({ where: { roomId } });
-  await _simulate(roomId, users, room.entryFee, memberCount);
+
+  const hasRealResults = await db.match.count({ where: { status: "finished" } });
+  if (hasRealResults > 0) {
+    throw new Error(
+      "Cannot simulate: the real tournament already has scored matches. " +
+      "Run cleanup first, or only use this before tournament kick-off."
+    );
+  }
+
+  await _seedGroupStageRandomly(roomId, users, room.entryFee, memberCount);
+  return buildReport(roomId);
+}
+
+export async function seedKOStageInRoom(roomId: string): Promise<TestTournamentReport> {
+  const phase = await getTestPhase(roomId);
+  if (phase === 0) throw new Error("Run Phase 1 (Group Stage) first");
+
+  const testEmails = TEST_USERS.map((u) => u.email);
+  const users = await db.user.findMany({
+    where: { email: { in: testEmails } },
+    select: { id: true, name: true },
+  });
+  if (users.length === 0) throw new Error("Test users not found — run Phase 1 first");
+
+  const room = await db.room.findUniqueOrThrow({ where: { id: roomId } });
+  const memberCount = await db.roomMember.count({ where: { roomId } });
+
+  await _seedKORoundsRandomly(roomId, users, room.entryFee, memberCount);
+  await _seedUberPotBets(roomId, users);
 
   return buildReport(roomId);
+}
+
+export async function seedIntoRoom(roomId: string): Promise<TestTournamentReport> {
+  await seedGroupStageInRoom(roomId);
+  return seedKOStageInRoom(roomId);
 }
 
 // ---------------------------------------------------------------------------
@@ -215,14 +266,24 @@ async function _seedGroupStageRandomly(
     await db.match.update({ where: { id: matchId }, data: { homeScore: home, awayScore: away, status: "finished" } });
   }
 
-  // Score match predictions for ALL room members (points only — no earnedAmount for group matches)
-  const allPreds = await db.prediction.findMany({
+  // Score group match predictions for ALL room members:
+  // test users store preds with roomId, real members store with roomId: null
+  const allRoomMemberIds = (await db.roomMember.findMany({
     where: { roomId },
+    select: { userId: true },
+  })).map((m) => m.userId);
+
+  const allPreds = await db.prediction.findMany({
+    where: {
+      userId: { in: allRoomMemberIds },
+      match: { round: "Group" },
+      OR: [{ roomId }, { roomId: null }],
+    },
     include: { match: true },
   });
   await Promise.all(
     allPreds
-      .filter((p) => p.match.round === "Group" && p.match.homeScore !== null)
+      .filter((p) => p.match.homeScore !== null)
       .map((pred) => {
         const pts = calculatePoints("Group", pred.homeScore, pred.awayScore, pred.match.homeScore!, pred.match.awayScore!);
         return db.prediction.update({ where: { id: pred.id }, data: { points: pts } });
@@ -461,7 +522,14 @@ export async function buildReport(roomId: string): Promise<TestTournamentReport>
     include: { user: { select: { id: true, name: true } } },
   });
 
-  const predictions = await db.prediction.findMany({ where: { roomId } });
+  const memberIds = members.map((m) => m.userId);
+  // Test users store preds with roomId; real members store group match preds with roomId: null
+  const predictions = await db.prediction.findMany({
+    where: {
+      userId: { in: memberIds },
+      OR: [{ roomId }, { roomId: null }],
+    },
+  });
   const groupPreds = await db.groupStandingPrediction.findMany({ where: { roomId } });
 
   const byUser = new Map<string, LeaderboardEntry>();

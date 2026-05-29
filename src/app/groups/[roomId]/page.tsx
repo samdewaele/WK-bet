@@ -13,6 +13,7 @@ import GroupAdminPanel from "@/components/GroupAdminPanel";
 import MemberList from "@/components/MemberList";
 import InviteButton from "@/components/InviteButton";
 import { isTournamentStarted } from "@/lib/tournament-lock";
+import CountdownTimer from "@/components/CountdownTimer";
 
 type Props = {
   params: Promise<{ roomId: string }>;
@@ -24,7 +25,7 @@ export default async function GroupDetailPage({ params, searchParams }: Props) {
   if (!session?.user?.id) redirect("/auth/signin");
 
   const { roomId } = await params;
-  const { tab: rawTab = "predictions" } = await searchParams;
+  const { tab: rawTab = "standings" } = await searchParams;
   // Backward compat: "leaderboard" → "standings"
   const tab = rawTab === "leaderboard" ? "standings" : rawTab;
   const userId = session.user.id;
@@ -104,6 +105,11 @@ export default async function GroupDetailPage({ params, searchParams }: Props) {
             <span className="text-amber-400 font-semibold">Total pot: €{pot.totalPot.toFixed(2)}</span>
             {!tournamentStarted && <InviteButton inviteCode={room.inviteCode} />}
           </div>
+          {!tournamentStarted && (
+            <div className="mt-3">
+              <CountdownTimer />
+            </div>
+          )}
         </div>
 
         {/* Pot breakdown */}

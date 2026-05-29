@@ -15,6 +15,23 @@ type LeaderboardEntry = {
   excludedFromPot: boolean;
 };
 
+type BreakdownGroup = { wcGroup: string; earnedAmount: number };
+type BreakdownMatch = {
+  round: string;
+  matchNumber: number;
+  homeTeam: string;
+  awayTeam: string;
+  predicted: string;
+  earnedAmount: number;
+};
+type BreakdownBet = { betTitle: string; earnedAmount: number };
+type Breakdown = {
+  groupStage: { total: number; groups: BreakdownGroup[] };
+  knockout: { total: number; matches: BreakdownMatch[] };
+  sideBets: { total: number; bets: BreakdownBet[] };
+  total: number;
+} | null;
+
 type Props = {
   roomId: string;
   currentUserId: string;
@@ -24,20 +41,42 @@ type Props = {
 export default function GroupLeaderboard({ roomId, currentUserId, totalPot }: Props) {
   const [entries, setEntries] = useState<LeaderboardEntry[]>([]);
   const [loading, setLoading] = useState(true);
+  const [expandedUserId, setExpandedUserId] = useState<string | null>(null);
+  const [breakdowns, setBreakdowns] = useState<Record<string, Breakdown>>({});
+  const [loadingBreakdown, setLoadingBreakdown] = useState<string | null>(null);
 
   useEffect(() => {
     async function fetchData() {
       try {
         const res = await fetch(`/api/groups/${roomId}/leaderboard`);
-        if (res.ok) {
-          setEntries(await res.json());
-        }
+        if (res.ok) setEntries(await res.json());
       } finally {
         setLoading(false);
       }
     }
     fetchData();
   }, [roomId]);
+
+  async function handleRowClick(userId: string) {
+    if (expandedUserId === userId) {
+      setExpandedUserId(null);
+      return;
+    }
+    setExpandedUserId(userId);
+    if (breakdowns[userId] !== undefined) return;
+    setLoadingBreakdown(userId);
+    try {
+      const res = await fetch(`/api/groups/${roomId}/leaderboard/${userId}`);
+      if (res.ok) {
+        const data = await res.json();
+        setBreakdowns((prev) => ({ ...prev, [userId]: data }));
+      } else {
+        setBreakdowns((prev) => ({ ...prev, [userId]: null }));
+      }
+    } finally {
+      setLoadingBreakdown(null);
+    }
+  }
 
   const distributed = entries.reduce((sum, e) => sum + e.totalEarned, 0);
   const uberPot = Math.max(0, totalPot - distributed);
@@ -64,6 +103,8 @@ export default function GroupLeaderboard({ roomId, currentUserId, totalPot }: Pr
         </div>
       )}
 
+      <p className="text-xs text-gray-500 mb-3">Click a player to see their earnings breakdown.</p>
+
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
@@ -79,69 +120,148 @@ export default function GroupLeaderboard({ roomId, currentUserId, totalPot }: Pr
           <tbody className="divide-y divide-gray-800/50">
             {entries.map((entry) => {
               const isCurrentUser = entry.userId === currentUserId;
+              const isExpanded = expandedUserId === entry.userId;
+              const breakdown = breakdowns[entry.userId];
+              const isLoadingThis = loadingBreakdown === entry.userId;
+
               return (
-                <tr
-                  key={entry.userId}
-                  className={`${
-                    entry.excludedFromPot
-                      ? "opacity-50"
-                      : isCurrentUser
-                      ? "bg-amber-400/5 border border-amber-400/20 rounded-xl"
-                      : ""
-                  }`}
-                >
-                  <td className="py-4 pr-4">
-                    <span
-                      className={`font-bold ${
-                        entry.rank === 1
-                          ? "text-yellow-400"
-                          : entry.rank === 2
-                          ? "text-gray-300"
-                          : entry.rank === 3
-                          ? "text-amber-600"
-                          : "text-gray-500"
-                      }`}
-                    >
-                      {entry.rank}
-                    </span>
-                  </td>
-                  <td className="py-4 pr-4">
-                    <div className="flex items-center gap-3">
-                      {entry.image ? (
-                        <Image
-                          src={entry.image}
-                          alt={entry.name ?? "User"}
-                          width={32}
-                          height={32}
-                          className="rounded-full"
-                        />
-                      ) : (
-                        <div className="w-8 h-8 rounded-full bg-amber-400 flex items-center justify-center text-gray-900 font-bold text-xs">
-                          {entry.name?.[0]?.toUpperCase() ?? "?"}
-                        </div>
-                      )}
-                      <span className={`font-medium ${isCurrentUser ? "text-amber-400" : "text-white"}`}>
-                        {entry.name ?? "Unknown"}
-                        {isCurrentUser && <span className="text-xs text-gray-500 ml-1">(you)</span>}
-                        {entry.excludedFromPot && (
-                          <span className="ml-1.5 text-xs text-red-400 font-normal bg-red-900/30 border border-red-800/50 rounded px-1">excluded</span>
-                        )}
+                <>
+                  <tr
+                    key={entry.userId}
+                    onClick={() => handleRowClick(entry.userId)}
+                    className={`cursor-pointer transition-colors ${
+                      entry.excludedFromPot
+                        ? "opacity-50"
+                        : isExpanded
+                        ? "bg-gray-800/60"
+                        : isCurrentUser
+                        ? "bg-amber-400/5 hover:bg-amber-400/10"
+                        : "hover:bg-gray-800/40"
+                    }`}
+                  >
+                    <td className="py-4 pr-4">
+                      <span
+                        className={`font-bold ${
+                          entry.rank === 1
+                            ? "text-yellow-400"
+                            : entry.rank === 2
+                            ? "text-gray-300"
+                            : entry.rank === 3
+                            ? "text-amber-600"
+                            : "text-gray-500"
+                        }`}
+                      >
+                        {entry.rank}
                       </span>
-                    </div>
-                  </td>
-                  <td className="py-4 pr-4 text-right text-gray-300">
-                    €{entry.groupStage.toFixed(2)}
-                  </td>
-                  <td className="py-4 pr-4 text-right text-gray-300">
-                    €{entry.knockout.toFixed(2)}
-                  </td>
-                  <td className="py-4 pr-4 text-right text-gray-300">
-                    €{entry.sideBets.toFixed(2)}
-                  </td>
-                  <td className="py-4 text-right font-bold text-amber-400">
-                    €{entry.totalEarned.toFixed(2)}
-                  </td>
-                </tr>
+                    </td>
+                    <td className="py-4 pr-4">
+                      <div className="flex items-center gap-3">
+                        {entry.image ? (
+                          <Image
+                            src={entry.image}
+                            alt={entry.name ?? "User"}
+                            width={32}
+                            height={32}
+                            className="rounded-full"
+                          />
+                        ) : (
+                          <div className="w-8 h-8 rounded-full bg-amber-400 flex items-center justify-center text-gray-900 font-bold text-xs">
+                            {entry.name?.[0]?.toUpperCase() ?? "?"}
+                          </div>
+                        )}
+                        <span className={`font-medium ${isCurrentUser ? "text-amber-400" : "text-white"}`}>
+                          {entry.name ?? "Unknown"}
+                          {isCurrentUser && <span className="text-xs text-gray-500 ml-1">(you)</span>}
+                          {entry.excludedFromPot && (
+                            <span className="ml-1.5 text-xs text-red-400 font-normal bg-red-900/30 border border-red-800/50 rounded px-1">excluded</span>
+                          )}
+                        </span>
+                      </div>
+                    </td>
+                    <td className="py-4 pr-4 text-right text-gray-300">
+                      €{entry.groupStage.toFixed(2)}
+                    </td>
+                    <td className="py-4 pr-4 text-right text-gray-300">
+                      €{entry.knockout.toFixed(2)}
+                    </td>
+                    <td className="py-4 pr-4 text-right text-gray-300">
+                      €{entry.sideBets.toFixed(2)}
+                    </td>
+                    <td className="py-4 text-right font-bold text-amber-400">
+                      €{entry.totalEarned.toFixed(2)}
+                    </td>
+                  </tr>
+                  {isExpanded && (
+                    <tr key={`${entry.userId}-breakdown`} className="bg-gray-800/30">
+                      <td colSpan={6} className="px-4 pb-4 pt-2">
+                        {isLoadingThis ? (
+                          <div className="text-xs text-gray-500 py-2">Loading breakdown…</div>
+                        ) : !breakdown ? (
+                          <div className="text-xs text-gray-500 py-2">No earnings yet.</div>
+                        ) : (
+                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs">
+                            <div>
+                              <div className="font-semibold text-amber-400 mb-2">
+                                Group Stage — €{breakdown.groupStage.total.toFixed(2)}
+                              </div>
+                              {breakdown.groupStage.groups.length === 0 ? (
+                                <p className="text-gray-600">No earnings</p>
+                              ) : (
+                                <div className="space-y-1">
+                                  {breakdown.groupStage.groups
+                                    .filter((g) => g.earnedAmount > 0)
+                                    .map((g) => (
+                                      <div key={g.wcGroup} className="flex justify-between text-gray-300">
+                                        <span>Group {g.wcGroup}</span>
+                                        <span className="text-green-400 font-medium">+€{g.earnedAmount.toFixed(2)}</span>
+                                      </div>
+                                    ))}
+                                  {breakdown.groupStage.groups.every((g) => g.earnedAmount === 0) && (
+                                    <p className="text-gray-600">No earnings</p>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                            <div>
+                              <div className="font-semibold text-amber-400 mb-2">
+                                Knockout — €{breakdown.knockout.total.toFixed(2)}
+                              </div>
+                              {breakdown.knockout.matches.length === 0 ? (
+                                <p className="text-gray-600">No earnings</p>
+                              ) : (
+                                <div className="space-y-1">
+                                  {breakdown.knockout.matches.map((m, i) => (
+                                    <div key={i} className="flex justify-between text-gray-300 gap-2">
+                                      <span className="truncate">{m.homeTeam} vs {m.awayTeam} ({m.predicted})</span>
+                                      <span className="text-green-400 font-medium shrink-0">+€{m.earnedAmount.toFixed(2)}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                            <div>
+                              <div className="font-semibold text-amber-400 mb-2">
+                                Side Bets — €{breakdown.sideBets.total.toFixed(2)}
+                              </div>
+                              {breakdown.sideBets.bets.length === 0 ? (
+                                <p className="text-gray-600">No winnings</p>
+                              ) : (
+                                <div className="space-y-1">
+                                  {breakdown.sideBets.bets.map((b, i) => (
+                                    <div key={i} className="flex justify-between text-gray-300 gap-2">
+                                      <span className="truncate">{b.betTitle}</span>
+                                      <span className="text-green-400 font-medium shrink-0">+€{b.earnedAmount.toFixed(2)}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  )}
+                </>
               );
             })}
           </tbody>

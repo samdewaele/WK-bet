@@ -4,6 +4,7 @@ import { auth } from "@auth";
 import { db } from "@/lib/db";
 import Navbar from "@/components/Navbar";
 import CreateJoinGroupForms from "@/components/CreateJoinGroupForms";
+import CountdownTimer from "@/components/CountdownTimer";
 import { calculatePot } from "@/lib/pot";
 
 export default async function GroupsPage() {
@@ -19,7 +20,9 @@ export default async function GroupsPage() {
     include: {
       room: {
         include: {
-          members: true,
+          members: {
+            include: { user: { select: { id: true, name: true, image: true } } },
+          },
           sideBets: true,
         },
       },
@@ -38,6 +41,11 @@ export default async function GroupsPage() {
       memberCount: m.room.members.length,
       sideBetCount: m.room.sideBets.length,
       totalPot: pot.totalPot,
+      members: m.room.members.slice(0, 6).map((rm) => ({
+        id: rm.userId,
+        name: rm.user.name,
+        image: rm.user.image,
+      })),
     };
   });
 
@@ -58,11 +66,15 @@ export default async function GroupsPage() {
     <div className="min-h-screen bg-[#0a0f1e] text-white">
       <Navbar />
       <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
-        <div className="mb-8">
+        <div className="mb-6">
           <h1 className="text-3xl font-bold text-white">My Betting Groups</h1>
           {!hasGroups && (
             <p className="text-gray-400 mt-1">Create a group or join one with an invite code.</p>
           )}
+        </div>
+
+        <div className="mb-8">
+          <CountdownTimer />
         </div>
 
         {/* Show existing groups first when user has them */}
@@ -76,17 +88,37 @@ export default async function GroupsPage() {
                   className="block bg-gray-900 border border-gray-800 rounded-xl p-5 hover:border-amber-400/40 transition-colors"
                 >
                   <div className="flex items-start justify-between gap-4">
-                    <div>
+                    <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-3 mb-1">
                         <h3 className="text-lg font-semibold text-white">{g.name}</h3>
                         <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${statusBadge(g.status)}`}>
                           {g.status}
                         </span>
                       </div>
-                      <div className="flex flex-wrap gap-4 text-sm text-gray-400 mt-2">
+                      <div className="flex flex-wrap gap-4 text-sm text-gray-400 mt-1">
                         <span>{g.memberCount} {g.memberCount === 1 ? "member" : "members"}</span>
                         <span>Entry: €{g.entryFee.toFixed(2)}</span>
-                        <span>Pot: €{g.totalPot.toFixed(2)}</span>
+                        <span className="text-amber-400 font-semibold">Pot: €{g.totalPot.toFixed(2)}</span>
+                      </div>
+                      {/* Member avatars */}
+                      <div className="flex items-center gap-1.5 mt-3">
+                        {g.members.map((m) => (
+                          <div
+                            key={m.id}
+                            className="w-7 h-7 rounded-full border border-gray-700 overflow-hidden flex items-center justify-center text-xs font-semibold text-gray-300 bg-gray-800 shrink-0"
+                            title={m.name ?? undefined}
+                          >
+                            {m.image ? (
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <img src={m.image} alt={m.name ?? ""} className="w-full h-full object-cover" />
+                            ) : (
+                              (m.name ?? "?")[0].toUpperCase()
+                            )}
+                          </div>
+                        ))}
+                        {g.memberCount > 6 && (
+                          <span className="text-xs text-gray-500">+{g.memberCount - 6}</span>
+                        )}
                       </div>
                     </div>
                     <div className="text-amber-400 text-xl shrink-0">→</div>

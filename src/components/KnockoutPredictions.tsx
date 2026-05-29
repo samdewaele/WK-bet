@@ -182,14 +182,32 @@ export default function KnockoutPredictions({ roomId }: Props) {
   }
 
   if (availableRounds.length === 0) {
+    const BRACKET = [
+      { label: "Round of 32", matches: 32 },
+      { label: "Round of 16", matches: 16 },
+      { label: "Quarter-finals", matches: 8 },
+      { label: "Semi-finals", matches: 4 },
+      { label: "3rd Place", matches: 1 },
+      { label: "Final", matches: 1 },
+    ];
     return (
-      <div className="text-center py-12 bg-gray-900/50 border border-gray-800 rounded-xl">
-        <div className="text-4xl mb-3">🏆</div>
-        <p className="text-white font-semibold mb-2">Knockout bracket coming soon</p>
-        <p className="text-gray-500 text-sm max-w-xs mx-auto">
-          The Round of 32 opens once the group stage draw is confirmed.
-          Come back here to predict all 67 knockout matches.
-        </p>
+      <div className="bg-gray-900/50 border border-gray-800 rounded-xl p-6">
+        <div className="text-center mb-6">
+          <div className="text-3xl mb-2">🏆</div>
+          <p className="text-white font-semibold text-lg">Knockout bracket opens after group stage</p>
+          <p className="text-gray-500 text-sm mt-1">
+            Predict all 63 knockout matches — picks lock at each match&apos;s kickoff
+          </p>
+        </div>
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+          {BRACKET.map((b) => (
+            <div key={b.label} className="bg-gray-800 border border-gray-700 rounded-lg p-3 text-center opacity-50">
+              <div className="text-xs text-gray-400 mb-1 font-medium">{b.label}</div>
+              <div className="text-2xl font-bold text-gray-500">{b.matches}</div>
+              <div className="text-xs text-gray-600">match{b.matches > 1 ? "es" : ""}</div>
+            </div>
+          ))}
+        </div>
       </div>
     );
   }
