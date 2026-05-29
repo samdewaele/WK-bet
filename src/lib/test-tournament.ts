@@ -576,8 +576,20 @@ export async function buildReport(roomId: string): Promise<TestTournamentReport>
 export async function cleanupTestInRoom(roomId: string): Promise<void> {
   const testEmails = TEST_USERS.map((u) => u.email);
   const testUsers = await db.user.findMany({ where: { email: { in: testEmails } }, select: { id: true } });
-  if (testUsers.length === 0) return;
   const ids = testUsers.map((u) => u.id);
+
+  // Reset any real-user bets that were settled during the simulation.
+  // This runs unconditionally (before the early-return guard) so a second
+  // cleanup call — when no test users remain in the DB — still resets bets.
+  await db.sideBet.updateMany({
+    where: {
+      roomId,
+      ...(ids.length > 0 ? { proposedByUserId: { notIn: ids } } : {}),
+    },
+    data: { winnerEntryId: null, status: "open" },
+  });
+
+  if (testUsers.length === 0) return;
 
   // Reset ALL match scores that were set during the test
   await db.match.updateMany({ where: { status: "finished" }, data: { homeScore: null, awayScore: null, status: "scheduled" } });
@@ -587,12 +599,6 @@ export async function cleanupTestInRoom(roomId: string): Promise<void> {
 
   await db.sideBetEntry.deleteMany({ where: { sideBet: { roomId }, userId: { in: ids } } });
   await db.sideBet.deleteMany({ where: { roomId, proposedByUserId: { in: ids } } });
-
-  // Reset any real-user bets that were settled during the simulation
-  await db.sideBet.updateMany({
-    where: { roomId, proposedByUserId: { notIn: ids } },
-    data: { winnerEntryId: null, status: "open" },
-  });
   await db.p2PSideBet.deleteMany({ where: { roomId, proposerId: { in: ids } } });
   await db.p2PSideBet.deleteMany({ where: { roomId, acceptorId: { in: ids } } });
   await db.prediction.deleteMany({ where: { roomId, userId: { in: ids } } });
