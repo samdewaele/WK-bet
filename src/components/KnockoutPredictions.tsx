@@ -28,6 +28,7 @@ type Prediction = {
   homeScore: number;
   awayScore: number;
   earnedAmount: number | null;
+  predicted: boolean;
   match: Match;
 };
 
@@ -65,12 +66,15 @@ export default function KnockoutPredictions({ roomId }: Props) {
         const data: Prediction[] = await res.json();
         setPredictions(data);
 
+        // Only pre-fill scores for matches the user has already predicted
         const initial: ScoreState = {};
         for (const p of data) {
-          initial[p.matchId] = {
-            home: String(p.homeScore),
-            away: String(p.awayScore),
-          };
+          if (p.predicted) {
+            initial[p.matchId] = {
+              home: String(p.homeScore),
+              away: String(p.awayScore),
+            };
+          }
         }
         setScores(initial);
 
@@ -83,12 +87,14 @@ export default function KnockoutPredictions({ roomId }: Props) {
     fetchData();
   }, [roomId]);
 
-  const predMap = new Map(predictions.map((p) => [p.matchId, p]));
+  // predMap only tracks actual predictions (predicted: true) for score display and earned amounts
+  const predMap = new Map(predictions.filter((p) => p.predicted).map((p) => [p.matchId, p]));
 
   const roundMatches = predictions
     .filter((p) => p.match.round === activeRound)
     .map((p) => p.match);
 
+  // Show all rounds that have matches (not just ones with predictions)
   const availableRounds = KO_ROUNDS.filter((r) =>
     predictions.some((p) => p.match.round === r)
   );

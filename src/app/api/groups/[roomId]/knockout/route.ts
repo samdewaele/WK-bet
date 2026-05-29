@@ -20,39 +20,49 @@ export async function GET(
     return NextResponse.json({ error: "Not a member" }, { status: 403 });
   }
 
-  const predictions = await db.prediction.findMany({
-    where: { userId: session.user.id, roomId },
-    include: {
-      match: {
-        include: {
-          homeTeam: { select: { id: true, name: true, flag: true } },
-          awayTeam: { select: { id: true, name: true, flag: true } },
-        },
+  // Return ALL KO matches so users can enter predictions even if they haven't yet
+  const KO_ROUNDS = ["R32", "R16", "QF", "SF", "3rd", "Final"];
+  const [koMatches, existingPredictions] = await Promise.all([
+    db.match.findMany({
+      where: { round: { in: KO_ROUNDS } },
+      include: {
+        homeTeam: { select: { id: true, name: true, flag: true } },
+        awayTeam: { select: { id: true, name: true, flag: true } },
       },
-    },
-    orderBy: { match: { kickoff: "asc" } },
-  });
+      orderBy: { kickoff: "asc" },
+    }),
+    db.prediction.findMany({
+      where: { userId: session.user.id, roomId },
+      select: { matchId: true, homeScore: true, awayScore: true, earnedAmount: true },
+    }),
+  ]);
+
+  const predMap = new Map(existingPredictions.map((p) => [p.matchId, p]));
 
   return NextResponse.json(
-    predictions.map((p) => ({
-      id: p.id,
-      matchId: p.matchId,
-      homeScore: p.homeScore,
-      awayScore: p.awayScore,
-      earnedAmount: p.earnedAmount,
-      match: {
-        id: p.match.id,
-        round: p.match.round,
-        group: p.match.group,
-        matchNumber: p.match.matchNumber,
-        kickoff: p.match.kickoff.toISOString(),
-        homeScore: p.match.homeScore,
-        awayScore: p.match.awayScore,
-        status: p.match.status,
-        homeTeam: p.match.homeTeam,
-        awayTeam: p.match.awayTeam,
-      },
-    }))
+    koMatches.map((m) => {
+      const pred = predMap.get(m.id);
+      return {
+        id: m.id,
+        matchId: m.id,
+        homeScore: pred?.homeScore ?? 0,
+        awayScore: pred?.awayScore ?? 0,
+        earnedAmount: pred?.earnedAmount ?? null,
+        predicted: !!pred,
+        match: {
+          id: m.id,
+          round: m.round,
+          group: m.group,
+          matchNumber: m.matchNumber,
+          kickoff: m.kickoff.toISOString(),
+          homeScore: m.homeScore,
+          awayScore: m.awayScore,
+          status: m.status,
+          homeTeam: m.homeTeam,
+          awayTeam: m.awayTeam,
+        },
+      };
+    })
   );
 }
 

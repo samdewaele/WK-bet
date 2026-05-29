@@ -368,7 +368,6 @@ export default function GroupAdminPanel({
                           <tr className="border-b border-gray-700 text-gray-500">
                             <th className="text-left px-2 py-1">#</th>
                             <th className="text-left px-2 py-1">Player</th>
-                            <th className="text-right px-2 py-1">Pts</th>
                             <th className="text-right px-2 py-1">Earned</th>
                           </tr>
                         </thead>
@@ -377,7 +376,6 @@ export default function GroupAdminPanel({
                             <tr key={i} className="border-b border-gray-800 last:border-0">
                               <td className="px-2 py-1 text-gray-600">{i + 1}</td>
                               <td className="px-2 py-1 text-white">{p.name}</td>
-                              <td className="px-2 py-1 text-right text-amber-400 font-bold">{p.points}</td>
                               <td className="px-2 py-1 text-right text-green-400">€{(p.earned ?? 0).toFixed(2)}</td>
                             </tr>
                           ))}
