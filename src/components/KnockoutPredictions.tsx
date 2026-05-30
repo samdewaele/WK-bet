@@ -189,10 +189,10 @@ export default function KnockoutPredictions({ roomId }: Props) {
 
   if (availableRounds.length === 0) {
     const BRACKET = [
-      { label: "Round of 32", matches: 32 },
-      { label: "Round of 16", matches: 16 },
-      { label: "Quarter-finals", matches: 8 },
-      { label: "Semi-finals", matches: 4 },
+      { label: "Round of 32", matches: 16 },
+      { label: "Round of 16", matches: 8 },
+      { label: "Quarter-finals", matches: 4 },
+      { label: "Semi-finals", matches: 2 },
       { label: "3rd Place", matches: 1 },
       { label: "Final", matches: 1 },
     ];
@@ -202,7 +202,7 @@ export default function KnockoutPredictions({ roomId }: Props) {
           <div className="text-3xl mb-2">🏆</div>
           <p className="text-white font-semibold text-lg">Knockout bracket opens after group stage</p>
           <p className="text-gray-500 text-sm mt-1">
-            Predict all 63 knockout matches — picks lock at each match&apos;s kickoff
+            Predict all 31 knockout matches — picks lock at each match&apos;s kickoff
           </p>
         </div>
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
