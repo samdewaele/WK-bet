@@ -296,3 +296,104 @@ export async function resetR32Bracket(): Promise<void> {
     data: { homeTeamId: null, awayTeamId: null },
   });
 }
+
+// ---------------------------------------------------------------------------
+// KO bracket progression
+// ---------------------------------------------------------------------------
+
+/**
+ * Maps each KO match number to the next-round slot the winner fills.
+ * SF losers also fill the 3rd-place match slots.
+ */
+export const NEXT_ROUND_SLOT: Record<
+  number,
+  {
+    winner: { matchNumber: number; side: "home" | "away" };
+    loser?: { matchNumber: number; side: "home" | "away" };
+  }
+> = {
+  73:  { winner: { matchNumber: 89,  side: "home" } },
+  74:  { winner: { matchNumber: 89,  side: "away" } },
+  75:  { winner: { matchNumber: 90,  side: "home" } },
+  76:  { winner: { matchNumber: 90,  side: "away" } },
+  77:  { winner: { matchNumber: 91,  side: "home" } },
+  78:  { winner: { matchNumber: 91,  side: "away" } },
+  79:  { winner: { matchNumber: 92,  side: "home" } },
+  80:  { winner: { matchNumber: 92,  side: "away" } },
+  81:  { winner: { matchNumber: 93,  side: "home" } },
+  82:  { winner: { matchNumber: 93,  side: "away" } },
+  83:  { winner: { matchNumber: 94,  side: "home" } },
+  84:  { winner: { matchNumber: 94,  side: "away" } },
+  85:  { winner: { matchNumber: 95,  side: "home" } },
+  86:  { winner: { matchNumber: 95,  side: "away" } },
+  87:  { winner: { matchNumber: 96,  side: "home" } },
+  88:  { winner: { matchNumber: 96,  side: "away" } },
+  89:  { winner: { matchNumber: 97,  side: "home" } },
+  90:  { winner: { matchNumber: 97,  side: "away" } },
+  91:  { winner: { matchNumber: 98,  side: "home" } },
+  92:  { winner: { matchNumber: 98,  side: "away" } },
+  93:  { winner: { matchNumber: 99,  side: "home" } },
+  94:  { winner: { matchNumber: 99,  side: "away" } },
+  95:  { winner: { matchNumber: 100, side: "home" } },
+  96:  { winner: { matchNumber: 100, side: "away" } },
+  97:  { winner: { matchNumber: 101, side: "home" } },
+  98:  { winner: { matchNumber: 101, side: "away" } },
+  99:  { winner: { matchNumber: 102, side: "home" } },
+  100: { winner: { matchNumber: 102, side: "away" } },
+  101: { winner: { matchNumber: 104, side: "home" }, loser: { matchNumber: 103, side: "home" } },
+  102: { winner: { matchNumber: 104, side: "away" }, loser: { matchNumber: 103, side: "away" } },
+  // 103 and 104 are Final/3rd — no next round
+};
+
+/**
+ * After a KO match finishes, populate the next-round match's team slot(s) in the DB.
+ * winnerId: the team that won (home or away based on scores).
+ * loserId: the team that lost — only used for SF matches feeding the 3rd-place match.
+ */
+export async function populateNextRoundSlot(
+  matchNumber: number,
+  winnerId: string,
+  loserId: string | null
+): Promise<void> {
+  const slot = NEXT_ROUND_SLOT[matchNumber];
+  if (!slot) return;
+
+  const nextMatch = await db.match.findFirst({
+    where: { matchNumber: slot.winner.matchNumber },
+    select: { id: true },
+  });
+  if (!nextMatch) return;
+
+  await db.match.update({
+    where: { id: nextMatch.id },
+    data: slot.winner.side === "home"
+      ? { homeTeamId: winnerId }
+      : { awayTeamId: winnerId },
+  });
+
+  if (slot.loser && loserId) {
+    const loserMatch = await db.match.findFirst({
+      where: { matchNumber: slot.loser.matchNumber },
+      select: { id: true },
+    });
+    if (loserMatch) {
+      await db.match.update({
+        where: { id: loserMatch.id },
+        data: slot.loser.side === "home"
+          ? { homeTeamId: loserId }
+          : { awayTeamId: loserId },
+      });
+    }
+  }
+}
+
+/**
+ * Reset all R16/QF/SF/3rd/Final bracket team slots back to null.
+ * Called alongside resetR32Bracket during simulation cleanup.
+ */
+export async function resetKOBracket(): Promise<void> {
+  await db.match.updateMany({
+    where: { round: { in: ["R16", "QF", "SF", "3rd", "Final"] } },
+    data: { homeTeamId: null, awayTeamId: null },
+  });
+}

@@ -20,10 +20,17 @@ export async function GET(
     return NextResponse.json({ error: "Not a member" }, { status: 403 });
   }
 
-  // Return KO matches once the group stage has started (at least 1 finished group match)
   const KO_ROUNDS = ["R32", "R16", "QF", "SF", "3rd", "Final"];
-  const [finishedGroupCount, koMatches, existingPredictions] = await Promise.all([
-    db.match.count({ where: { status: "finished", round: "Group" } }),
+  const KO_VISIBLE_STATUSES = ["ko_betting", "ko_active", "finished"];
+
+  const room = await db.room.findUnique({ where: { id: roomId }, select: { status: true } });
+
+  // Only show KO matches once the group stage is complete and KO betting is open
+  if (!room || !KO_VISIBLE_STATUSES.includes(room.status)) {
+    return NextResponse.json([]);
+  }
+
+  const [koMatches, existingPredictions] = await Promise.all([
     db.match.findMany({
       where: { round: { in: KO_ROUNDS } },
       include: {
@@ -37,11 +44,6 @@ export async function GET(
       select: { matchId: true, homeScore: true, awayScore: true, earnedAmount: true },
     }),
   ]);
-
-  // Before group stage starts: only show the form if the user already has predictions
-  if (finishedGroupCount === 0 && existingPredictions.length === 0) {
-    return NextResponse.json([]);
-  }
 
   const predMap = new Map(existingPredictions.map((p) => [p.matchId, p]));
 

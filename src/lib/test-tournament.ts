@@ -14,7 +14,7 @@ import {
   type KORound,
 } from "@/lib/pot";
 import { checkAndSendRoundNotifications, resetNotification } from "@/lib/notifications";
-import { buildStandingsFromMatches, populateR32Bracket, resetR32Bracket } from "@/lib/ko-seeding";
+import { buildStandingsFromMatches, populateR32Bracket, resetR32Bracket, populateNextRoundSlot, resetKOBracket, NEXT_ROUND_SLOT } from "@/lib/ko-seeding";
 
 export const TEST_PREFIX = "test-tournament-";
 const TEST_ROOM_INVITE = `${TEST_PREFIX}invite`;
@@ -457,17 +457,50 @@ async function _seedKORoundsRandomly(
   });
   if (koMatches.length === 0) return;
 
-  // Random results + predictions for each KO match
+  // Track team slots in memory so we can propagate bracket progression
+  // without re-fetching from DB. Starts with R32 teams (set by populateR32Bracket).
+  const teamSlots = new Map<number, { homeTeamId: string | null; awayTeamId: string | null }>();
+  for (const m of koMatches) {
+    teamSlots.set(m.matchNumber, { homeTeamId: m.homeTeamId, awayTeamId: m.awayTeamId });
+  }
+
+  // Random results + predictions for each KO match (ascending matchNumber order)
   for (const match of koMatches) {
+    // KO can't draw — if equal, home wins by 1
     let actualHome = randomGoals();
-    // KO can't draw — if drawn, home wins on penalties (represented as +1)
     const actualAway = randomGoals();
-    if (actualHome === actualAway) actualHome += 1; // KO can't draw — home wins by 1
+    if (actualHome === actualAway) actualHome += 1;
 
     await db.match.update({
       where: { id: match.id },
       data: { homeScore: actualHome, awayScore: actualAway, status: "finished" },
     });
+
+    // Propagate winner to next round bracket slot (both in memory and DB)
+    const slots = teamSlots.get(match.matchNumber)!;
+    const winnerId = actualHome > actualAway ? slots.homeTeamId : slots.awayTeamId;
+    const loserId  = actualHome > actualAway ? slots.awayTeamId : slots.homeTeamId;
+
+    if (winnerId) {
+      const nextSlot = NEXT_ROUND_SLOT[match.matchNumber];
+      if (nextSlot) {
+        // Update in-memory map for subsequent matches
+        const nextSlots = teamSlots.get(nextSlot.winner.matchNumber);
+        if (nextSlots) {
+          if (nextSlot.winner.side === "home") nextSlots.homeTeamId = winnerId;
+          else nextSlots.awayTeamId = winnerId;
+        }
+        if (nextSlot.loser && loserId) {
+          const loserSlots = teamSlots.get(nextSlot.loser.matchNumber);
+          if (loserSlots) {
+            if (nextSlot.loser.side === "home") loserSlots.homeTeamId = loserId;
+            else loserSlots.awayTeamId = loserId;
+          }
+        }
+        // Persist to DB
+        await populateNextRoundSlot(match.matchNumber, winnerId, loserId);
+      }
+    }
 
     // Score ALL predictions for this match (test users + real members who submitted)
     const matchPrize = pot.prizePerKOMatch[match.round as KORound] ?? 0;
@@ -619,8 +652,9 @@ export async function cleanupTestInRoom(roomId: string): Promise<void> {
   // Reset ALL match scores that were set during the test
   await db.match.updateMany({ where: { status: "finished" }, data: { homeScore: null, awayScore: null, status: "scheduled" } });
 
-  // Reset R32 bracket team assignments
+  // Reset bracket team assignments (R32 and all subsequent KO rounds)
   await resetR32Bracket();
+  await resetKOBracket();
 
   // Reset round notifications so they can fire again on the next simulation
   await resetNotification("Group").catch(() => {});
@@ -655,6 +689,7 @@ export async function cleanupTestTournament(): Promise<void> {
   if (room) {
     await db.match.updateMany({ where: { status: "finished" }, data: { homeScore: null, awayScore: null, status: "scheduled" } });
     await resetR32Bracket();
+    await resetKOBracket();
     await db.sideBetEntry.deleteMany({ where: { sideBet: { roomId: room.id } } });
     await db.sideBet.deleteMany({ where: { roomId: room.id } });
     await db.p2PSideBet.deleteMany({ where: { roomId: room.id } });

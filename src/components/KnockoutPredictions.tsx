@@ -288,7 +288,7 @@ export default function KnockoutPredictions({ roomId, roomStatus, simulationMode
           <div className="text-3xl mb-2">🏆</div>
           <p className="text-white font-semibold text-lg">Knockout bracket opens after group stage</p>
           <p className="text-gray-500 text-sm mt-1">
-            Predict all 31 knockout matches — picks lock at each match&apos;s kickoff
+            Predict all 32 knockout matches — all picks lock when the KO stage begins
           </p>
         </div>
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
@@ -327,7 +327,14 @@ export default function KnockoutPredictions({ roomId, roomStatus, simulationMode
     const locked = isLocked(match);
     const pred = predMap.get(match.id);
     const scoreState = scores[match.id];
-    const { home: displayHome, away: displayAway } = getDisplayTeams(match);
+
+    // For display: prefer actual seeded teams (match.homeTeam/awayTeam), fall back to user projection
+    const { home: projectedHome, away: projectedAway } = getDisplayTeams(match);
+    const displayHome = match.homeTeam ?? projectedHome;
+    const displayAway = match.awayTeam ?? projectedAway;
+
+    const hasActualResult = match.status === "finished" && match.homeScore !== null && match.awayScore !== null;
+    const isLive = match.status === "live";
 
     const kickoffDate = new Date(match.kickoff);
     const timeStr = kickoffDate.toLocaleString("en-GB", {
@@ -340,25 +347,73 @@ export default function KnockoutPredictions({ roomId, roomStatus, simulationMode
     return (
       <div
         key={match.id}
-        className="bg-gray-900 border border-gray-800 rounded-xl p-4 flex flex-col sm:flex-row items-center gap-4"
+        className={`bg-gray-900 border rounded-xl p-4 flex flex-col gap-3 ${
+          hasActualResult ? "border-gray-700" : "border-gray-800"
+        }`}
       >
-        <div className="w-full sm:w-24 text-center shrink-0">
-          <div className="text-xs text-gray-500">#{match.matchNumber}</div>
-          <div className="text-xs text-gray-400 mt-0.5">{timeStr}</div>
-          {match.status === "live" && (
-            <span className="inline-block mt-1 text-xs bg-green-500/20 text-green-400 px-1.5 py-0.5 rounded">LIVE</span>
-          )}
-          {match.status === "finished" && (
-            <span className="inline-block mt-1 text-xs bg-gray-700 text-gray-400 px-1.5 py-0.5 rounded">FT</span>
-          )}
+        {/* Match header */}
+        <div className="flex items-center justify-between text-xs text-gray-500">
+          <span>#{match.matchNumber} · {timeStr}</span>
+          <div className="flex items-center gap-2">
+            {isLive && (
+              <span className="text-xs bg-green-500/20 text-green-400 px-1.5 py-0.5 rounded">LIVE</span>
+            )}
+            {hasActualResult && (
+              <span className="text-xs bg-gray-700 text-gray-400 px-1.5 py-0.5 rounded">FT</span>
+            )}
+          </div>
         </div>
 
-        <div className="flex-1 flex items-center gap-3 w-full justify-center">
-          {renderTeamSlot(displayHome, "home")}
+        {/* Actual result row (shown once match is live or finished) */}
+        {(hasActualResult || isLive) && (
+          <div className="flex items-center gap-3 w-full">
+            {renderTeamSlot(displayHome, "home")}
+            <div className="flex items-center gap-2">
+              <div className={`w-10 h-10 flex items-center justify-center rounded-lg font-bold text-lg ${
+                isLive ? "bg-green-900/40 text-green-300" : "bg-gray-800 text-white"
+              }`}>
+                {match.homeScore ?? "—"}
+              </div>
+              <span className="text-gray-400 font-bold">-</span>
+              <div className={`w-10 h-10 flex items-center justify-center rounded-lg font-bold text-lg ${
+                isLive ? "bg-green-900/40 text-green-300" : "bg-gray-800 text-white"
+              }`}>
+                {match.awayScore ?? "—"}
+              </div>
+            </div>
+            {renderTeamSlot(displayAway, "away")}
+          </div>
+        )}
 
-          <div className="flex items-center gap-2">
-            {locked ? (
-              <>
+        {/* User prediction row */}
+        <div className="flex items-center gap-3 w-full">
+          {/* Only show team names in prediction row when no actual result shown */}
+          {!hasActualResult && !isLive && renderTeamSlot(displayHome, "home")}
+
+          {hasActualResult || isLive ? (
+            <div className="flex-1 flex items-center justify-center gap-2">
+              <span className="text-xs text-gray-500 mr-1">Your pick:</span>
+              <div className="w-8 h-8 flex items-center justify-center bg-gray-800 rounded text-sm font-bold text-gray-300">
+                {pred ? String(pred.homeScore) : "—"}
+              </div>
+              <span className="text-gray-500 text-sm">-</span>
+              <div className="w-8 h-8 flex items-center justify-center bg-gray-800 rounded text-sm font-bold text-gray-300">
+                {pred ? String(pred.awayScore) : "—"}
+              </div>
+              {pred?.earnedAmount != null && (
+                <div className={`ml-2 inline-flex items-center gap-1 text-xs font-bold px-2 py-1 rounded-full ${
+                  pred.earnedAmount > 0 ? "bg-amber-400/20 text-amber-400" : "bg-gray-700 text-gray-400"
+                }`}>
+                  €{pred.earnedAmount.toFixed(2)}
+                </div>
+              )}
+              {!pred && (
+                <span className="text-xs text-gray-600 italic ml-1">No prediction</span>
+              )}
+            </div>
+          ) : locked ? (
+            <>
+              <div className="flex items-center gap-2">
                 <div className="w-10 h-10 flex items-center justify-center bg-gray-800 rounded-lg text-white font-bold text-lg">
                   {scoreState?.home ?? (pred ? String(pred.homeScore) : "—")}
                 </div>
@@ -366,55 +421,41 @@ export default function KnockoutPredictions({ roomId, roomStatus, simulationMode
                 <div className="w-10 h-10 flex items-center justify-center bg-gray-800 rounded-lg text-white font-bold text-lg">
                   {scoreState?.away ?? (pred ? String(pred.awayScore) : "—")}
                 </div>
-              </>
-            ) : (
-              <>
-                <input
-                  type="number"
-                  min={0}
-                  max={20}
-                  value={scoreState?.home ?? ""}
-                  onChange={(e) => handleScoreChange(match.id, "home", e.target.value)}
-                  className="w-10 h-10 text-center bg-gray-800 border border-gray-700 focus:border-amber-400 rounded-lg text-white font-bold text-lg outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-                  placeholder="?"
-                />
-                <span className="text-gray-400 font-bold">-</span>
-                <input
-                  type="number"
-                  min={0}
-                  max={20}
-                  value={scoreState?.away ?? ""}
-                  onChange={(e) => handleScoreChange(match.id, "away", e.target.value)}
-                  className="w-10 h-10 text-center bg-gray-800 border border-gray-700 focus:border-amber-400 rounded-lg text-white font-bold text-lg outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-                  placeholder="?"
-                />
-              </>
-            )}
-          </div>
-
-          {renderTeamSlot(displayAway, "away")}
-        </div>
-
-        <div className="w-full sm:w-28 text-center shrink-0">
-          {match.status === "finished" && match.homeScore !== null && match.awayScore !== null && (
-            <div className="text-xs text-gray-400 mb-1">
-              Result: {match.homeScore}–{match.awayScore}
+              </div>
+              {pred?.earnedAmount != null && (
+                <div className={`inline-flex items-center gap-1 text-xs font-bold px-2 py-1 rounded-full ${
+                  pred.earnedAmount > 0 ? "bg-amber-400/20 text-amber-400" : "bg-gray-700 text-gray-400"
+                }`}>
+                  €{pred.earnedAmount.toFixed(2)}
+                </div>
+              )}
+              {!pred && <span className="text-xs text-gray-600 italic">No prediction</span>}
+            </>
+          ) : (
+            <div className="flex items-center gap-2">
+              <input
+                type="number"
+                min={0}
+                max={20}
+                value={scoreState?.home ?? ""}
+                onChange={(e) => handleScoreChange(match.id, "home", e.target.value)}
+                className="w-10 h-10 text-center bg-gray-800 border border-gray-700 focus:border-amber-400 rounded-lg text-white font-bold text-lg outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                placeholder="?"
+              />
+              <span className="text-gray-400 font-bold">-</span>
+              <input
+                type="number"
+                min={0}
+                max={20}
+                value={scoreState?.away ?? ""}
+                onChange={(e) => handleScoreChange(match.id, "away", e.target.value)}
+                className="w-10 h-10 text-center bg-gray-800 border border-gray-700 focus:border-amber-400 rounded-lg text-white font-bold text-lg outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                placeholder="?"
+              />
             </div>
           )}
-          {locked && pred?.earnedAmount != null && (
-            <div
-              className={`inline-flex items-center gap-1 text-xs font-bold px-2 py-1 rounded-full ${
-                pred.earnedAmount > 0
-                  ? "bg-amber-400/20 text-amber-400"
-                  : "bg-gray-700 text-gray-400"
-              }`}
-            >
-              €{pred.earnedAmount.toFixed(2)}
-            </div>
-          )}
-          {locked && !pred && (
-            <div className="text-xs text-gray-600 italic">No prediction</div>
-          )}
+
+          {!hasActualResult && !isLive && renderTeamSlot(displayAway, "away")}
         </div>
       </div>
     );

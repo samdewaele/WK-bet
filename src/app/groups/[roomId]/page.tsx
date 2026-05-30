@@ -192,7 +192,7 @@ export default async function GroupDetailPage({ params, searchParams }: Props) {
           <div className="space-y-8">
             <div>
               <h2 className="text-xl font-bold text-white mb-4">Group Stage Standings</h2>
-              <GroupStandingsPicker roomId={roomId} />
+              <GroupStandingsPicker roomId={roomId} roomStatus={roomStatus} />
             </div>
             <div>
               <h2 className="text-xl font-bold text-white mb-4">Knockout Predictions</h2>

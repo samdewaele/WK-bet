@@ -13,9 +13,6 @@ vi.mock("@/lib/db", () => ({
     team: {
       findMany: vi.fn(),
     },
-    match: {
-      findFirst: vi.fn(),
-    },
     groupStandingPrediction: {
       findMany: vi.fn(),
       upsert: vi.fn(),
@@ -150,29 +147,6 @@ describe("POST /api/groups/[roomId]/standings", () => {
     expect(json.details?.[0]).toMatch(/invalid team/i);
   });
 
-  it("rejects prediction when group is locked (match has kicked off)", async () => {
-    mockAuth.mockResolvedValue({ user: { id: "u1" } } as never);
-    mockDb.roomMember.findUnique.mockResolvedValue({ id: "rm1" } as never);
-    mockDb.team.findMany.mockResolvedValue(validTeams as never);
-    mockDb.match.findFirst.mockResolvedValue({
-      id: "m1",
-      kickoff: new Date(Date.now() - 3600000),
-    } as never);
-
-    const pred = {
-      wcGroup: "A",
-      position1: "t1",
-      position2: "t2",
-      position3: "t3",
-      position4: "t4",
-    };
-
-    const res = await POST(makeRequest({ predictions: [pred] }), { params: PARAMS });
-    expect(res.status).toBe(400);
-    const json = await res.json();
-    expect(json.details?.[0]).toMatch(/locked/i);
-  });
-
   it("returns 403 when room predictions are locked", async () => {
     mockAuth.mockResolvedValue({ user: { id: "u1" } } as never);
     mockDb.roomMember.findUnique.mockResolvedValue({ id: "rm1" } as never);
@@ -188,7 +162,6 @@ describe("POST /api/groups/[roomId]/standings", () => {
     mockAuth.mockResolvedValue({ user: { id: "u1" } } as never);
     mockDb.roomMember.findUnique.mockResolvedValue({ id: "rm1" } as never);
     mockDb.team.findMany.mockResolvedValue(validTeams as never);
-    mockDb.match.findFirst.mockResolvedValue(null);
     mockDb.groupStandingPrediction.upsert.mockResolvedValue({
       id: "gp1",
       wcGroup: "A",
@@ -221,7 +194,6 @@ describe("POST /api/groups/[roomId]/standings", () => {
       .mockResolvedValueOnce(validTeams as never)
       .mockResolvedValueOnce([] as never);
 
-    mockDb.match.findFirst.mockResolvedValue(null);
     mockDb.groupStandingPrediction.upsert.mockResolvedValue({} as never);
 
     const preds = [

@@ -2,7 +2,7 @@ import { db } from "@/lib/db";
 import { fetchWCMatches, mapStatus } from "@/lib/football-data";
 import { calculatePoints, type Round } from "@/lib/points";
 import { checkAndSendRoundNotifications, checkAndSendIncompleteReminders } from "@/lib/notifications";
-import { computeGroupStandings, populateR32Bracket } from "@/lib/ko-seeding";
+import { computeGroupStandings, populateR32Bracket, populateNextRoundSlot } from "@/lib/ko-seeding";
 
 export type SyncResult = {
   updated: number;
@@ -84,6 +84,22 @@ export async function syncMatches(): Promise<SyncResult> {
         })
       );
       predictionsScored += dbMatch.predictions.length;
+
+      // Propagate KO bracket: populate the next round's team slots
+      const KO_ROUND_NAMES = ["R32", "R16", "QF", "SF", "3rd", "Final"];
+      if (KO_ROUND_NAMES.includes(dbMatch.round) && dbMatch.matchNumber) {
+        const winnerId = apiHome > apiAway
+          ? (dbMatch.homeTeam?.id ?? null)
+          : (dbMatch.awayTeam?.id ?? null);
+        const loserId = apiHome > apiAway
+          ? (dbMatch.awayTeam?.id ?? null)
+          : (dbMatch.homeTeam?.id ?? null);
+        if (winnerId) {
+          await populateNextRoundSlot(dbMatch.matchNumber, winnerId, loserId).catch(
+            (err) => console.error("[sync] KO bracket progression failed:", err)
+          );
+        }
+      }
     }
   }
 

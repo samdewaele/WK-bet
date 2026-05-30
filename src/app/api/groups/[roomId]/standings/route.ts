@@ -108,18 +108,6 @@ export async function POST(
       continue;
     }
 
-    // Check if any match in this WC group has kicked off
-    const lockedMatch = await db.match.findFirst({
-      where: {
-        group: wcGroup,
-        kickoff: { lte: new Date() },
-      },
-    });
-    if (lockedMatch) {
-      errors.push(`Group ${wcGroup}: locked — match has already kicked off`);
-      continue;
-    }
-
     valid.push(pred);
   }
 
