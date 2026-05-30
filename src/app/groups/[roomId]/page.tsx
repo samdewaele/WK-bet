@@ -160,7 +160,7 @@ export default async function GroupDetailPage({ params, searchParams }: Props) {
         {tournamentStarted && (
           <div className="mb-6 flex items-center gap-2 text-sm text-amber-400 bg-amber-400/10 border border-amber-400/20 rounded-xl px-4 py-3">
             <span>🔒</span>
-            <span>Tournament in progress — membership locked. Only Side Bets can still be placed.</span>
+            <span>Tournament in progress — no new members can join. Predictions close per match as they kick off.</span>
           </div>
         )}
 

@@ -98,7 +98,7 @@ export async function POST(
   }
 
   const room = await db.room.findUnique({ where: { id: roomId }, select: { status: true } });
-  if (room && ["locked", "active", "finished"].includes(room.status)) {
+  if (room?.status === "locked" || room?.status === "finished") {
     return NextResponse.json({ error: "Predictions are locked for this group" }, { status: 403 });
   }
 
