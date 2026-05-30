@@ -25,7 +25,7 @@ export default async function GroupDetailPage({ params, searchParams }: Props) {
   if (!session?.user?.id) redirect("/auth/signin");
 
   const { roomId } = await params;
-  const { tab: rawTab = "standings" } = await searchParams;
+  const { tab: rawTab = "predictions" } = await searchParams;
   // Backward compat: "leaderboard" → "standings"
   const tab = rawTab === "leaderboard" ? "standings" : rawTab;
   const userId = session.user.id;
@@ -70,9 +70,13 @@ export default async function GroupDetailPage({ params, searchParams }: Props) {
   });
   const paidMap = new Map(membersPaid.map((m) => [m.userId, m.paid]));
 
+  const showStandings = !["setup", "betting", "closed"].includes(roomStatus);
+  // Fall back to predictions if the standings tab isn't available
+  const activeTab = tab === "standings" && !showStandings ? "predictions" : tab;
+
   const tabs = [
     { key: "predictions", label: "Predictions" },
-    { key: "standings", label: "Standings" },
+    ...(showStandings ? [{ key: "standings", label: "Standings" }] : []),
     { key: "sidebets-p2p", label: "Side Bets" },
     { key: "members", label: `Members (${room.members.length})` },
     { key: "rules", label: "How to play" },
@@ -145,7 +149,7 @@ export default async function GroupDetailPage({ params, searchParams }: Props) {
                 key={t.key}
                 href={`/groups/${roomId}?tab=${t.key}`}
                 className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                  tab === t.key
+                  activeTab === t.key
                     ? "bg-amber-400 text-gray-900"
                     : "bg-gray-800 text-gray-300 hover:bg-gray-700 hover:text-white"
                 }`}
@@ -184,7 +188,7 @@ export default async function GroupDetailPage({ params, searchParams }: Props) {
         )}
 
         {/* Tab content */}
-        {tab === "predictions" && (
+        {activeTab === "predictions" && (
           <div className="space-y-8">
             <div>
               <h2 className="text-xl font-bold text-white mb-4">Group Stage Standings</h2>
@@ -210,11 +214,11 @@ export default async function GroupDetailPage({ params, searchParams }: Props) {
           </div>
         )}
 
-        {tab === "standings" && (
-          <GroupLeaderboard roomId={roomId} currentUserId={userId} totalPot={pot.totalPot} />
+        {activeTab === "standings" && (
+          <GroupLeaderboard roomId={roomId} currentUserId={userId} totalPot={pot.totalPot} roomStatus={roomStatus} />
         )}
 
-        {tab === "sidebets-p2p" && (
+        {activeTab === "sidebets-p2p" && (
           <P2PBetsPanel
             roomId={roomId}
             currentUserId={userId}
@@ -226,7 +230,7 @@ export default async function GroupDetailPage({ params, searchParams }: Props) {
           />
         )}
 
-        {tab === "members" && (
+        {activeTab === "members" && (
           <MemberList
             roomId={roomId}
             members={room.members.map((m) => ({

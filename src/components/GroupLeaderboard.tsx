@@ -36,9 +36,10 @@ type Props = {
   roomId: string;
   currentUserId: string;
   totalPot: number;
+  roomStatus: string;
 };
 
-export default function GroupLeaderboard({ roomId, currentUserId, totalPot }: Props) {
+export default function GroupLeaderboard({ roomId, currentUserId, totalPot, roomStatus }: Props) {
   const [entries, setEntries] = useState<LeaderboardEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedUserId, setExpandedUserId] = useState<string | null>(null);
@@ -47,17 +48,20 @@ export default function GroupLeaderboard({ roomId, currentUserId, totalPot }: Pr
 
   const fetchData = useCallback(async () => {
     setLoading(true);
+    setBreakdowns({});
+    setExpandedUserId(null);
     try {
-      const res = await fetch(`/api/groups/${roomId}/leaderboard`);
+      const res = await fetch(`/api/groups/${roomId}/leaderboard`, { cache: "no-store" });
       if (res.ok) setEntries(await res.json());
     } finally {
       setLoading(false);
     }
   }, [roomId]);
 
+  // Re-fetch whenever room status changes (e.g. after simulation cleanup)
   useEffect(() => {
     fetchData();
-  }, [fetchData]);
+  }, [fetchData, roomStatus]);
 
   async function handleRowClick(userId: string) {
     if (expandedUserId === userId) {
@@ -83,12 +87,36 @@ export default function GroupLeaderboard({ roomId, currentUserId, totalPot }: Pr
   const distributed = entries.reduce((sum, e) => sum + e.totalEarned, 0);
   const uberPot = Math.max(0, totalPot - distributed);
 
+  const hasAnyEarnings = entries.some((e) => e.totalEarned > 0);
+
   if (loading) {
     return (
       <div className="space-y-3">
         {[...Array(5)].map((_, i) => (
           <div key={i} className="bg-gray-900 border border-gray-800 rounded-xl h-16 animate-pulse" />
         ))}
+      </div>
+    );
+  }
+
+  if (!hasAnyEarnings) {
+    const message =
+      roomStatus === "group_active"
+        ? "Group stage in progress — standings will update as matches are scored."
+        : roomStatus === "ko_betting"
+        ? "Group stage complete — standings will show once match results are processed."
+        : "No results yet — standings appear once matches have been played and scored.";
+    return (
+      <div className="bg-gray-900/50 border border-gray-800 rounded-xl p-10 text-center">
+        <div className="text-3xl mb-3">📊</div>
+        <p className="text-white font-semibold text-lg mb-1">No standings yet</p>
+        <p className="text-gray-500 text-sm">{message}</p>
+        <button
+          onClick={fetchData}
+          className="mt-4 text-xs text-gray-500 hover:text-gray-300 transition-colors"
+        >
+          ↻ Refresh
+        </button>
       </div>
     );
   }
