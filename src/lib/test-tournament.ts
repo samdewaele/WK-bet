@@ -319,6 +319,26 @@ async function _seedGroupStageRandomly(
   const koStandings = buildStandingsFromMatches(matchInputs);
   await populateR32Bracket(koStandings);
 
+  // Seed KO bracket predictions for test users now (Phase 1), so the gate
+  // can check that all members have submitted their full bracket before Phase 2.
+  const koMatches = await db.match.findMany({
+    where: { round: { in: [...KO_ROUNDS] } },
+    orderBy: { matchNumber: "asc" },
+    select: { id: true },
+  });
+  for (const user of users) {
+    for (const match of koMatches) {
+      let home = randomGoals();
+      let away = randomGoals();
+      if (home === away) home += 1; // KO picks must have a winner
+      await db.prediction.upsert({
+        where: { userId_matchId_roomId: { userId: user.id, matchId: match.id, roomId } },
+        create: { userId: user.id, matchId: match.id, roomId, homeScore: home, awayScore: away },
+        update: { homeScore: home, awayScore: away, points: null, earnedAmount: null },
+      });
+    }
+  }
+
   // Group standing predictions + earnedAmount
   const pot = calculatePot(entryFee, memberCount);
   const prizePerGroup = pot.groupStagePot / 12;
@@ -439,16 +459,6 @@ async function _seedKORoundsRandomly(
       where: { id: match.id },
       data: { homeScore: actualHome, awayScore: actualAway, status: "finished" },
     });
-
-    // Create random predictions for test users
-    const userPreds = users.map((u) => ({ userId: u.id, home: randomGoals(), away: randomGoals() }));
-    for (const pred of userPreds) {
-      await db.prediction.upsert({
-        where: { userId_matchId_roomId: { userId: pred.userId, matchId: match.id, roomId } },
-        create: { userId: pred.userId, matchId: match.id, roomId, homeScore: pred.home, awayScore: pred.away },
-        update: { homeScore: pred.home, awayScore: pred.away, points: null, earnedAmount: null },
-      });
-    }
 
     // Score ALL predictions for this match (test users + real members who submitted)
     const matchPrize = pot.prizePerKOMatch[match.round as KORound] ?? 0;

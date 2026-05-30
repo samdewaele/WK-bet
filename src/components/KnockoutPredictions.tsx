@@ -46,6 +46,30 @@ const ROUND_LABELS: Record<string, string> = {
   Final: "Final",
 };
 
+// Maps each non-R32 match number to the two feeder matches that provide its teams.
+// Adjacent R32 pairs → R16, adjacent R16 pairs → QF, etc.
+const BRACKET_PATH: Record<number, {
+  home: { matchNum: number; side: "winner" | "loser" };
+  away: { matchNum: number; side: "winner" | "loser" };
+}> = {
+  89:  { home: { matchNum: 73, side: "winner" }, away: { matchNum: 74, side: "winner" } },
+  90:  { home: { matchNum: 75, side: "winner" }, away: { matchNum: 76, side: "winner" } },
+  91:  { home: { matchNum: 77, side: "winner" }, away: { matchNum: 78, side: "winner" } },
+  92:  { home: { matchNum: 79, side: "winner" }, away: { matchNum: 80, side: "winner" } },
+  93:  { home: { matchNum: 81, side: "winner" }, away: { matchNum: 82, side: "winner" } },
+  94:  { home: { matchNum: 83, side: "winner" }, away: { matchNum: 84, side: "winner" } },
+  95:  { home: { matchNum: 85, side: "winner" }, away: { matchNum: 86, side: "winner" } },
+  96:  { home: { matchNum: 87, side: "winner" }, away: { matchNum: 88, side: "winner" } },
+  97:  { home: { matchNum: 89, side: "winner" }, away: { matchNum: 90, side: "winner" } },
+  98:  { home: { matchNum: 91, side: "winner" }, away: { matchNum: 92, side: "winner" } },
+  99:  { home: { matchNum: 93, side: "winner" }, away: { matchNum: 94, side: "winner" } },
+  100: { home: { matchNum: 95, side: "winner" }, away: { matchNum: 96, side: "winner" } },
+  101: { home: { matchNum: 97,  side: "winner" }, away: { matchNum: 98,  side: "winner" } },
+  102: { home: { matchNum: 99,  side: "winner" }, away: { matchNum: 100, side: "winner" } },
+  103: { home: { matchNum: 101, side: "loser"  }, away: { matchNum: 102, side: "loser"  } },
+  104: { home: { matchNum: 101, side: "winner" }, away: { matchNum: 102, side: "winner" } },
+};
+
 type ScoreState = Record<string, { home: string; away: string }>;
 type RoundSaveStatus = "idle" | "saved" | "error" | "locked";
 
@@ -66,7 +90,6 @@ export default function KnockoutPredictions({ roomId }: Props) {
         const data: Prediction[] = await res.json();
         setPredictions(data);
 
-        // Only pre-fill scores for matches the user has already predicted
         const initial: ScoreState = {};
         for (const p of data) {
           if (p.predicted) {
@@ -87,14 +110,71 @@ export default function KnockoutPredictions({ roomId }: Props) {
     fetchData();
   }, [roomId]);
 
-  // predMap only tracks actual predictions (predicted: true) for score display and earned amounts
+  // Index matches by number for cascade resolution
+  const matchByNum = new Map(predictions.map((p) => [p.match.matchNumber, p.match]));
+
+  // Effective score: what the user currently has typed, or their saved prediction
   const predMap = new Map(predictions.filter((p) => p.predicted).map((p) => [p.matchId, p]));
+  const getEffectiveScore = (matchId: string): { h: number; a: number } | null => {
+    const s = scores[matchId];
+    if (s && s.home !== "" && s.away !== "") {
+      const h = parseInt(s.home, 10);
+      const a = parseInt(s.away, 10);
+      if (!isNaN(h) && !isNaN(a)) return { h, a };
+    }
+    const saved = predMap.get(matchId);
+    if (saved) return { h: saved.homeScore, a: saved.awayScore };
+    return null;
+  };
+
+  /**
+   * Recursively resolve which team the user projects into a given match slot.
+   * For R32: uses the actual seeded teams from the DB.
+   * For R16+: cascades from the user's predictions for the feeder matches.
+   */
+  function resolveProjectedTeam(
+    matchNum: number,
+    side: "winner" | "loser"
+  ): Team | null {
+    const match = matchByNum.get(matchNum);
+    if (!match) return null;
+
+    let homeTeam: Team | null;
+    let awayTeam: Team | null;
+
+    if (match.round === "R32") {
+      // Real teams seeded from group stage results
+      homeTeam = match.homeTeam;
+      awayTeam = match.awayTeam;
+    } else {
+      const path = BRACKET_PATH[matchNum];
+      if (!path) return null;
+      homeTeam = resolveProjectedTeam(path.home.matchNum, path.home.side);
+      awayTeam = resolveProjectedTeam(path.away.matchNum, path.away.side);
+    }
+
+    const score = getEffectiveScore(match.id);
+    if (!score || score.h === score.a) return null; // tie = no winner determined
+
+    const homeWins = score.h > score.a;
+    if (side === "winner") return homeWins ? homeTeam : awayTeam;
+    return homeWins ? awayTeam : homeTeam;
+  }
+
+  function getDisplayTeams(match: Match): { home: Team | null; away: Team | null } {
+    if (match.round === "R32") return { home: match.homeTeam, away: match.awayTeam };
+    const path = BRACKET_PATH[match.matchNumber];
+    if (!path) return { home: null, away: null };
+    return {
+      home: resolveProjectedTeam(path.home.matchNum, path.home.side),
+      away: resolveProjectedTeam(path.away.matchNum, path.away.side),
+    };
+  }
 
   const roundMatches = predictions
     .filter((p) => p.match.round === activeRound)
     .map((p) => p.match);
 
-  // Show all rounds that have matches (not just ones with predictions)
   const availableRounds = KO_ROUNDS.filter((r) =>
     predictions.some((p) => p.match.round === r)
   );
@@ -218,10 +298,30 @@ export default function KnockoutPredictions({ roomId }: Props) {
     );
   }
 
+  const renderTeamSlot = (team: Team | null, side: "home" | "away") => {
+    const alignClass = side === "home" ? "justify-end text-right" : "justify-start text-left";
+    const flagFirst = side === "away";
+    if (!team) {
+      return (
+        <div className={`flex items-center gap-2 flex-1 ${alignClass}`}>
+          <span className="text-sm text-gray-600 italic">TBD</span>
+        </div>
+      );
+    }
+    return (
+      <div className={`flex items-center gap-2 flex-1 ${alignClass}`}>
+        {flagFirst && <TeamFlag flag={team.flag} name={team.name} size={28} />}
+        <span className="text-sm font-semibold text-white">{team.name}</span>
+        {!flagFirst && <TeamFlag flag={team.flag} name={team.name} size={28} />}
+      </div>
+    );
+  };
+
   const renderMatch = (match: Match) => {
     const locked = isLocked(match);
     const pred = predMap.get(match.id);
     const scoreState = scores[match.id];
+    const { home: displayHome, away: displayAway } = getDisplayTeams(match);
 
     const kickoffDate = new Date(match.kickoff);
     const timeStr = kickoffDate.toLocaleString("en-GB", {
@@ -248,16 +348,7 @@ export default function KnockoutPredictions({ roomId }: Props) {
         </div>
 
         <div className="flex-1 flex items-center gap-3 w-full justify-center">
-          <div className="flex items-center gap-2 flex-1 justify-end">
-            <span className="text-sm font-semibold text-white text-right">
-              {match.homeTeam?.name ?? "TBD"}
-            </span>
-            {match.homeTeam ? (
-              <TeamFlag flag={match.homeTeam.flag} name={match.homeTeam.name} size={28} />
-            ) : (
-              <span className="text-2xl">🏳</span>
-            )}
-          </div>
+          {renderTeamSlot(displayHome, "home")}
 
           <div className="flex items-center gap-2">
             {locked ? (
@@ -295,14 +386,7 @@ export default function KnockoutPredictions({ roomId }: Props) {
             )}
           </div>
 
-          <div className="flex items-center gap-2 flex-1 justify-start">
-            {match.awayTeam ? (
-              <TeamFlag flag={match.awayTeam.flag} name={match.awayTeam.name} size={28} />
-            ) : (
-              <span className="text-2xl">🏳</span>
-            )}
-            <span className="text-sm font-semibold text-white">{match.awayTeam?.name ?? "TBD"}</span>
-          </div>
+          {renderTeamSlot(displayAway, "away")}
         </div>
 
         <div className="w-full sm:w-28 text-center shrink-0">

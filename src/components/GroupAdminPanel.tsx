@@ -371,16 +371,15 @@ export default function GroupAdminPanel({
                       </button>
                     )}
                     {testState.phase === "seeded" && testState.simPhase === 1 && (() => {
-                      const myStats = memberStats.find(m => m.userId === currentUserId);
-                      const myKO = myStats?.koPredictions ?? 0;
-                      const totalKO = myStats?.totalKOMatches ?? 0;
-                      const adminReady = myKO > 0 && myKO >= totalKO;
+                      const totalKO = memberStats[0]?.totalKOMatches ?? 0;
+                      const membersReady = memberStats.filter(m => m.koPredictions >= totalKO && totalKO > 0).length;
+                      const allReady = totalKO > 0 && membersReady === memberStats.length;
                       return (
                         <>
                           <span className="text-xs text-emerald-400 self-center">✓ Group stage</span>
                           <button onClick={() => handleSeed(2)}
-                            disabled={!adminReady}
-                            title={!adminReady ? `Submit your KO predictions first (${myKO}/${totalKO})` : undefined}
+                            disabled={!allReady}
+                            title={!allReady ? `All members must submit their full KO bracket first` : undefined}
                             className="bg-emerald-700 hover:bg-emerald-600 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-semibold px-3 py-2 rounded-lg transition-colors">
                             ▶ Phase 2: KO Round
                           </button>
@@ -388,9 +387,9 @@ export default function GroupAdminPanel({
                             className="ml-auto bg-red-800 hover:bg-red-700 text-white text-xs font-semibold px-3 py-2 rounded-lg transition-colors">
                             🗑 Cleanup
                           </button>
-                          {!adminReady && totalKO > 0 && (
+                          {!allReady && totalKO > 0 && (
                             <p className="w-full text-xs text-amber-400 mt-1">
-                              Submit your KO predictions before running Phase 2 ({myKO}/{totalKO} done).
+                              All members must submit their full KO bracket before Phase 2 ({membersReady}/{memberStats.length} ready).
                             </p>
                           )}
                         </>
