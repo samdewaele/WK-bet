@@ -68,8 +68,9 @@ model Room {
   inviteCode       String                   @unique @default(cuid())
   creatorId        String?
   entryFee         Float                    @default(0)
-  // setup | open | locked | active | finished
+  // setup | betting | closed | group_active | ko_betting | ko_active | finished
   status           String                   @default("setup")
+  simulationMode   Boolean                  @default(false)
   members          RoomMember[]
   groupPredictions GroupStandingPrediction[]
   predictions      Prediction[]

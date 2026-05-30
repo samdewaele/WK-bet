@@ -51,12 +51,27 @@ export default async function GroupsPage() {
 
   const hasGroups = groups.length > 0;
 
+  const statusLabel = (status: string) => {
+    const labels: Record<string, string> = {
+      setup: "Setup",
+      betting: "Open",
+      closed: "Closed",
+      group_active: "Group stage",
+      ko_betting: "KO betting",
+      ko_active: "KO stage",
+      finished: "Finished",
+    };
+    return labels[status] ?? status;
+  };
+
   const statusBadge = (status: string) => {
     const map: Record<string, string> = {
       setup: "bg-gray-700 text-gray-300",
-      open: "bg-blue-500/20 text-blue-400",
-      locked: "bg-orange-500/20 text-orange-400",
-      active: "bg-green-500/20 text-green-400",
+      betting: "bg-blue-500/20 text-blue-400",
+      closed: "bg-orange-500/20 text-orange-400",
+      group_active: "bg-green-500/20 text-green-400",
+      ko_betting: "bg-amber-500/20 text-amber-400",
+      ko_active: "bg-emerald-500/20 text-emerald-400",
       finished: "bg-purple-500/20 text-purple-400",
     };
     return map[status] ?? "bg-gray-700 text-gray-300";
@@ -92,7 +107,7 @@ export default async function GroupsPage() {
                       <div className="flex items-center gap-3 mb-1">
                         <h3 className="text-lg font-semibold text-white">{g.name}</h3>
                         <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${statusBadge(g.status)}`}>
-                          {g.status}
+                          {statusLabel(g.status)}
                         </span>
                       </div>
                       <div className="flex flex-wrap gap-4 text-sm text-gray-400 mt-1">

@@ -60,6 +60,8 @@ export default async function GroupDetailPage({ params, searchParams }: Props) {
   const isPlatformAdmin = session.user.role === "admin";
   const isManager = room.creatorId === userId || isPlatformAdmin;
   const tournamentStarted = await isTournamentStarted();
+  const roomStatus = room.status;
+  const simulationMode = room.simulationMode;
 
   // Fetch paid status for all members
   const membersPaid = await db.roomMember.findMany({
@@ -93,6 +95,7 @@ export default async function GroupDetailPage({ params, searchParams }: Props) {
                 initialName={room.name}
                 initialFee={room.entryFee}
                 initialStatus={room.status}
+                initialSimulationMode={room.simulationMode}
                 initialCreatorId={room.creatorId}
                 isPlatformAdmin={isPlatformAdmin}
                 currentUserId={userId}
@@ -104,13 +107,10 @@ export default async function GroupDetailPage({ params, searchParams }: Props) {
             <span>{room.members.length} members</span>
             <span>Entry: €{room.entryFee.toFixed(2)}</span>
             <span className="text-amber-400 font-semibold">Total pot: €{pot.totalPot.toFixed(2)}</span>
-            {!tournamentStarted && <InviteButton inviteCode={room.inviteCode} />}
+            {(roomStatus === "betting" || roomStatus === "setup") && !tournamentStarted && (
+              <InviteButton inviteCode={room.inviteCode} />
+            )}
           </div>
-          {!tournamentStarted && (
-            <div className="mt-3">
-              <CountdownTimer />
-            </div>
-          )}
         </div>
 
         {/* Pot breakdown */}
@@ -156,11 +156,30 @@ export default async function GroupDetailPage({ params, searchParams }: Props) {
           )}
         </div>
 
-        {/* Tournament lock banner */}
-        {tournamentStarted && (
-          <div className="mb-6 flex items-center gap-2 text-sm text-amber-400 bg-amber-400/10 border border-amber-400/20 rounded-xl px-4 py-3">
+        {/* Stage-aware banners */}
+        {simulationMode && (
+          <div className="mb-4 flex items-center gap-2 text-sm text-violet-300 bg-violet-500/10 border border-violet-500/20 rounded-xl px-4 py-3">
+            <span>🧪</span>
+            <span>Simulation mode — this is a test run, not the real tournament.</span>
+          </div>
+        )}
+        {(roomStatus === "group_active" || roomStatus === "ko_betting" || roomStatus === "ko_active") && (
+          <div className="mb-4 flex items-center gap-2 text-sm text-amber-400 bg-amber-400/10 border border-amber-400/20 rounded-xl px-4 py-3">
             <span>🔒</span>
-            <span>Tournament in progress — no new members can join. Predictions close per match as they kick off.</span>
+            {roomStatus === "group_active" && <span>Group stage in progress — no new members can join. Group standings predictions are locked.</span>}
+            {roomStatus === "ko_betting" && <span>Group stage complete — fill in your knockout bracket predictions before the first KO match kicks off!</span>}
+            {roomStatus === "ko_active" && <span>Knockout stage in progress — KO predictions are locked.</span>}
+          </div>
+        )}
+        {roomStatus === "finished" && (
+          <div className="mb-4 flex items-center gap-2 text-sm text-emerald-400 bg-emerald-400/10 border border-emerald-400/20 rounded-xl px-4 py-3">
+            <span>🏆</span>
+            <span>Tournament finished — check the standings to see the final results.</span>
+          </div>
+        )}
+        {(roomStatus === "setup" || roomStatus === "betting" || roomStatus === "closed") && !tournamentStarted && (
+          <div className="mb-4">
+            <CountdownTimer />
           </div>
         )}
 
@@ -173,7 +192,7 @@ export default async function GroupDetailPage({ params, searchParams }: Props) {
             </div>
             <div>
               <h2 className="text-xl font-bold text-white mb-4">Knockout Predictions</h2>
-              <KnockoutPredictions roomId={roomId} />
+              <KnockoutPredictions roomId={roomId} roomStatus={roomStatus} simulationMode={simulationMode} />
             </div>
             <div>
               <h2 className="text-xl font-bold text-white mb-2">Uber Pot Bets</h2>

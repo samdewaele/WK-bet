@@ -176,7 +176,7 @@ describe("POST /api/groups/[roomId]/standings", () => {
   it("returns 403 when room predictions are locked", async () => {
     mockAuth.mockResolvedValue({ user: { id: "u1" } } as never);
     mockDb.roomMember.findUnique.mockResolvedValue({ id: "rm1" } as never);
-    mockDb.room.findUnique.mockResolvedValue({ status: "locked" });
+    mockDb.room.findUnique.mockResolvedValue({ status: "closed" });
 
     const pred = { wcGroup: "A", position1: "t1", position2: "t2", position3: "t3", position4: "t4" };
     const res = await POST(makeRequest({ predictions: [pred] }), { params: PARAMS });

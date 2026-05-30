@@ -99,18 +99,15 @@ export async function getTestPhase(roomId: string): Promise<0 | 1 | 2> {
   const seeded = await getTestInRoomStatus(roomId);
   if (!seeded) return 0;
 
-  const testEmails = TEST_USERS.map((u) => u.email);
-  const testUsers = await db.user.findMany({ where: { email: { in: testEmails } }, select: { id: true } });
-  if (testUsers.length === 0) return 0;
+  const room = await db.room.findUnique({ where: { id: roomId }, select: { status: true, simulationMode: true } });
+  if (!room?.simulationMode) return 0;
 
-  const koPredCount = await db.prediction.count({
-    where: {
-      roomId,
-      userId: { in: testUsers.map((u) => u.id) },
-      match: { round: { not: "Group" } },
-    },
-  });
-  return koPredCount > 0 ? 2 : 1;
+  // ko_betting = Phase 1 done, waiting for real members to submit KO picks
+  if (room.status === "ko_betting") return 1;
+  // ko_active or finished = Phase 2 done
+  if (room.status === "ko_active" || room.status === "finished") return 2;
+
+  return 1; // fallback: test users present but status unclear
 }
 
 // ---------------------------------------------------------------------------
@@ -129,7 +126,8 @@ export async function runTestTournament(adminUserId?: string): Promise<TestTourn
       name: `${TEST_PREFIX}Full Tournament Demo`,
       inviteCode: TEST_ROOM_INVITE,
       entryFee: ENTRY_FEE,
-      status: "active",
+      status: "ko_active",
+      simulationMode: true,
       creatorId: adminUserId ?? null,
     },
   });
@@ -188,6 +186,12 @@ export async function seedGroupStageInRoom(roomId: string): Promise<TestTourname
 
   await _seedGroupStageRandomly(roomId, users, room.entryFee, memberCount);
 
+  // Mark as simulation in ko_betting phase so KO predictions are unlocked
+  await db.room.update({
+    where: { id: roomId },
+    data: { status: "ko_betting", simulationMode: true },
+  });
+
   // Trigger "group stage done → submit KO predictions" emails to all group members
   await checkAndSendRoundNotifications().catch((err) =>
     console.error("[simulation] notification error:", err)
@@ -211,7 +215,12 @@ export async function seedKOStageInRoom(roomId: string): Promise<TestTournamentR
   const memberCount = await db.roomMember.count({ where: { roomId } });
 
   await _seedKORoundsRandomly(roomId, users, room.entryFee, memberCount);
-  // Uber pot bets are NOT seeded here — admin settles real bets after Phase 2
+
+  // Advance to ko_active (predictions window closed, KO in progress)
+  await db.room.update({
+    where: { id: roomId },
+    data: { status: "ko_active" },
+  });
 
   return buildReport(roomId);
 }
@@ -627,6 +636,12 @@ export async function cleanupTestInRoom(roomId: string): Promise<void> {
   // Reset scores on real member predictions that were scored against test match results
   await db.prediction.updateMany({ where: { roomId }, data: { points: null, earnedAmount: null } });
   await db.groupStandingPrediction.updateMany({ where: { roomId }, data: { earnedAmount: null } });
+
+  // Reset room back to betting mode (not simulation)
+  await db.room.update({
+    where: { id: roomId },
+    data: { status: "betting", simulationMode: false },
+  });
 
   for (const id of ids) {
     const remaining = await db.roomMember.count({ where: { userId: id } });

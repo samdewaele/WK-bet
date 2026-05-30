@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import type { TestTournamentReport } from "@/lib/test-tournament";
 
-type Settings = { name: string; entryFee: string; status: string };
+type Settings = { name: string; entryFee: string; status: string; simulationMode: boolean };
 type TestState =
   | { phase: "checking" }
   | { phase: "idle" }
@@ -34,13 +34,22 @@ type MemberStat = {
   totalGroupStandingGroups: number;
 };
 
-const STATUS_OPTIONS = ["setup", "open", "locked", "active", "finished"];
+const STATUS_LABELS: Record<string, string> = {
+  setup: "Setup",
+  betting: "Open for bets",
+  closed: "Closed",
+  group_active: "Group stage",
+  ko_betting: "KO betting",
+  ko_active: "KO stage",
+  finished: "Finished",
+};
 
 export default function GroupAdminPanel({
   roomId,
   initialName,
   initialFee,
   initialStatus,
+  initialSimulationMode,
   initialCreatorId,
   isPlatformAdmin,
   currentUserId,
@@ -50,6 +59,7 @@ export default function GroupAdminPanel({
   initialName: string;
   initialFee: number;
   initialStatus: string;
+  initialSimulationMode: boolean;
   initialCreatorId: string | null;
   isPlatformAdmin: boolean;
   currentUserId: string;
@@ -60,7 +70,7 @@ export default function GroupAdminPanel({
 
   // Settings
   const [settings, setSettings] = useState<Settings>({
-    name: initialName, entryFee: initialFee.toFixed(2), status: initialStatus,
+    name: initialName, entryFee: initialFee.toFixed(2), status: initialStatus, simulationMode: initialSimulationMode,
   });
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState("");
@@ -132,7 +142,6 @@ export default function GroupAdminPanel({
       const res = await patch({
         name: settings.name,
         entryFee: parseFloat(settings.entryFee) || 0,
-        status: settings.status,
       });
       setSaveMsg(res.ok ? "Saved" : ((await res.json()).error ?? "Failed"));
       if (res.ok) router.refresh();
@@ -140,13 +149,14 @@ export default function GroupAdminPanel({
     finally { setSaving(false); setTimeout(() => setSaveMsg(""), 3000); }
   }
 
-  async function handleToggleLock() {
-    const newStatus = settings.status === "locked" ? "open" : "locked";
+  async function handleStatusTransition(newStatus: string) {
     setSaving(true);
     try {
       const res = await patch({ status: newStatus });
       if (res.ok) { setSettings((s) => ({ ...s, status: newStatus })); router.refresh(); }
-    } finally { setSaving(false); }
+      else setSaveMsg((await res.json()).error ?? "Failed");
+    } catch { setSaveMsg("Network error"); }
+    finally { setSaving(false); setTimeout(() => setSaveMsg(""), 3000); }
   }
 
   async function handleTransfer() {
@@ -234,7 +244,7 @@ export default function GroupAdminPanel({
   }
 
   const otherMembers = members.filter((m) => m.userId !== initialCreatorId);
-  const predictionsLocked = ["locked", "active", "finished"].includes(settings.status);
+  const currentStatus = settings.status;
 
   return (
     <div>
@@ -271,40 +281,76 @@ export default function GroupAdminPanel({
                     className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-violet-500"
                   />
                 </div>
+
+                {/* Status — current stage + contextual action buttons */}
                 <div>
-                  <label className="block text-xs text-gray-400 mb-1">Status</label>
-                  <div className="flex flex-wrap gap-2">
-                    {STATUS_OPTIONS.map((s) => (
-                      <button
-                        key={s}
-                        onClick={() => setSettings((p) => ({ ...p, status: s }))}
-                        className={`px-3 py-1 rounded-full text-xs font-semibold border transition-colors capitalize ${
-                          settings.status === s
-                            ? "border-violet-500 bg-violet-500/20 text-violet-300"
-                            : "border-gray-700 bg-gray-800 text-gray-400 hover:border-gray-500"
-                        }`}
-                      >
-                        {s}
+                  <label className="block text-xs text-gray-400 mb-1">Stage</label>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className={`text-xs font-semibold px-2.5 py-1 rounded-full border ${
+                      currentStatus === "setup" ? "border-gray-600 bg-gray-700 text-gray-300" :
+                      currentStatus === "betting" ? "border-blue-500/50 bg-blue-500/10 text-blue-300" :
+                      currentStatus === "closed" ? "border-orange-500/50 bg-orange-500/10 text-orange-300" :
+                      currentStatus === "group_active" ? "border-green-500/50 bg-green-500/10 text-green-300" :
+                      currentStatus === "ko_betting" ? "border-amber-500/50 bg-amber-500/10 text-amber-300" :
+                      currentStatus === "ko_active" ? "border-emerald-500/50 bg-emerald-500/10 text-emerald-300" :
+                      "border-purple-500/50 bg-purple-500/10 text-purple-300"
+                    }`}>
+                      {STATUS_LABELS[currentStatus] ?? currentStatus}
+                    </span>
+                    {settings.simulationMode && (
+                      <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-violet-500/20 border border-violet-500/40 text-violet-300">
+                        🧪 SIM
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Contextual transition buttons */}
+                  <div className="flex flex-wrap gap-2 mt-2">
+                    {currentStatus === "setup" && (
+                      <button onClick={() => handleStatusTransition("betting")} disabled={saving}
+                        className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white transition-colors">
+                        Open for bets →
                       </button>
-                    ))}
+                    )}
+                    {currentStatus === "betting" && (
+                      <>
+                        <button onClick={() => handleStatusTransition("setup")} disabled={saving}
+                          className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-gray-700 hover:bg-gray-600 disabled:opacity-40 text-gray-300 transition-colors">
+                          ← Back to setup
+                        </button>
+                        <button onClick={() => handleStatusTransition("closed")} disabled={saving}
+                          className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-orange-700 hover:bg-orange-600 disabled:opacity-40 text-white transition-colors">
+                          Close (no new members) →
+                        </button>
+                      </>
+                    )}
+                    {currentStatus === "closed" && (
+                      <button onClick={() => handleStatusTransition("betting")} disabled={saving}
+                        className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-blue-700 hover:bg-blue-600 disabled:opacity-40 text-white transition-colors">
+                        ← Reopen for bets
+                      </button>
+                    )}
+                    {(currentStatus === "group_active" || currentStatus === "ko_betting") && (
+                      <p className="text-xs text-gray-500 italic">Transitions automatically based on match schedule.</p>
+                    )}
+                    {currentStatus === "ko_active" && (
+                      <button onClick={() => handleStatusTransition("finished")} disabled={saving}
+                        className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-purple-700 hover:bg-purple-600 disabled:opacity-40 text-white transition-colors">
+                        Mark as finished →
+                      </button>
+                    )}
+                    {currentStatus === "finished" && (
+                      <p className="text-xs text-emerald-400">Tournament complete.</p>
+                    )}
                   </div>
                 </div>
+
                 <div className="flex items-center gap-2 pt-1">
                   <button
                     onClick={handleSave} disabled={saving}
                     className="bg-violet-600 hover:bg-violet-500 disabled:opacity-50 text-white font-semibold px-4 py-2 rounded-lg text-sm transition-colors"
                   >
                     {saving ? "Saving…" : "Save"}
-                  </button>
-                  <button
-                    onClick={handleToggleLock} disabled={saving}
-                    className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold border transition-colors ${
-                      predictionsLocked
-                        ? "border-yellow-500/50 bg-yellow-500/10 text-yellow-400 hover:bg-yellow-500/20"
-                        : "border-gray-700 bg-gray-800 text-gray-300 hover:border-gray-500"
-                    }`}
-                  >
-                    {predictionsLocked ? "🔒 Predictions locked" : "🔓 Lock predictions"}
                   </button>
                   {saveMsg && (
                     <span className={saveMsg === "Saved" ? "text-green-400 text-sm" : "text-red-400 text-sm"}>

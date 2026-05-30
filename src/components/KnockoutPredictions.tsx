@@ -34,6 +34,8 @@ type Prediction = {
 
 type Props = {
   roomId: string;
+  roomStatus?: string;
+  simulationMode?: boolean;
 };
 
 const KO_ROUNDS = ["R32", "R16", "QF", "SF", "3rd", "Final"] as const;
@@ -73,7 +75,7 @@ const BRACKET_PATH: Record<number, {
 type ScoreState = Record<string, { home: string; away: string }>;
 type RoundSaveStatus = "idle" | "saved" | "error" | "locked";
 
-export default function KnockoutPredictions({ roomId }: Props) {
+export default function KnockoutPredictions({ roomId, roomStatus, simulationMode }: Props) {
   const [predictions, setPredictions] = useState<Prediction[]>([]);
   const [scores, setScores] = useState<ScoreState>({});
   const [activeRound, setActiveRound] = useState<string>("R32");
@@ -179,7 +181,11 @@ export default function KnockoutPredictions({ roomId }: Props) {
     predictions.some((p) => p.match.round === r)
   );
 
+  // All KO predictions lock atomically when the KO stage begins (not per-match kickoff)
+  const allKOLocked = roomStatus !== "ko_betting";
+
   const isLocked = (match: Match) => {
+    if (allKOLocked) return true;
     if (match.status === "finished" || match.status === "live") return true;
     return new Date(match.kickoff) <= new Date();
   };
@@ -420,6 +426,17 @@ export default function KnockoutPredictions({ roomId }: Props) {
 
   return (
     <div>
+      {allKOLocked && roomStatus && roomStatus !== "ko_betting" && availableRounds.length > 0 && (
+        <div className="mb-4 flex items-center gap-2 text-sm text-amber-400 bg-amber-400/10 border border-amber-400/20 rounded-xl px-4 py-3">
+          <span>🔒</span>
+          {roomStatus === "ko_active" || roomStatus === "finished"
+            ? <span>KO predictions are locked — bracket is now playing out.</span>
+            : simulationMode
+            ? <span>Run Phase 1 simulation first to open the KO prediction window.</span>
+            : <span>KO predictions open during the &quot;KO Betting&quot; window between group stage and first KO match.</span>
+          }
+        </div>
+      )}
       <div className="flex flex-wrap gap-2 mb-6">
         {availableRounds.map((r) => (
           <button

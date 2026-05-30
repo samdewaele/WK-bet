@@ -53,7 +53,7 @@ async function buildRoomLeaderboard(roomId: string): Promise<LeaderboardRow[]> {
 
 async function sendRoundEmails(round: Round): Promise<number> {
   const rooms = await db.room.findMany({
-    where: { status: { in: ["open", "locked", "active"] } },
+    where: { status: { in: ["betting", "closed", "group_active", "ko_betting", "ko_active"] } },
     include: {
       members: { include: { user: { select: { id: true, name: true, email: true } } } },
     },
@@ -125,7 +125,7 @@ export async function checkAndSendIncompleteReminders(): Promise<{ round: string
   const in24h = new Date(now.getTime() + 24 * 60 * 60 * 1000);
 
   const rooms = await db.room.findMany({
-    where: { status: { in: ["open", "locked", "active"] } },
+    where: { status: { in: ["betting", "closed", "group_active", "ko_betting", "ko_active"] } },
     include: {
       members: {
         where: { excludedFromPot: false },

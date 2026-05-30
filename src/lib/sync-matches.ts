@@ -87,18 +87,50 @@ export async function syncMatches(): Promise<SyncResult> {
     }
   }
 
-  // Auto-populate R32 bracket when all 72 group matches are finished
-  // and the R32 slots haven't been filled yet.
+  // Auto-populate R32 bracket and drive room status transitions
   if (updated > 0) {
-    const [finishedGroupCount, r32WithTeams] = await Promise.all([
+    const [finishedGroupCount, r32WithTeams, firstGroupKickoff, firstKOKickoff, finishedKOCount, totalKOCount] = await Promise.all([
       db.match.count({ where: { round: "Group", status: "finished" } }),
       db.match.count({ where: { round: "R32", homeTeamId: { not: null } } }),
+      db.match.findFirst({ where: { round: "Group" }, orderBy: { kickoff: "asc" }, select: { kickoff: true } }),
+      db.match.findFirst({ where: { round: { in: ["R32", "R16", "QF", "SF", "3rd", "Final"] }, kickoff: { lte: new Date() } }, orderBy: { kickoff: "asc" }, select: { kickoff: true } }),
+      db.match.count({ where: { round: { in: ["R32", "R16", "QF", "SF", "3rd", "Final"] }, status: "finished" } }),
+      db.match.count({ where: { round: { in: ["R32", "R16", "QF", "SF", "3rd", "Final"] } } }),
     ]);
+
+    // Populate R32 bracket once all group matches are done
     if (finishedGroupCount === 72 && r32WithTeams === 0) {
       const standings = await computeGroupStandings();
       await populateR32Bracket(standings).catch((err) =>
         console.error("[sync] R32 seeding failed:", err)
       );
+    }
+
+    // Auto-transition non-simulation rooms through status lifecycle
+    const now = new Date();
+    const groupStarted = firstGroupKickoff && now >= firstGroupKickoff.kickoff;
+    const allGroupDone = finishedGroupCount === 72;
+    const koStarted = !!firstKOKickoff;
+
+    const rooms = await db.room.findMany({
+      where: { simulationMode: false },
+      select: { id: true, status: true },
+    });
+
+    for (const room of rooms) {
+      let newStatus: string | null = null;
+
+      if ((room.status === "betting" || room.status === "closed") && groupStarted) {
+        newStatus = "group_active";
+      } else if (room.status === "group_active" && allGroupDone) {
+        newStatus = "ko_betting";
+      } else if (room.status === "ko_betting" && koStarted) {
+        newStatus = "ko_active";
+      }
+
+      if (newStatus) {
+        await db.room.update({ where: { id: room.id }, data: { status: newStatus } });
+      }
     }
   }
 

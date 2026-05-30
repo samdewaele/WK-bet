@@ -84,11 +84,11 @@ describe("PATCH /api/admin/groups/[roomId]", () => {
   it("updates status", async () => {
     mockAuth.mockResolvedValue({ user: { id: "u1", role: "user" } } as never);
     mockDb.room.findUnique.mockResolvedValue({ creatorId: "u1" });
-    mockDb.room.update.mockResolvedValue({ id: "r1", name: "G", entryFee: 0, status: "locked" });
-    const res = await PATCH(patchRequest({ status: "locked" }), { params: PARAMS });
+    mockDb.room.update.mockResolvedValue({ id: "r1", name: "G", entryFee: 0, status: "closed", simulationMode: false });
+    const res = await PATCH(patchRequest({ status: "closed" }), { params: PARAMS });
     expect(res.status).toBe(200);
     expect(mockDb.room.update).toHaveBeenCalledWith(
-      expect.objectContaining({ data: { status: "locked" } }),
+      expect.objectContaining({ data: { status: "closed" } }),
     );
   });
 

@@ -98,8 +98,8 @@ export async function POST(
   }
 
   const room = await db.room.findUnique({ where: { id: roomId }, select: { status: true } });
-  if (room?.status === "locked" || room?.status === "finished") {
-    return NextResponse.json({ error: "Predictions are locked for this group" }, { status: 403 });
+  if (room?.status !== "ko_betting") {
+    return NextResponse.json({ error: "KO predictions are not open for this group" }, { status: 403 });
   }
 
   let body: { predictions: KOPredictionInput[] };
