@@ -2,8 +2,11 @@ name: Tests
 on:
   push:
   pull_request:
+
 jobs:
-  test:
+  # ── Unit + type tests ──────────────────────────────────────────────────────
+  unit:
+    name: Unit tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -11,9 +14,55 @@ jobs:
           ref: ${{ github.head_ref || github.ref_name }}
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
-          cache: 'npm'
+          node-version: "20"
+          cache: npm
       - run: npm ci
       - run: npx prisma generate
       - run: npx tsc --noEmit
       - run: npm test
+
+  # ── E2E tests ─────────────────────────────────────────────────────────────
+  e2e:
+    name: E2E tests
+    runs-on: ubuntu-latest
+    needs: unit
+    env:
+      DATABASE_URL: file:./e2e.db
+      E2E_DATABASE_URL: file:./e2e.db
+      E2E_TEST: "true"
+      AUTH_SECRET: ${{ secrets.AUTH_SECRET || 'e2e-test-secret-min-32-chars-xxxxx' }}
+      NEXT_PUBLIC_BASE_URL: http://localhost:3000
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref || github.ref_name }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - run: npm ci
+      - run: npx prisma generate
+
+      - name: Set up E2E database
+        run: |
+          npx prisma migrate deploy
+          npx tsx prisma/seed.ts
+
+      - name: Build Next.js
+        run: npm run build
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Run E2E tests
+        run: npx playwright test
+
+      - name: Upload Playwright report
+        uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7
