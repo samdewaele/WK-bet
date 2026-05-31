@@ -58,6 +58,107 @@ test.describe("Simulation flow", () => {
     ).toBeVisible({ timeout: 10_000 });
   });
 
+  // ── KO predictions (Phase 1 → ko_betting) ────────────────────────────────
+
+  test("Phase 1 → KO: filling in a tied score shows the penalty-winner selector", async ({
+    page,
+  }) => {
+    await runPhase1(page, roomId);
+
+    await page.goto(`/groups/${roomId}?tab=predictions`);
+    await page.getByRole("button", { name: /round of 32/i }).click();
+
+    // Fill in a drawn score for the first match
+    const inputs = page.locator('input[type="number"]');
+    await inputs.nth(0).fill("1");
+    await inputs.nth(1).fill("1");
+
+    // Penalty winner selector must appear
+    await expect(page.getByText(/penalty winner/i)).toBeVisible({ timeout: 3_000 });
+    // Two team buttons available
+    const penaltyBtns = page.locator('[class*="penalty"], button:near(:text("Penalty winner"))');
+    // Just verify both penalty buttons are rendered by checking "Penalty winner" text exists
+    // and that clicking one removes the highlight state (not already selected)
+    const firstPenBtn = page.locator('div:has(> span:text-matches("Penalty winner", "i")) button').first();
+    await firstPenBtn.click();
+    await expect(firstPenBtn).toHaveClass(/bg-amber-400/, { timeout: 2_000 });
+  });
+
+  test("Phase 1 → KO: non-tied score auto-saves (shows ✓ indicator)", async ({
+    page,
+  }) => {
+    await runPhase1(page, roomId);
+
+    await page.goto(`/groups/${roomId}?tab=predictions`);
+    await page.getByRole("button", { name: /round of 32/i }).click();
+
+    // Fill in a decisive score for the first match
+    const inputs = page.locator('input[type="number"]');
+    await inputs.nth(0).fill("2");
+    await inputs.nth(1).fill("0");
+
+    // Auto-save fires after 700ms; allow up to 4s for network round-trip
+    await expect(page.getByText("✓").first()).toBeVisible({ timeout: 4_000 });
+  });
+
+  test("Phase 1 → KO: Save all button saves all filled predictions at once", async ({
+    page,
+  }) => {
+    await runPhase1(page, roomId);
+
+    await page.goto(`/groups/${roomId}?tab=predictions`);
+    await page.getByRole("button", { name: /round of 32/i }).click();
+
+    // Fill scores for two matches
+    const inputs = page.locator('input[type="number"]');
+    await inputs.nth(0).fill("3");
+    await inputs.nth(1).fill("1");
+    await inputs.nth(2).fill("2");
+    await inputs.nth(3).fill("0");
+
+    // "Save all" button should reflect filled count
+    await expect(page.getByText(/2\//)).toBeVisible({ timeout: 2_000 });
+
+    // Clicking Save all shows Saved! confirmation
+    await page.getByRole("button", { name: /save all/i }).click();
+    await expect(page.getByRole("button", { name: /saved!/i })).toBeVisible({ timeout: 5_000 });
+  });
+
+  test("Phase 1 → KO: admin panel shows correct prediction count after saving", async ({
+    page,
+  }) => {
+    await runPhase1(page, roomId);
+
+    // Fetch all KO match IDs and POST predictions for all of them via API
+    const koRes = await page.request.get(`/api/groups/${roomId}/knockout`);
+    const koPreds: { matchId: string; match: { homeScore: null } }[] = await koRes.json();
+
+    const predictions = koPreds.map((p) => ({
+      matchId: p.matchId,
+      homeScore: 2,
+      awayScore: 1,
+    }));
+    const saveRes = await page.request.post(`/api/groups/${roomId}/knockout`, {
+      data: { predictions },
+    });
+    expect(saveRes.ok()).toBe(true);
+
+    const total = koPreds.length;
+
+    // Admin opens admin panel and refreshes member stats
+    await page.goto(`/groups/${roomId}`);
+    await page.getByRole("button", { name: /admin/i }).click();
+
+    // Refresh stats (the button already exists in the panel)
+    const refreshBtn = page.getByRole("button", { name: /↻ Refresh/i });
+    if (await refreshBtn.isVisible()) await refreshBtn.click();
+
+    // Admin's own KO prediction count should now show total/total
+    await expect(
+      page.getByText(new RegExp(`${total}\\/${total}`))
+    ).toBeVisible({ timeout: 8_000 });
+  });
+
   // ── Phase 2 ──────────────────────────────────────────────────────────────
 
   test("Phase 2: leaderboard shows earnings after KO stage simulation", async ({

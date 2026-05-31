@@ -126,6 +126,44 @@ test.describe("Uber Pot bets", () => {
     await expect(page.getByText(/locked by admin/i)).toBeVisible();
   });
 
+  test("admin can cancel an open Uber Pot bet", async ({ page }) => {
+    await signInAs(page, E2E_ADMIN_EMAIL, "Admin", "admin");
+    const roomId = await createGroup(page, `UP-Cancel-Admin-${Date.now()}`);
+    await createSideBet(page, roomId, "Who scores first?");
+
+    await page.goto(`/groups/${roomId}?tab=predictions`);
+    await expect(page.getByText("Who scores first?")).toBeVisible({ timeout: 5_000 });
+
+    // ✕ cancel button is visible for admin
+    await page.getByTitle("Cancel this bet").click();
+
+    // Bet removed from the list
+    await expect(page.getByText("Who scores first?")).not.toBeVisible({ timeout: 5_000 });
+  });
+
+  test("proposer can cancel their own pending bet", async ({ page, browser }) => {
+    await signInAs(page, E2E_ADMIN_EMAIL, "Admin", "admin");
+    const roomId = await createGroup(page, `UP-Cancel-Proposer-${Date.now()}`);
+    const inviteCode = await getInviteCode(page, roomId);
+
+    const ctx2 = await browser.newContext();
+    const page2 = await ctx2.newPage();
+    await signInAs(page2, MEMBER_EMAIL, "Member");
+    await joinGroupByCode(page2, inviteCode);
+
+    // Member proposes a bet
+    await page2.goto(`/groups/${roomId}?tab=predictions`);
+    await page2.getByPlaceholder(/question \/ title/i).fill("My cancellable bet");
+    await page2.getByRole("button", { name: /^propose$/i }).click();
+    await expect(page2.getByText("My cancellable bet")).toBeVisible({ timeout: 5_000 });
+
+    // Member can cancel their own pending bet
+    await page2.getByTitle("Cancel this bet").click();
+    await expect(page2.getByText("My cancellable bet")).not.toBeVisible({ timeout: 5_000 });
+
+    await ctx2.close();
+  });
+
   test("after lock, API also rejects new proposals with 403", async ({ page }) => {
     await signInAs(page, E2E_ADMIN_EMAIL, "Admin", "admin");
     const roomId = await createGroup(page, `UP-Lock-API-${Date.now()}`);

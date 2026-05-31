@@ -34,8 +34,10 @@ export async function GET(_req: Request, { params }: Params) {
       const groupPredictions = await db.prediction.count({
         where: { userId: m.userId, roomId: null, match: { round: "Group" } },
       });
+      // Group predictions: stored with roomId=null. KO predictions: stored with roomId=<id>.
+      // Filtering by roomId alone is sufficient — no need for a match-relation join.
       const koPredictions = await db.prediction.count({
-        where: { userId: m.userId, roomId, match: { round: { not: "Group" } } },
+        where: { userId: m.userId, roomId },
       });
       const groupStandingGroups = await db.groupStandingPrediction.count({
         where: { userId: m.userId, roomId },
