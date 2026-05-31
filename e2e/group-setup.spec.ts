@@ -69,7 +69,7 @@ test.describe("Join group", () => {
 
     // Owner refreshes members tab — should see 2 members
     await page.goto(`/groups/${roomId}?tab=members`);
-    await expect(page.getByText("Members")).toBeVisible();
+    await expect(page.getByRole("heading", { name: /members/i })).toBeVisible();
     await expect(page.getByText("Joiner").first()).toBeVisible({ timeout: 10_000 });
   });
 });
@@ -136,7 +136,7 @@ test.describe("Member list (step 7)", () => {
     await page.goto(`/groups/${roomId}?tab=members`);
 
     // Invite button (copies link to clipboard)
-    await expect(page.getByRole("button", { name: /invite/i })).toBeVisible();
+    await expect(page.getByRole("button", { name: /invite/i }).first()).toBeVisible();
   });
 
   test("creator appears with Creator badge", async ({ page }) => {

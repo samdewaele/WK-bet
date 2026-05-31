@@ -73,13 +73,13 @@ test.describe("P2P Side Bets", () => {
     // Joiner accepts
     await page2.goto(`/groups/${roomId}?tab=sidebets-p2p`);
     await expect(page2.getByText("Top scorer is Mbappé")).toBeVisible({ timeout: 8_000 });
-    await page2.getByRole("button", { name: /accept/i }).click();
-    await expect(page2.getByText(/accepted/i)).toBeVisible({ timeout: 5_000 });
+    await page2.getByRole("button", { name: /accept/i }).first().click();
+    await expect(page2.getByText(/accepted/i).first()).toBeVisible({ timeout: 5_000 });
 
     // Owner settles (they won)
     await page.reload();
     await page.getByRole("button", { name: /i won/i }).click();
-    await expect(page.getByText(/settled/i)).toBeVisible({ timeout: 5_000 });
+    await expect(page.getByText(/settled/i).first()).toBeVisible({ timeout: 5_000 });
 
     await ctx2.close();
   });

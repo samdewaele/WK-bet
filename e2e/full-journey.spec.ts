@@ -208,7 +208,7 @@ test.describe("Full betting journey", () => {
 
     // UI: standings tab shows leaderboard with earned amounts
     await page.goto(`/groups/${roomId}?tab=standings`);
-    await expect(page.getByText("Player")).toBeVisible({ timeout: 8_000 }); // table loaded
+    await expect(page.getByRole("columnheader", { name: "Player" })).toBeVisible({ timeout: 8_000 }); // table loaded
     await expect(page.getByText(/€[1-9]/).first()).toBeVisible(); // at least one non-zero €
 
     // API: admin earned from group stage; member also earned (Groups B, C, D)
@@ -269,7 +269,7 @@ test.describe("Full betting journey", () => {
 
     // UI: standings tab shows KO earnings in leaderboard
     await page.goto(`/groups/${roomId}?tab=standings`);
-    await expect(page.getByText("Player")).toBeVisible({ timeout: 8_000 });
+    await expect(page.getByRole("columnheader", { name: "Player" })).toBeVisible({ timeout: 8_000 });
     await expect(page.getByText(/€[1-9]/).first()).toBeVisible();
 
     // API: both admin and member earned from KO; admin earned more

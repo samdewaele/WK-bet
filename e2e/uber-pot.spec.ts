@@ -51,16 +51,27 @@ test.describe("Uber Pot bets", () => {
     await expect(page.getByText(/open/i).first()).toBeVisible();
   });
 
-  test("member can propose an Uber Pot bet which shows as pending", async ({ page }) => {
-    await signInAs(page, E2E_USER_EMAIL, "E2E User");
+  test("member can propose an Uber Pot bet which shows as pending", async ({ page, browser }) => {
+    // Admin creates group
+    await signInAs(page, E2E_ADMIN_EMAIL, "Admin", "admin");
     const roomId = await createGroup(page, `UP-Propose-${Date.now()}`);
-    await page.goto(`/groups/${roomId}?tab=predictions`);
+    const inviteCode = await getInviteCode(page, roomId);
 
-    await page.getByPlaceholder(/question \/ title/i).fill("Which team scores first?");
-    await page.getByRole("button", { name: /^propose$/i }).click();
+    // Non-admin member joins in a second context
+    const ctx2 = await browser.newContext();
+    const page2 = await ctx2.newPage();
+    await signInAs(page2, MEMBER_EMAIL, "Member");
+    await joinGroupByCode(page2, inviteCode);
 
-    await expect(page.getByText("Which team scores first?")).toBeVisible({ timeout: 5_000 });
-    await expect(page.getByText(/pending/i)).toBeVisible();
+    // Member proposes a bet — non-admins see "Propose" button, bet starts as pending
+    await page2.goto(`/groups/${roomId}?tab=predictions`);
+    await page2.getByPlaceholder(/question \/ title/i).fill("Which team scores first?");
+    await page2.getByRole("button", { name: /^propose$/i }).click();
+
+    await expect(page2.getByText("Which team scores first?")).toBeVisible({ timeout: 5_000 });
+    await expect(page2.getByText(/pending/i)).toBeVisible();
+
+    await ctx2.close();
   });
 
   test("admin can accept a proposed Uber Pot bet", async ({ page, browser }) => {
@@ -103,11 +114,11 @@ test.describe("Uber Pot bets", () => {
     await signInAs(page, E2E_ADMIN_EMAIL, "Admin", "admin");
     const roomId = await createGroup(page, `UP-Lock-${Date.now()}`);
 
-    // Lock via admin panel
+    // Lock via admin panel (aria-label drives accessible name, not button text)
     await page.goto(`/groups/${roomId}`);
     await page.getByRole("button", { name: /admin/i }).click();
-    await page.getByRole("button", { name: /🔓 unlocked/i }).click();
-    await expect(page.getByRole("button", { name: /🔒 locked/i })).toBeVisible({ timeout: 5_000 });
+    await page.getByRole("button", { name: /lock uber pot bets/i }).click();
+    await expect(page.getByRole("button", { name: /unlock uber pot bets/i })).toBeVisible({ timeout: 5_000 });
 
     // After reload, the predictions tab create form should be hidden
     await page.goto(`/groups/${roomId}?tab=predictions`);
