@@ -110,7 +110,7 @@ export default function KnockoutPredictions({ roomId, roomStatus, simulationMode
       }
     }
     fetchData();
-  }, [roomId]);
+  }, [roomId, roomStatus]);
 
   // Index matches by number for cascade resolution
   const matchByNum = new Map(predictions.map((p) => [p.match.matchNumber, p.match]));
