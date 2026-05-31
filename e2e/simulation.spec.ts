@@ -9,6 +9,7 @@ import { test, expect } from "@playwright/test";
 import {
   signInAs,
   createGroup,
+  createSideBet,
   runPhase1,
   runPhase2,
   runCleanup,
@@ -21,8 +22,8 @@ test.describe("Simulation flow", () => {
   test.beforeEach(async ({ page }) => {
     await signInAs(page, E2E_ADMIN_EMAIL, "E2E Admin", "admin");
     roomId = await createGroup(page, `Sim-${Date.now()}`);
-    // Advance to betting so the group is ready for simulation
-    // (createGroup starts in setup; admin panel transitions it)
+    // Phase 1 simulation requires at least 1 open Uber Pot bet in the room
+    await createSideBet(page, roomId);
   });
 
   // ── Phase 1 ──────────────────────────────────────────────────────────────

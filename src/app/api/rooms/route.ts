@@ -38,7 +38,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  let body: { name?: string };
+  let body: { name?: string; entryFee?: number };
   try {
     body = await req.json();
   } catch {
@@ -57,9 +57,9 @@ export async function POST(req: NextRequest) {
 
   // Create room and add creator as member in a transaction
   const room = await db.$transaction(async (tx) => {
-    const newRoom = await tx.room.create({
-      data: { name },
-    });
+    const data: Record<string, unknown> = { name, creatorId: userId };
+    if (typeof body.entryFee === "number" && body.entryFee >= 0) data.entryFee = body.entryFee;
+    const newRoom = await tx.room.create({ data });
     await tx.roomMember.create({
       data: { userId, roomId: newRoom.id },
     });

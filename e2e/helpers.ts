@@ -50,7 +50,21 @@ export async function setRoomStatus(
   const res = await page.request.patch(`/api/admin/groups/${roomId}`, {
     data: { status },
   });
-  if (!res.ok()) throw new Error(`setRoomStatus(${status}) failed: ${res.status()}`);
+  if (!res.ok()) throw new Error(`setRoomStatus(${status}) failed: ${res.status()} ${await res.text()}`);
+}
+
+/**
+ * Create an open Uber Pot side bet in the room.
+ * Caller must be signed in as creator or platform admin (their bet goes straight to "open").
+ * Required before running Phase 1 simulation.
+ */
+export async function createSideBet(page: Page, roomId: string, title = "E2E test bet"): Promise<string> {
+  const res = await page.request.post(`/api/groups/${roomId}/sidebets`, {
+    data: { title },
+  });
+  if (!res.ok()) throw new Error(`createSideBet failed: ${res.status()} ${await res.text()}`);
+  const data = await res.json();
+  return data.id as string;
 }
 
 /** Run Phase 1 (group stage) simulation for the room. Requires admin role. */
@@ -58,7 +72,7 @@ export async function runPhase1(page: Page, roomId: string) {
   const res = await page.request.post(`/api/admin/groups/${roomId}/test`, {
     data: { phase: 1 },
   });
-  if (!res.ok()) throw new Error(`Phase 1 simulation failed: ${res.status()}`);
+  if (!res.ok()) throw new Error(`Phase 1 simulation failed: ${res.status()} ${await res.text()}`);
 }
 
 /** Run Phase 2 (KO stage) simulation for the room. Requires admin role. */
@@ -66,11 +80,11 @@ export async function runPhase2(page: Page, roomId: string) {
   const res = await page.request.post(`/api/admin/groups/${roomId}/test`, {
     data: { phase: 2 },
   });
-  if (!res.ok()) throw new Error(`Phase 2 simulation failed: ${res.status()}`);
+  if (!res.ok()) throw new Error(`Phase 2 simulation failed: ${res.status()} ${await res.text()}`);
 }
 
 /** Clean up simulation data for the room. Requires admin role. */
 export async function runCleanup(page: Page, roomId: string) {
   const res = await page.request.delete(`/api/admin/groups/${roomId}/test`);
-  if (!res.ok()) throw new Error(`Cleanup failed: ${res.status()}`);
+  if (!res.ok()) throw new Error(`Cleanup failed: ${res.status()} ${await res.text()}`);
 }
