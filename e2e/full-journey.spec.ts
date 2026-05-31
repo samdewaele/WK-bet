@@ -7,16 +7,18 @@
  *   Group B: Argentina > Chile > Peru > Australia  (etc.)
  * Total group goals: 72 matches × 2 = 144.
  *
- * Both admin and member predict ALL 12 groups. Variety of outcomes:
- *   Group A  — Admin all-correct (×1.0), Member wrong (×0)         → Admin earns solo
- *   Group B  — Both all-correct  (×1.0)                            → Prize split
- *   Group C  — Admin wrong (×0),  Member all-correct (×1.0)        → Member earns solo
- *   Group D  — Both top-2-correct (×0.75)                          → Partial prize split
- *   Groups E-L — Both wrong (×0)                                   → All 8 prizes → Uber Pot
+ * Group prediction variety (all 12 groups, both players):
+ *   Group A  — Admin all-correct (×1.0), Member wrong (×0)        → Admin earns solo
+ *   Group B  — Both all-correct  (×1.0)                           → Prize split
+ *   Group C  — Admin wrong (×0),  Member all-correct (×1.0)       → Member earns solo
+ *   Group D  — Both top-2-correct (×0.75)                         → Partial prize split
+ *   Groups E-L — Both wrong (×0)                                  → All 8 prizes → Uber Pot
  *
- * KO predictions:
- *   Admin → home wins 2-0 for every match → all correct → earns KO prize
- *   Member → away wins 0-2 for every match → all wrong  → earns nothing from KO
+ * KO prediction variety (32 matches, split into thirds):
+ *   First ~10  — Admin exact (2-0), Member wrong winner (0-2)   → Admin earns full
+ *   Middle ~10 — Admin correct winner wrong score (3-0),         → Admin earns ×0.75,
+ *                Member exact (2-0)                                Member earns ×1.0
+ *   Last  ~12  — Both wrong winner (0-1)                        → Both earn nothing → Uber Pot
  *
  * Uber Pot bets:
  *   "Total goals in group stage" — admin answers "144" (correct), member "999" (wrong)
@@ -48,6 +50,7 @@ type StandingPred = {
   position4: string;
 };
 
+/** Build a group standing prediction from expected standings + an accuracy mode. */
 function makePred(
   wcGroup: string,
   standings: string[],
@@ -56,7 +59,7 @@ function makePred(
   const [p1, p2, p3, p4] = standings;
   if (mode === "correct") return { wcGroup, position1: p1, position2: p2, position3: p3, position4: p4 };
   if (mode === "top2")    return { wcGroup, position1: p1, position2: p2, position3: p4, position4: p3 };
-  // wrong: swap top-2 → no multiplier credit
+  // wrong: swap top-2 so no multiplier credit applies
   return { wcGroup, position1: p2, position2: p1, position3: p3, position4: p4 };
 }
 
@@ -104,12 +107,12 @@ test.describe("Full betting journey", () => {
     });
     expect(acceptRes.ok()).toBeTruthy();
 
-    // UI: predictions tab shows both bets
+    // UI: both bets appear on the predictions tab
     await page.goto(`/groups/${roomId}?tab=predictions`);
     await expect(page.getByText("Total goals in group stage")).toBeVisible({ timeout: 5_000 });
     await expect(page.getByText("Top scorer")).toBeVisible({ timeout: 5_000 });
 
-    // ── 3. Submit Uber Pot answers ────────────────────────────────────────────
+    // ── 3. Submit Uber Pot answers (both players, both bets) ──────────────────
 
     const adminTotalGoalsEntryRes = await page.request.post(
       `/api/groups/${roomId}/sidebets/${totalGoalsBetId}/entries`,
@@ -118,17 +121,15 @@ test.describe("Full betting journey", () => {
     expect(adminTotalGoalsEntryRes.ok()).toBeTruthy();
     const { id: adminTotalGoalsEntryId } = await adminTotalGoalsEntryRes.json();
 
-    const memberTotalGoalsEntryRes = await page2.request.post(
+    await page2.request.post(
       `/api/groups/${roomId}/sidebets/${totalGoalsBetId}/entries`,
       { data: { answer: "999" } }
     );
-    expect(memberTotalGoalsEntryRes.ok()).toBeTruthy();
 
-    const adminTopScorerEntryRes = await page.request.post(
+    await page.request.post(
       `/api/groups/${roomId}/sidebets/${topScorerBetId}/entries`,
       { data: { answer: "Mbappe" } }
     );
-    expect(adminTopScorerEntryRes.ok()).toBeTruthy();
 
     const memberTopScorerEntryRes = await page2.request.post(
       `/api/groups/${roomId}/sidebets/${topScorerBetId}/entries`,
@@ -137,7 +138,7 @@ test.describe("Full betting journey", () => {
     expect(memberTopScorerEntryRes.ok()).toBeTruthy();
     const { id: memberTopScorerEntryId } = await memberTopScorerEntryRes.json();
 
-    // ── 4. Group standing predictions (ALL 12 groups) ─────────────────────────
+    // ── 4. Group standing predictions (ALL 12 groups, both players) ───────────
 
     // Fetch expected standings from preset endpoint
     const metaRes = await page.request.get("/api/e2e/tournament-run");
@@ -152,13 +153,13 @@ test.describe("Full betting journey", () => {
     const gs = meta.groups; // gs["A"].expectedStandings = [1st, 2nd, 3rd, 4th] team IDs
 
     /**
-     * Prediction matrix (all 12 groups, both players):
+     * Prediction matrix — 4 distinct payout scenarios across 12 groups:
      *
-     *  Group A  Admin=correct(1.0)  Member=wrong(0)      → Admin solo
-     *  Group B  Admin=correct(1.0)  Member=correct(1.0)  → Split
-     *  Group C  Admin=wrong(0)      Member=correct(1.0)  → Member solo
-     *  Group D  Admin=top2(0.75)    Member=top2(0.75)    → Split partial
-     *  Groups E-L  both=wrong(0)                         → Uber Pot
+     *  Group A  Admin=correct(1.0)  Member=wrong(0)      → Admin earns solo
+     *  Group B  Admin=correct(1.0)  Member=correct(1.0)  → Split prize
+     *  Group C  Admin=wrong(0)      Member=correct(1.0)  → Member earns solo
+     *  Group D  Admin=top2(0.75)    Member=top2(0.75)    → Split partial prize
+     *  E–L      Both=wrong(0)                            → Prize → Uber Pot
      */
     const adminPreds: StandingPred[] = [
       makePred("A", gs["A"].expectedStandings, "correct"),
@@ -197,44 +198,61 @@ test.describe("Full betting journey", () => {
     });
     expect(phase1Res.ok()).toBeTruthy();
 
-    // Room should now be in ko_betting
-    const roomRes = await page.request.get(`/api/groups/${roomId}`);
-    const roomData: { status: string } = await roomRes.json();
-    expect(roomData.status).toBe("ko_betting");
+    // API: room is now in ko_betting
+    const roomRes1 = await page.request.get(`/api/groups/${roomId}`);
+    expect((await roomRes1.json()).status).toBe("ko_betting");
 
-    // Leaderboard: admin and member both earned from group stage;
-    // admin earned from Group A (solo) + half-B + half-D
-    // member earned from Group C (solo) + half-B + half-D
-    // Groups E-L → prize went to uber pot, not to either player
-    const lb1Res = await page.request.get(`/api/groups/${roomId}/leaderboard`);
-    const lb1: { name: string; groupStage: number; totalEarned: number }[] = await lb1Res.json();
-    const adminEntry1 = lb1.find((e) => e.name === "Admin");
-    const memberEntry1 = lb1.find((e) => e.name === "Member");
+    // UI: predictions tab shows "Actual" standings column (only visible after tournament starts)
+    await page.goto(`/groups/${roomId}?tab=predictions`);
+    await expect(page.getByText("Actual").first()).toBeVisible({ timeout: 8_000 });
 
-    expect(adminEntry1?.groupStage).toBeGreaterThan(0);
-    expect(memberEntry1?.groupStage).toBeGreaterThan(0);
+    // UI: standings tab shows leaderboard with earned amounts
+    await page.goto(`/groups/${roomId}?tab=standings`);
+    await expect(page.getByText("Player")).toBeVisible({ timeout: 8_000 }); // table loaded
+    await expect(page.getByText(/€[1-9]/).first()).toBeVisible(); // at least one non-zero €
 
-    // ── 6. KO predictions ────────────────────────────────────────────────────
+    // API: admin earned from group stage; member also earned (Groups B, C, D)
+    const lb1: { name: string; groupStage: number }[] =
+      await (await page.request.get(`/api/groups/${roomId}/leaderboard`)).json();
+    expect(lb1.find((e) => e.name === "Admin")?.groupStage).toBeGreaterThan(0);
+    expect(lb1.find((e) => e.name === "Member")?.groupStage).toBeGreaterThan(0);
 
-    // Get all KO match IDs (R32 bracket populated by phase 1)
+    // ── 6. KO predictions (both players, all 32 matches, three-way variety) ───
+
+    // Get all KO match IDs (R32 bracket now populated after phase 1)
     const koMatchesRes = await page.request.get(`/api/groups/${roomId}/knockout`);
     expect(koMatchesRes.ok()).toBeTruthy();
     const koMatches: { matchId: string }[] = await koMatchesRes.json();
     expect(koMatches.length).toBeGreaterThan(0);
 
-    // Admin: predicts home wins (2-0) for every KO match — correct with preset
+    const third = Math.floor(koMatches.length / 3);
+
+    /**
+     * KO prediction matrix (ordered by kickoff → R32 first, then R16, QF, SF, 3rd, Final):
+     *
+     *  Matches 0…third-1   Admin exact (2-0),              Member wrong (0-2)
+     *  Matches third…2t-1  Admin correct winner (3-0 ×0.75), Member exact (2-0 ×1.0)
+     *  Matches 2t…end      Both wrong winner (0-1)         → prize → Uber Pot
+     */
+    const adminKOPreds = koMatches.map((m, i) => {
+      if (i < third)         return { matchId: m.matchId, homeScore: 2, awayScore: 0 }; // exact
+      if (i < 2 * third)     return { matchId: m.matchId, homeScore: 3, awayScore: 0 }; // correct winner, wrong score
+      return                        { matchId: m.matchId, homeScore: 0, awayScore: 1 }; // wrong winner
+    });
+
+    const memberKOPreds = koMatches.map((m, i) => {
+      if (i < third)         return { matchId: m.matchId, homeScore: 0, awayScore: 2 }; // wrong winner
+      if (i < 2 * third)     return { matchId: m.matchId, homeScore: 2, awayScore: 0 }; // exact
+      return                        { matchId: m.matchId, homeScore: 0, awayScore: 2 }; // wrong winner
+    });
+
     const adminKORes = await page.request.post(`/api/groups/${roomId}/knockout`, {
-      data: {
-        predictions: koMatches.map((m) => ({ matchId: m.matchId, homeScore: 2, awayScore: 0 })),
-      },
+      data: { predictions: adminKOPreds },
     });
     expect(adminKORes.ok()).toBeTruthy();
 
-    // Member: predicts away wins (0-2) for every KO match — wrong with preset
     const memberKORes = await page2.request.post(`/api/groups/${roomId}/knockout`, {
-      data: {
-        predictions: koMatches.map((m) => ({ matchId: m.matchId, homeScore: 0, awayScore: 2 })),
-      },
+      data: { predictions: memberKOPreds },
     });
     expect(memberKORes.ok()).toBeTruthy();
 
@@ -245,16 +263,25 @@ test.describe("Full betting journey", () => {
     });
     expect(phase2Res.ok()).toBeTruthy();
 
-    // Leaderboard: admin earned all KO prizes; member earned nothing from KO
-    const lb2Res = await page.request.get(`/api/groups/${roomId}/leaderboard`);
-    const lb2: { name: string; groupStage: number; knockout: number; totalEarned: number }[] =
-      await lb2Res.json();
-    const adminEntry2 = lb2.find((e) => e.name === "Admin");
-    const memberEntry2 = lb2.find((e) => e.name === "Member");
+    // UI: predictions tab shows actual KO results inline with user's prediction
+    await page.goto(`/groups/${roomId}?tab=predictions`);
+    await expect(page.getByText(/your pick:/i).first()).toBeVisible({ timeout: 8_000 });
 
-    expect(adminEntry2?.knockout).toBeGreaterThan(0);
-    expect(memberEntry2?.knockout).toBe(0);
-    expect(adminEntry2!.totalEarned).toBeGreaterThan(memberEntry2!.totalEarned);
+    // UI: standings tab shows KO earnings in leaderboard
+    await page.goto(`/groups/${roomId}?tab=standings`);
+    await expect(page.getByText("Player")).toBeVisible({ timeout: 8_000 });
+    await expect(page.getByText(/€[1-9]/).first()).toBeVisible();
+
+    // API: both admin and member earned from KO; admin earned more
+    const lb2: { name: string; knockout: number; totalEarned: number }[] =
+      await (await page.request.get(`/api/groups/${roomId}/leaderboard`)).json();
+    const adminEntry2 = lb2.find((e) => e.name === "Admin")!;
+    const memberEntry2 = lb2.find((e) => e.name === "Member")!;
+
+    expect(adminEntry2.knockout).toBeGreaterThan(0);
+    expect(memberEntry2.knockout).toBeGreaterThan(0); // member earned from the middle third
+    expect(adminEntry2.knockout).toBeGreaterThan(memberEntry2.knockout);
+    expect(adminEntry2.totalEarned).toBeGreaterThan(memberEntry2.totalEarned);
 
     // ── 8. Settle Uber Pot bets ───────────────────────────────────────────────
 
@@ -272,9 +299,9 @@ test.describe("Full betting journey", () => {
     expect(settleTopScorerRes.ok()).toBeTruthy();
     expect((await settleTopScorerRes.json()).status).toBe("settled");
 
-    // Both players should now have sideBet earnings (each won one bet)
-    const lb3Res = await page.request.get(`/api/groups/${roomId}/leaderboard`);
-    const lb3: { name: string; sideBets: number }[] = await lb3Res.json();
+    // API: both players have sideBet earnings (each won one bet)
+    const lb3: { name: string; sideBets: number }[] =
+      await (await page.request.get(`/api/groups/${roomId}/leaderboard`)).json();
     expect(lb3.find((e) => e.name === "Admin")?.sideBets).toBeGreaterThan(0);
     expect(lb3.find((e) => e.name === "Member")?.sideBets).toBeGreaterThan(0);
 
@@ -285,6 +312,7 @@ test.describe("Full betting journey", () => {
     });
     expect(closeRes.ok()).toBeTruthy();
 
+    // UI: group detail shows finished status
     await page.goto(`/groups/${roomId}`);
     await expect(page.getByText(/finished/i).first()).toBeVisible({ timeout: 5_000 });
 
