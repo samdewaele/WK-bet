@@ -4,8 +4,10 @@ export const E2E_ADMIN_EMAIL = "e2e-admin@test.local";
 export const E2E_USER_EMAIL = "e2e-user@test.local";
 
 /**
- * Create (or reuse) a test user and set their session cookie so subsequent
- * page loads are authenticated.
+ * Sign in as a test user by navigating the browser to the E2E auth endpoint.
+ * The server creates the DB session and sets the cookie via Set-Cookie header,
+ * so the cookie lives in the browser's native jar and is automatically included
+ * in all subsequent page.request API calls — no addCookies() needed.
  */
 export async function signInAs(
   page: Page,
@@ -13,23 +15,10 @@ export async function signInAs(
   name: string,
   role: "user" | "admin" = "user"
 ) {
-  const res = await page.request.post("/api/e2e/signin", {
-    data: { email, name, role },
-  });
-  if (!res.ok()) throw new Error(`E2E sign-in failed: ${res.status()}`);
-  const { sessionToken } = await res.json();
-
-  await page.context().addCookies([
-    {
-      name: "authjs.session-token",
-      value: sessionToken,
-      domain: "localhost",
-      path: "/",
-      httpOnly: true,
-      secure: false,
-      sameSite: "Lax",
-    },
-  ]);
+  const params = new URLSearchParams({ email, name, role });
+  await page.goto(`/api/e2e/signin?${params}`);
+  // The endpoint redirects to /groups on success
+  await page.waitForURL(/\/groups/, { timeout: 15_000 });
 }
 
 /**
