@@ -24,7 +24,7 @@ test.describe("My Groups list", () => {
     await expect(card.getByText(/setup/i)).toBeVisible();
 
     // Entry fee and pot
-    await expect(card.getByText(/€20\.00/)).toBeVisible();
+    await expect(card.getByText(/€20\.00/).first()).toBeVisible();
     await expect(card.getByText(/1 member/)).toBeVisible();
   });
 
@@ -59,7 +59,7 @@ test.describe("My Groups list", () => {
 
     await expect(page.getByText(/no groups yet/i)).toBeVisible();
     // Both Create and Join forms are visible directly
-    await expect(page.getByText(/create group/i)).toBeVisible();
-    await expect(page.getByText(/join group/i)).toBeVisible();
+    await expect(page.getByText(/create group/i).first()).toBeVisible();
+    await expect(page.getByText(/join group/i).first()).toBeVisible();
   });
 });

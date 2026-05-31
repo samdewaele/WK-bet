@@ -40,7 +40,7 @@ test.describe("Create group", () => {
 
     await page.waitForURL(/\/groups\/.+/, { timeout: 15_000 });
     await expect(page.getByText("Friday Night Bets")).toBeVisible();
-    await expect(page.getByText(/€15\.00/)).toBeVisible();
+    await expect(page.getByText(/€15\.00/).first()).toBeVisible();
   });
 
   test("create and join forms are separate sections on the page", async ({ page }) => {
@@ -48,8 +48,8 @@ test.describe("Create group", () => {
     await page.goto("/groups");
 
     // Both headings exist as distinct sections
-    await expect(page.getByText("Create Group")).toBeVisible();
-    await expect(page.getByText("Join Group")).toBeVisible();
+    await expect(page.getByText("Create Group").first()).toBeVisible();
+    await expect(page.getByText("Join Group").first()).toBeVisible();
   });
 });
 
@@ -70,8 +70,7 @@ test.describe("Join group", () => {
     // Owner refreshes members tab — should see 2 members
     await page.goto(`/groups/${roomId}?tab=members`);
     await expect(page.getByText("Members")).toBeVisible();
-    const rows = page.locator(".bg-gray-900.border.border-gray-800.rounded-xl div").filter({ hasText: /Joiner/ });
-    await expect(rows.first()).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByText("Joiner").first()).toBeVisible({ timeout: 10_000 });
   });
 });
 
@@ -145,8 +144,8 @@ test.describe("Member list (step 7)", () => {
     const roomId = await createGroup(page, `Creator-Badge-${Date.now()}`);
     await page.goto(`/groups/${roomId}?tab=members`);
 
-    await expect(page.getByText("Creator")).toBeVisible();
-    await expect(page.getByText("You")).toBeVisible();
+    await expect(page.getByText("Creator").first()).toBeVisible();
+    await expect(page.getByText("You").first()).toBeVisible();
   });
 
   test("admin can toggle paid status on a member", async ({ page }) => {

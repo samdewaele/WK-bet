@@ -46,7 +46,7 @@ test.describe("P2P Side Bets", () => {
 
     // Bet card appears
     await expect(page.getByText("Belgium wins the final")).toBeVisible({ timeout: 5_000 });
-    await expect(page.getByText("€5.00")).toBeVisible();
+    await expect(page.getByText("€5.00").first()).toBeVisible();
     await expect(page.getByText(/proposed/i)).toBeVisible();
   });
 

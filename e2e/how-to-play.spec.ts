@@ -13,11 +13,11 @@ test.describe("How to play", () => {
     await page.goto(`/groups/${roomId}/rules`);
 
     await expect(page.getByText("How It Works")).toBeVisible();
-    await expect(page.getByText(/the pot/i)).toBeVisible();
-    await expect(page.getByText(/group stage predictions/i)).toBeVisible();
-    await expect(page.getByText(/knockout predictions/i)).toBeVisible();
-    await expect(page.getByText(/player vs player bets/i)).toBeVisible();
-    await expect(page.getByText(/prediction deadlines/i)).toBeVisible();
+    await expect(page.getByRole("heading", { name: /the pot/i })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /group stage predictions/i })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /knockout predictions/i })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /player vs player bets/i })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /prediction deadlines/i })).toBeVisible();
   });
 
   test("no form fields or submit buttons on the rules page", async ({ page }) => {
