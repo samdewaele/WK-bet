@@ -24,7 +24,7 @@ export async function GET(req: Request) {
 
   const user = await db.user.upsert({
     where: { email },
-    update: {},
+    update: { name, role },
     create: { email, name, role },
   });
 

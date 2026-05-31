@@ -24,7 +24,7 @@ export async function GET(
   const bets = await db.p2PSideBet.findMany({
     where: {
       roomId,
-      OR: [{ proposerId: userId }, { acceptorId: userId }],
+      OR: [{ proposerId: userId }, { acceptorId: userId }, { acceptorId: null }],
     },
     include: {
       proposer: { select: { id: true, name: true, image: true } },
