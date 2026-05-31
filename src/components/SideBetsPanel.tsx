@@ -29,6 +29,7 @@ type Props = {
   currentUserId: string;
   isManager: boolean;
   tournamentStarted: boolean;
+  uberBetsLocked?: boolean;
   totalPot: number;
 };
 
@@ -43,7 +44,7 @@ const STATUS_LABEL: Record<string, string> = {
   settled: "Settled",
 };
 
-export default function SideBetsPanel({ roomId, currentUserId, isManager, tournamentStarted, totalPot }: Props) {
+export default function SideBetsPanel({ roomId, currentUserId, isManager, tournamentStarted, uberBetsLocked = false, totalPot }: Props) {
   const [bets, setBets] = useState<UberBet[]>([]);
   const [loading, setLoading] = useState(true);
   const [answerDrafts, setAnswerDrafts] = useState<Record<string, string>>({});
@@ -145,9 +146,9 @@ export default function SideBetsPanel({ roomId, currentUserId, isManager, tourna
             {activeBetCount > 0 ? `≈ €${estimatedPayoutPerBet.toFixed(2)}` : "—"}
           </span>
         </div>
-        {tournamentStarted && (
+        {(tournamentStarted || uberBetsLocked) && (
           <span className="text-xs text-amber-400 bg-amber-400/10 border border-amber-400/20 rounded-lg px-3 py-1.5">
-            🔒 Locked — all answers revealed
+            🔒 {uberBetsLocked && !tournamentStarted ? "Locked by admin" : "Locked — all answers revealed"}
           </span>
         )}
       </div>
@@ -222,7 +223,7 @@ export default function SideBetsPanel({ roomId, currentUserId, isManager, tourna
             )}
 
             {/* Answer input — open + pre-lock */}
-            {isOpen && !tournamentStarted && (
+            {isOpen && !tournamentStarted && !uberBetsLocked && (
               <div className="mb-4">
                 <div className="flex gap-2">
                   <input
@@ -335,7 +336,7 @@ export default function SideBetsPanel({ roomId, currentUserId, isManager, tourna
       )}
 
       {/* Propose / create form — at bottom */}
-      {!tournamentStarted && (
+      {!tournamentStarted && !uberBetsLocked && (
         <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
           <h3 className="text-sm font-semibold text-amber-400 mb-1">
             {isManager ? "Create Uber Pot Bet" : "Propose an Uber Pot Bet"}

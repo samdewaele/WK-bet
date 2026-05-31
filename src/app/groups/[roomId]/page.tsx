@@ -62,6 +62,8 @@ export default async function GroupDetailPage({ params, searchParams }: Props) {
   const tournamentStarted = await isTournamentStarted();
   const roomStatus = room.status;
   const simulationMode = room.simulationMode;
+  const uberBetsLocked = room.uberBetsLocked;
+  const description = room.description;
 
   // Fetch paid status for all members
   const membersPaid = await db.roomMember.findMany({
@@ -104,6 +106,8 @@ export default async function GroupDetailPage({ params, searchParams }: Props) {
                 isPlatformAdmin={isPlatformAdmin}
                 currentUserId={userId}
                 members={room.members.map((m) => ({ userId: m.userId, name: m.user.name }))}
+                initialDescription={room.description}
+                initialUberBetsLocked={room.uberBetsLocked}
               />
             )}
           </div>
@@ -115,6 +119,9 @@ export default async function GroupDetailPage({ params, searchParams }: Props) {
               <InviteButton inviteCode={room.inviteCode} />
             )}
           </div>
+          {description && (
+            <p className="text-sm text-gray-400 mt-2 max-w-2xl">{description}</p>
+          )}
         </div>
 
         {/* Pot breakdown */}
@@ -208,6 +215,7 @@ export default async function GroupDetailPage({ params, searchParams }: Props) {
                 currentUserId={userId}
                 isManager={isManager}
                 tournamentStarted={tournamentStarted}
+                uberBetsLocked={uberBetsLocked}
                 totalPot={pot.totalPot}
               />
             </div>

@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import type { TestTournamentReport } from "@/lib/test-tournament";
 
-type Settings = { name: string; entryFee: string; status: string; simulationMode: boolean };
+type Settings = { name: string; entryFee: string; status: string; simulationMode: boolean; description: string; uberBetsLocked: boolean };
 type TestState =
   | { phase: "checking" }
   | { phase: "idle" }
@@ -54,6 +54,8 @@ export default function GroupAdminPanel({
   isPlatformAdmin,
   currentUserId,
   members,
+  initialDescription,
+  initialUberBetsLocked,
 }: {
   roomId: string;
   initialName: string;
@@ -64,6 +66,8 @@ export default function GroupAdminPanel({
   isPlatformAdmin: boolean;
   currentUserId: string;
   members: Member[];
+  initialDescription?: string | null;
+  initialUberBetsLocked?: boolean;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -71,6 +75,7 @@ export default function GroupAdminPanel({
   // Settings
   const [settings, setSettings] = useState<Settings>({
     name: initialName, entryFee: initialFee.toFixed(2), status: initialStatus, simulationMode: initialSimulationMode,
+    description: initialDescription ?? "", uberBetsLocked: initialUberBetsLocked ?? false,
   });
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState("");
@@ -142,6 +147,7 @@ export default function GroupAdminPanel({
       const res = await patch({
         name: settings.name,
         entryFee: parseFloat(settings.entryFee) || 0,
+        description: settings.description || null,
       });
       setSaveMsg(res.ok ? "Saved" : ((await res.json()).error ?? "Failed"));
       if (res.ok) router.refresh();
@@ -281,6 +287,17 @@ export default function GroupAdminPanel({
                     className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-violet-500"
                   />
                 </div>
+                <div>
+                  <label className="block text-xs text-gray-400 mb-1">Group description (optional)</label>
+                  <textarea
+                    value={settings.description}
+                    onChange={(e) => setSettings((s) => ({ ...s, description: e.target.value }))}
+                    placeholder="House rules, payment info, contact details…"
+                    rows={2}
+                    maxLength={500}
+                    className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-violet-500 resize-none"
+                  />
+                </div>
 
                 {/* Status — current stage + contextual action buttons */}
                 <div>
@@ -343,6 +360,35 @@ export default function GroupAdminPanel({
                       <p className="text-xs text-emerald-400">Tournament complete.</p>
                     )}
                   </div>
+                </div>
+
+                {/* Uber Pot lock */}
+                <div className="flex items-center justify-between gap-3 pt-1">
+                  <div>
+                    <p className="text-xs text-gray-300 font-medium">Lock Uber Pot bets</p>
+                    <p className="text-xs text-gray-500">Prevents new proposals and answer submissions.</p>
+                  </div>
+                  <button
+                    onClick={async () => {
+                      const next = !settings.uberBetsLocked;
+                      setSaving(true);
+                      try {
+                        const res = await patch({ uberBetsLocked: next });
+                        if (res.ok) { setSettings((s) => ({ ...s, uberBetsLocked: next })); router.refresh(); }
+                        else setSaveMsg((await res.json()).error ?? "Failed");
+                      } catch { setSaveMsg("Network error"); }
+                      finally { setSaving(false); setTimeout(() => setSaveMsg(""), 3000); }
+                    }}
+                    disabled={saving}
+                    aria-label={settings.uberBetsLocked ? "Unlock Uber Pot bets" : "Lock Uber Pot bets"}
+                    className={`shrink-0 text-xs font-semibold px-3 py-1.5 rounded-lg border transition-colors disabled:opacity-40 ${
+                      settings.uberBetsLocked
+                        ? "bg-amber-500/20 border-amber-500/40 text-amber-300 hover:bg-amber-500/30"
+                        : "bg-gray-700 border-gray-600 text-gray-300 hover:bg-gray-600"
+                    }`}
+                  >
+                    {settings.uberBetsLocked ? "🔒 Locked" : "🔓 Unlocked"}
+                  </button>
                 </div>
 
                 <div className="flex items-center gap-2 pt-1">

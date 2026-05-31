@@ -22,7 +22,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   const access = await resolveAccess(roomId, session.user.id, session.user.role ?? "");
   if (!access) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
-  let body: { name?: string; entryFee?: number; status?: string; simulationMode?: boolean; newCreatorId?: string };
+  let body: { name?: string; entryFee?: number; status?: string; simulationMode?: boolean; newCreatorId?: string; description?: string | null; uberBetsLocked?: boolean };
   try { body = await req.json(); } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
@@ -44,6 +44,8 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   if (typeof body.name === "string" && body.name.trim()) data.name = body.name.trim();
   if (typeof body.entryFee === "number" && body.entryFee >= 0) data.entryFee = body.entryFee;
   if (typeof body.simulationMode === "boolean") data.simulationMode = body.simulationMode;
+  if (typeof body.uberBetsLocked === "boolean") data.uberBetsLocked = body.uberBetsLocked;
+  if ("description" in body) data.description = body.description?.trim() || null;
   const VALID_STATUSES = ["setup", "betting", "closed", "group_active", "ko_betting", "ko_active", "finished"];
   if (typeof body.status === "string" && VALID_STATUSES.includes(body.status)) data.status = body.status;
 
