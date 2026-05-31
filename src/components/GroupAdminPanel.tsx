@@ -220,6 +220,22 @@ export default function GroupAdminPanel({
     const prevState = testState;
     setTestError(""); setTestState({ phase: "running" });
     try {
+      // For Phase 2, always fetch fresh stats first to get the latest prediction counts
+      if (simPhase === 2) {
+        const statsRes = await fetch(`/api/admin/groups/${roomId}/members`);
+        const freshStats: MemberStat[] = await statsRes.json();
+        if (Array.isArray(freshStats)) {
+          setMemberStats(freshStats);
+          const totalKO = freshStats[0]?.totalKOMatches ?? 0;
+          const membersReady = freshStats.filter((m) => m.koPredictions >= totalKO && totalKO > 0).length;
+          if (totalKO === 0 || membersReady < freshStats.length) {
+            setTestError(`All members must complete their KO bracket first (${membersReady}/${freshStats.length} ready)`);
+            setTestState(prevState.phase === "seeded" ? prevState : { phase: "idle" });
+            return;
+          }
+        }
+      }
+
       const res = await fetch(`/api/admin/groups/${roomId}/test`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -470,18 +486,17 @@ export default function GroupAdminPanel({
                         <>
                           <span className="text-xs text-emerald-400 self-center">✓ Group stage</span>
                           <button onClick={() => handleSeed(2)}
-                            disabled={!allReady}
-                            title={!allReady ? `All members must submit their full KO bracket first` : undefined}
-                            className="bg-emerald-700 hover:bg-emerald-600 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-semibold px-3 py-2 rounded-lg transition-colors">
+                            title="Checks member readiness live before proceeding"
+                            className="bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-semibold px-3 py-2 rounded-lg transition-colors">
                             ▶ Phase 2: KO Round
                           </button>
                           <button onClick={handleCleanupTest}
                             className="ml-auto bg-red-800 hover:bg-red-700 text-white text-xs font-semibold px-3 py-2 rounded-lg transition-colors">
                             🗑 Cleanup
                           </button>
-                          {!allReady && totalKO > 0 && (
-                            <p className="w-full text-xs text-amber-400 mt-1">
-                              All members must submit their full KO bracket before Phase 2 ({membersReady}/{memberStats.length} ready).
+                          {totalKO > 0 && (
+                            <p className="w-full text-xs text-gray-500 mt-1">
+                              {membersReady}/{memberStats.length} members have a full KO bracket — Phase 2 checks live on click.
                             </p>
                           )}
                         </>

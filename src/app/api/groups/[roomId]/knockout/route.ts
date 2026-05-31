@@ -55,6 +55,7 @@ export async function GET(
         matchId: m.id,
         homeScore: pred?.homeScore ?? 0,
         awayScore: pred?.awayScore ?? 0,
+        penaltyWinner: (pred as { penaltyWinner?: string | null } | undefined)?.penaltyWinner ?? null,
         earnedAmount: pred?.earnedAmount ?? null,
         predicted: !!pred,
         match: {
@@ -78,6 +79,7 @@ type KOPredictionInput = {
   matchId: string;
   homeScore: number;
   awayScore: number;
+  penaltyWinner?: "home" | "away" | null;
 };
 
 export async function POST(
@@ -137,6 +139,7 @@ export async function POST(
       pred.homeScore > 20 ||
       pred.awayScore > 20
     ) continue;
+    if (pred.homeScore === pred.awayScore && pred.penaltyWinner !== "home" && pred.penaltyWinner !== "away") continue;
     valid.push(pred);
   }
 
@@ -157,10 +160,12 @@ export async function POST(
           roomId,
           homeScore: pred.homeScore,
           awayScore: pred.awayScore,
+          penaltyWinner: pred.homeScore === pred.awayScore ? (pred.penaltyWinner ?? null) : null,
         },
         update: {
           homeScore: pred.homeScore,
           awayScore: pred.awayScore,
+          penaltyWinner: pred.homeScore === pred.awayScore ? (pred.penaltyWinner ?? null) : null,
           earnedAmount: null,
         },
       })

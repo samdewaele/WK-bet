@@ -134,9 +134,8 @@ export async function PATCH(req: NextRequest, { params }: Params) {
 
   const ctx = await resolveRoom(roomId, userId, session.user.role ?? "");
   if (!ctx) return NextResponse.json({ error: "Room not found" }, { status: 404 });
-  if (!ctx.isManager) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
-  let body: { sideBetId?: string; action?: "accept" | "reject"; winnerEntryId?: string };
+  let body: { sideBetId?: string; action?: "accept" | "reject" | "cancel"; winnerEntryId?: string };
   try { body = await req.json(); } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
@@ -147,16 +146,38 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   if (!sideBet) return NextResponse.json({ error: "Uber Pot Bet not found" }, { status: 404 });
 
   if (body.action === "accept") {
+    if (!ctx.isManager) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     if (sideBet.status !== "proposed") return NextResponse.json({ error: "Not a proposal" }, { status: 400 });
     const updated = await db.sideBet.update({ where: { id: body.sideBetId }, data: { status: "open" } });
     return NextResponse.json({ id: updated.id, status: updated.status });
   }
 
   if (body.action === "reject") {
+    if (!ctx.isManager) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     await db.sideBetEntry.deleteMany({ where: { sideBetId: body.sideBetId } });
     await db.sideBet.delete({ where: { id: body.sideBetId } });
     return NextResponse.json({ ok: true });
   }
+
+  if (body.action === "cancel") {
+    if (sideBet.status === "settled") {
+      return NextResponse.json({ error: "Cannot cancel a settled bet" }, { status: 400 });
+    }
+    const locked = await isTournamentStarted();
+    const roomRow = await db.room.findUnique({ where: { id: roomId }, select: { uberBetsLocked: true } });
+    if (locked || roomRow?.uberBetsLocked) {
+      return NextResponse.json({ error: "Uber Pot bets are locked" }, { status: 403 });
+    }
+    // Admin can cancel any bet; proposer can cancel their own bet
+    if (!ctx.isManager && sideBet.proposedByUserId !== userId) {
+      return NextResponse.json({ error: "You can only cancel your own bet" }, { status: 403 });
+    }
+    await db.sideBetEntry.deleteMany({ where: { sideBetId: body.sideBetId } });
+    await db.sideBet.delete({ where: { id: body.sideBetId } });
+    return NextResponse.json({ ok: true });
+  }
+
+  if (!ctx.isManager) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   if (body.winnerEntryId) {
     if (sideBet.status === "settled") return NextResponse.json({ error: "Already settled" }, { status: 400 });

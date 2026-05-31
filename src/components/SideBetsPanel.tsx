@@ -180,9 +180,22 @@ export default function SideBetsPanel({ roomId, currentUserId, isManager, tourna
                   <p className="text-xs text-gray-600 mt-1">Proposed by {bet.proposedByName}</p>
                 )}
               </div>
-              <span className={`text-xs px-2 py-0.5 rounded-full shrink-0 ${STATUS_BADGE[bet.status]}`}>
-                {STATUS_LABEL[bet.status]}
-              </span>
+              <div className="flex items-center gap-2 shrink-0">
+                <span className={`text-xs px-2 py-0.5 rounded-full ${STATUS_BADGE[bet.status]}`}>
+                  {STATUS_LABEL[bet.status]}
+                </span>
+                {!isSettled && !uberBetsLocked && !tournamentStarted &&
+                  (isManager || bet.proposedByUserId === currentUserId) && (
+                  <button
+                    onClick={() => handlePatch({ sideBetId: bet.id, action: "cancel" }, bet.id)}
+                    disabled={isActing}
+                    title="Cancel this bet"
+                    className="text-xs text-gray-500 hover:text-red-400 transition-colors disabled:opacity-40"
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
             </div>
 
             {/* Proposed — admin actions */}

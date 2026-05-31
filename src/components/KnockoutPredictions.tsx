@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import TeamFlag from "@/components/TeamFlag";
 
 type Team = {
@@ -27,6 +27,7 @@ type Prediction = {
   matchId: string;
   homeScore: number;
   awayScore: number;
+  penaltyWinner: "home" | "away" | null;
   earnedAmount: number | null;
   predicted: boolean;
   match: Match;
@@ -48,8 +49,6 @@ const ROUND_LABELS: Record<string, string> = {
   Final: "Final",
 };
 
-// Maps each non-R32 match number to the two feeder matches that provide its teams.
-// Adjacent R32 pairs → R16, adjacent R16 pairs → QF, etc.
 const BRACKET_PATH: Record<number, {
   home: { matchNum: number; side: "winner" | "loser" };
   away: { matchNum: number; side: "winner" | "loser" };
@@ -73,16 +72,18 @@ const BRACKET_PATH: Record<number, {
 };
 
 type ScoreState = Record<string, { home: string; away: string }>;
-type RoundSaveStatus = "idle" | "saved" | "error" | "locked";
+type MatchSaveStatus = "idle" | "saving" | "saved" | "error";
 
 export default function KnockoutPredictions({ roomId, roomStatus, simulationMode }: Props) {
   const [predictions, setPredictions] = useState<Prediction[]>([]);
   const [scores, setScores] = useState<ScoreState>({});
+  const [penaltyWinners, setPenaltyWinners] = useState<Record<string, "home" | "away">>({});
   const [activeRound, setActiveRound] = useState<string>("R32");
-  const [saving, setSaving] = useState(false);
-  const [saveStatus, setSaveStatus] = useState<Record<string, RoundSaveStatus>>({});
-  const [saveError, setSaveError] = useState<Record<string, string>>({});
+  const [matchSaveStatus, setMatchSaveStatus] = useState<Record<string, MatchSaveStatus>>({});
+  const [globalSaving, setGlobalSaving] = useState(false);
+  const [globalStatus, setGlobalStatus] = useState<"idle" | "saved" | "error">("idle");
   const [loading, setLoading] = useState(true);
+  const debounceRefs = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
 
   useEffect(() => {
     async function fetchData() {
@@ -93,15 +94,18 @@ export default function KnockoutPredictions({ roomId, roomStatus, simulationMode
         setPredictions(data);
 
         const initial: ScoreState = {};
+        const initialPw: Record<string, "home" | "away"> = {};
         for (const p of data) {
           if (p.predicted) {
             initial[p.matchId] = {
               home: String(p.homeScore),
               away: String(p.awayScore),
             };
+            if (p.penaltyWinner) initialPw[p.matchId] = p.penaltyWinner;
           }
         }
         setScores(initial);
+        setPenaltyWinners(initialPw);
 
         const firstRound = KO_ROUNDS.find((r) => data.some((p) => p.match.round === r));
         if (firstRound) setActiveRound(firstRound);
@@ -112,32 +116,24 @@ export default function KnockoutPredictions({ roomId, roomStatus, simulationMode
     fetchData();
   }, [roomId, roomStatus]);
 
-  // Index matches by number for cascade resolution
   const matchByNum = new Map(predictions.map((p) => [p.match.matchNumber, p.match]));
-
-  // Effective score: what the user currently has typed, or their saved prediction
   const predMap = new Map(predictions.filter((p) => p.predicted).map((p) => [p.matchId, p]));
-  const getEffectiveScore = (matchId: string): { h: number; a: number } | null => {
+
+  const getEffectiveScore = (matchId: string): { h: number; a: number; pw: "home" | "away" | null } | null => {
     const s = scores[matchId];
     if (s && s.home !== "" && s.away !== "") {
       const h = parseInt(s.home, 10);
       const a = parseInt(s.away, 10);
-      if (!isNaN(h) && !isNaN(a)) return { h, a };
+      if (!isNaN(h) && !isNaN(a)) {
+        return { h, a, pw: penaltyWinners[matchId] ?? null };
+      }
     }
     const saved = predMap.get(matchId);
-    if (saved) return { h: saved.homeScore, a: saved.awayScore };
+    if (saved) return { h: saved.homeScore, a: saved.awayScore, pw: saved.penaltyWinner ?? null };
     return null;
   };
 
-  /**
-   * Recursively resolve which team the user projects into a given match slot.
-   * For R32: uses the actual seeded teams from the DB.
-   * For R16+: cascades from the user's predictions for the feeder matches.
-   */
-  function resolveProjectedTeam(
-    matchNum: number,
-    side: "winner" | "loser"
-  ): Team | null {
+  function resolveProjectedTeam(matchNum: number, side: "winner" | "loser"): Team | null {
     const match = matchByNum.get(matchNum);
     if (!match) return null;
 
@@ -145,7 +141,6 @@ export default function KnockoutPredictions({ roomId, roomStatus, simulationMode
     let awayTeam: Team | null;
 
     if (match.round === "R32") {
-      // Real teams seeded from group stage results
       homeTeam = match.homeTeam;
       awayTeam = match.awayTeam;
     } else {
@@ -156,9 +151,17 @@ export default function KnockoutPredictions({ roomId, roomStatus, simulationMode
     }
 
     const score = getEffectiveScore(match.id);
-    if (!score || score.h === score.a) return null; // tie = no winner determined
+    if (!score) return null;
 
-    const homeWins = score.h > score.a;
+    let homeWins: boolean;
+    if (score.h !== score.a) {
+      homeWins = score.h > score.a;
+    } else if (score.pw) {
+      homeWins = score.pw === "home";
+    } else {
+      return null; // tie with no penalty winner yet
+    }
+
     if (side === "winner") return homeWins ? homeTeam : awayTeam;
     return homeWins ? awayTeam : homeTeam;
   }
@@ -181,7 +184,6 @@ export default function KnockoutPredictions({ roomId, roomStatus, simulationMode
     predictions.some((p) => p.match.round === r)
   );
 
-  // All KO predictions lock atomically when the KO stage begins (not per-match kickoff)
   const allKOLocked = roomStatus !== "ko_betting";
 
   const isLocked = (match: Match) => {
@@ -189,6 +191,64 @@ export default function KnockoutPredictions({ roomId, roomStatus, simulationMode
     if (match.status === "finished" || match.status === "live") return true;
     return new Date(match.kickoff) <= new Date();
   };
+
+  const isTied = (matchId: string) => {
+    const s = scores[matchId];
+    if (!s || s.home === "" || s.away === "") return false;
+    const h = parseInt(s.home, 10);
+    const a = parseInt(s.away, 10);
+    return !isNaN(h) && !isNaN(a) && h === a;
+  };
+
+  async function saveMatches(matches: Match[]) {
+    const toSave = matches
+      .filter((m) => {
+        if (isLocked(m)) return false;
+        const s = scores[m.id];
+        if (!s) return false;
+        const h = parseInt(s.home, 10);
+        const a = parseInt(s.away, 10);
+        if (isNaN(h) || isNaN(a)) return false;
+        if (h === a && !penaltyWinners[m.id]) return false; // tied but no penalty winner
+        return true;
+      })
+      .map((m) => ({
+        matchId: m.id,
+        homeScore: parseInt(scores[m.id].home, 10),
+        awayScore: parseInt(scores[m.id].away, 10),
+        penaltyWinner: isTied(m.id) ? (penaltyWinners[m.id] ?? null) : null,
+      }));
+
+    if (toSave.length === 0) return { ok: true, saved: 0 };
+
+    const res = await fetch(`/api/groups/${roomId}/knockout`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ predictions: toSave }),
+    });
+    return { ok: res.ok, saved: toSave.length, res };
+  }
+
+  const autoSaveMatch = useCallback(async (match: Match) => {
+    if (isLocked(match)) return;
+    const s = scores[match.id];
+    if (!s) return;
+    const h = parseInt(s.home, 10);
+    const a = parseInt(s.away, 10);
+    if (isNaN(h) || isNaN(a)) return;
+    if (h === a && !penaltyWinners[match.id]) return;
+
+    setMatchSaveStatus((prev) => ({ ...prev, [match.id]: "saving" }));
+    const { ok } = await saveMatches([match]);
+    setMatchSaveStatus((prev) => ({
+      ...prev,
+      [match.id]: ok ? "saved" : "error",
+    }));
+    if (ok) {
+      setTimeout(() => setMatchSaveStatus((prev) => ({ ...prev, [match.id]: "idle" })), 2000);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [roomId, scores, penaltyWinners]);
 
   const handleScoreChange = (matchId: string, side: "home" | "away", value: string) => {
     const parsed = parseInt(value, 10);
@@ -202,72 +262,37 @@ export default function KnockoutPredictions({ roomId, roomStatus, simulationMode
     }));
   };
 
-  const handleSave = useCallback(
-    async (round: string) => {
-      const toSave = roundMatches
-        .filter((m) => {
-          if (isLocked(m)) return false;
-          const s = scores[m.id];
-          if (!s) return false;
-          const h = parseInt(s.home, 10);
-          const a = parseInt(s.away, 10);
-          return !isNaN(h) && !isNaN(a);
-        })
-        .map((m) => ({
-          matchId: m.id,
-          homeScore: parseInt(scores[m.id].home, 10),
-          awayScore: parseInt(scores[m.id].away, 10),
-        }));
+  const handlePenaltyChange = (matchId: string, winner: "home" | "away") => {
+    setPenaltyWinners((prev) => ({ ...prev, [matchId]: winner }));
+  };
 
-      if (toSave.length === 0) return;
+  // Trigger auto-save after score or penalty winner changes
+  useEffect(() => {
+    if (allKOLocked) return;
+    for (const match of roundMatches) {
+      const s = scores[match.id];
+      if (!s || s.home === "" || s.away === "") continue;
+      const h = parseInt(s.home, 10);
+      const a = parseInt(s.away, 10);
+      if (isNaN(h) || isNaN(a)) continue;
+      if (h === a && !penaltyWinners[match.id]) continue;
 
-      setSaving(true);
-      try {
-        const res = await fetch(`/api/groups/${roomId}/knockout`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ predictions: toSave }),
-        });
-        if (!res.ok) {
-          let errorMsg = "Error — try again";
-          try {
-            const errData = await res.json();
-            if (errData.error && errData.error.toLowerCase().includes("locked")) {
-              setSaveStatus((prev) => ({ ...prev, [round]: "locked" }));
-              setSaveError((prev) => ({ ...prev, [round]: "Predictions are closed for this group" }));
-              setTimeout(() => {
-                setSaveStatus((prev) => ({ ...prev, [round]: "idle" }));
-                setSaveError((prev) => ({ ...prev, [round]: "" }));
-              }, 5000);
-              return;
-            }
-            errorMsg = errData.error ?? errorMsg;
-          } catch {
-            // ignore JSON parse errors
-          }
-          setSaveStatus((prev) => ({ ...prev, [round]: "error" }));
-          setSaveError((prev) => ({ ...prev, [round]: errorMsg }));
-          setTimeout(() => {
-            setSaveStatus((prev) => ({ ...prev, [round]: "idle" }));
-            setSaveError((prev) => ({ ...prev, [round]: "" }));
-          }, 3000);
-          return;
-        }
-        setSaveStatus((prev) => ({ ...prev, [round]: "saved" }));
-        setTimeout(() => setSaveStatus((prev) => ({ ...prev, [round]: "idle" })), 3000);
-      } catch {
-        setSaveStatus((prev) => ({ ...prev, [round]: "error" }));
-        setSaveError((prev) => ({ ...prev, [round]: "Error — try again" }));
-        setTimeout(() => {
-          setSaveStatus((prev) => ({ ...prev, [round]: "idle" }));
-          setSaveError((prev) => ({ ...prev, [round]: "" }));
-        }, 3000);
-      } finally {
-        setSaving(false);
-      }
-    },
-    [roomId, roundMatches, scores]
-  );
+      if (debounceRefs.current[match.id]) clearTimeout(debounceRefs.current[match.id]);
+      debounceRefs.current[match.id] = setTimeout(() => autoSaveMatch(match), 700);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scores, penaltyWinners, activeRound]);
+
+  const handleSaveAll = useCallback(async () => {
+    const allMatches = predictions.map((p) => p.match);
+    setGlobalSaving(true);
+    setGlobalStatus("idle");
+    const { ok } = await saveMatches(allMatches);
+    setGlobalSaving(false);
+    setGlobalStatus(ok ? "saved" : "error");
+    setTimeout(() => setGlobalStatus("idle"), 3000);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [roomId, predictions, scores, penaltyWinners]);
 
   if (loading) {
     return <div className="animate-pulse bg-gray-900 border border-gray-800 rounded-xl h-48" />;
@@ -327,8 +352,8 @@ export default function KnockoutPredictions({ roomId, roomStatus, simulationMode
     const locked = isLocked(match);
     const pred = predMap.get(match.id);
     const scoreState = scores[match.id];
+    const mSaveStatus = matchSaveStatus[match.id] ?? "idle";
 
-    // For display: prefer actual seeded teams (match.homeTeam/awayTeam), fall back to user projection
     const { home: projectedHome, away: projectedAway } = getDisplayTeams(match);
     const displayHome = match.homeTeam ?? projectedHome;
     const displayAway = match.awayTeam ?? projectedAway;
@@ -344,11 +369,14 @@ export default function KnockoutPredictions({ roomId, roomStatus, simulationMode
       minute: "2-digit",
     });
 
+    const tied = !locked && isTied(match.id);
+    const needsPenalty = tied && !penaltyWinners[match.id];
+
     return (
       <div
         key={match.id}
         className={`bg-gray-900 border rounded-xl p-4 flex flex-col gap-3 ${
-          hasActualResult ? "border-gray-700" : "border-gray-800"
+          hasActualResult ? "border-gray-700" : needsPenalty ? "border-amber-500/50" : "border-gray-800"
         }`}
       >
         {/* Match header */}
@@ -361,10 +389,19 @@ export default function KnockoutPredictions({ roomId, roomStatus, simulationMode
             {hasActualResult && (
               <span className="text-xs bg-gray-700 text-gray-400 px-1.5 py-0.5 rounded">FT</span>
             )}
+            {mSaveStatus === "saving" && (
+              <span className="text-xs text-gray-500">saving…</span>
+            )}
+            {mSaveStatus === "saved" && (
+              <span className="text-xs text-green-400">✓</span>
+            )}
+            {mSaveStatus === "error" && (
+              <span className="text-xs text-red-400">error</span>
+            )}
           </div>
         </div>
 
-        {/* Actual result row (shown once match is live or finished) */}
+        {/* Actual result row */}
         {(hasActualResult || isLive) && (
           <div className="flex items-center gap-3 w-full">
             {renderTeamSlot(displayHome, "home")}
@@ -387,7 +424,6 @@ export default function KnockoutPredictions({ roomId, roomStatus, simulationMode
 
         {/* User prediction row */}
         <div className="flex items-center gap-3 w-full">
-          {/* Only show team names in prediction row when no actual result shown */}
           {!hasActualResult && !isLive && renderTeamSlot(displayHome, "home")}
 
           {hasActualResult || isLive ? (
@@ -400,6 +436,11 @@ export default function KnockoutPredictions({ roomId, roomStatus, simulationMode
               <div className="w-8 h-8 flex items-center justify-center bg-gray-800 rounded text-sm font-bold text-gray-300">
                 {pred ? String(pred.awayScore) : "—"}
               </div>
+              {pred?.penaltyWinner && (
+                <span className="text-xs text-gray-400 ml-1">
+                  ({pred.penaltyWinner === "home" ? displayHome?.name ?? "Home" : displayAway?.name ?? "Away"} on pens)
+                </span>
+              )}
               {pred?.earnedAmount != null && (
                 <div className={`ml-2 inline-flex items-center gap-1 text-xs font-bold px-2 py-1 rounded-full ${
                   pred.earnedAmount > 0 ? "bg-amber-400/20 text-amber-400" : "bg-gray-700 text-gray-400"
@@ -422,6 +463,11 @@ export default function KnockoutPredictions({ roomId, roomStatus, simulationMode
                   {scoreState?.away ?? (pred ? String(pred.awayScore) : "—")}
                 </div>
               </div>
+              {pred?.penaltyWinner && (
+                <span className="text-xs text-gray-400 ml-1">
+                  ({pred.penaltyWinner === "home" ? displayHome?.name ?? "Home" : displayAway?.name ?? "Away"} on pens)
+                </span>
+              )}
               {pred?.earnedAmount != null && (
                 <div className={`inline-flex items-center gap-1 text-xs font-bold px-2 py-1 rounded-full ${
                   pred.earnedAmount > 0 ? "bg-amber-400/20 text-amber-400" : "bg-gray-700 text-gray-400"
@@ -457,13 +503,49 @@ export default function KnockoutPredictions({ roomId, roomStatus, simulationMode
 
           {!hasActualResult && !isLive && renderTeamSlot(displayAway, "away")}
         </div>
+
+        {/* Penalty shootout selector — appears when score is tied */}
+        {!locked && tied && (
+          <div className="flex items-center gap-3 bg-amber-500/10 border border-amber-500/30 rounded-lg px-3 py-2">
+            <span className="text-xs text-amber-400 shrink-0">Penalty winner:</span>
+            <div className="flex gap-2 flex-1">
+              <button
+                onClick={() => handlePenaltyChange(match.id, "home")}
+                className={`flex-1 text-xs font-semibold px-2 py-1 rounded-lg transition-colors ${
+                  penaltyWinners[match.id] === "home"
+                    ? "bg-amber-400 text-gray-900"
+                    : "bg-gray-700 text-gray-300 hover:bg-gray-600"
+                }`}
+              >
+                {displayHome?.name ?? "Home"}
+              </button>
+              <button
+                onClick={() => handlePenaltyChange(match.id, "away")}
+                className={`flex-1 text-xs font-semibold px-2 py-1 rounded-lg transition-colors ${
+                  penaltyWinners[match.id] === "away"
+                    ? "bg-amber-400 text-gray-900"
+                    : "bg-gray-700 text-gray-300 hover:bg-gray-600"
+                }`}
+              >
+                {displayAway?.name ?? "Away"}
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     );
   };
 
-  const status = saveStatus[activeRound] ?? "idle";
-  const errMsg = saveError[activeRound] ?? "";
-  const unlockedCount = roundMatches.filter((m) => !isLocked(m) && scores[m.id]).length;
+  const allPredictions = predictions.map((p) => p.match);
+  const filledCount = allPredictions.filter((m) => {
+    const s = scores[m.id];
+    if (!s || s.home === "" || s.away === "") return false;
+    const h = parseInt(s.home, 10);
+    const a = parseInt(s.away, 10);
+    if (isNaN(h) || isNaN(a)) return false;
+    if (h === a && !penaltyWinners[m.id]) return false;
+    return true;
+  }).length;
 
   return (
     <div>
@@ -478,6 +560,30 @@ export default function KnockoutPredictions({ roomId, roomStatus, simulationMode
           }
         </div>
       )}
+
+      {/* Global save bar */}
+      {!allKOLocked && (
+        <div className="flex items-center justify-between mb-4 bg-gray-900 border border-gray-800 rounded-xl px-4 py-3">
+          <span className="text-sm text-gray-400">
+            {filledCount}/{allPredictions.length} predictions filled
+            <span className="ml-2 text-xs text-gray-600">(auto-saves as you type)</span>
+          </span>
+          <button
+            onClick={handleSaveAll}
+            disabled={globalSaving || filledCount === 0}
+            className={`px-4 py-1.5 rounded-lg text-sm font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+              globalStatus === "saved"
+                ? "bg-green-500 text-white"
+                : globalStatus === "error"
+                ? "bg-red-500 text-white"
+                : "bg-amber-400 hover:bg-amber-300 text-gray-900"
+            }`}
+          >
+            {globalStatus === "saved" ? "Saved!" : globalStatus === "error" ? "Error — retry" : globalSaving ? "Saving…" : "Save all"}
+          </button>
+        </div>
+      )}
+
       <div className="flex flex-wrap gap-2 mb-6">
         {availableRounds.map((r) => (
           <button
@@ -500,40 +606,7 @@ export default function KnockoutPredictions({ roomId, roomStatus, simulationMode
             <p>No matches for this round yet.</p>
           </div>
         ) : (
-          <>
-            {roundMatches.map(renderMatch)}
-            <div className="flex flex-col items-end gap-2 pt-4">
-              {status === "locked" && errMsg && (
-                <p className="text-sm text-amber-400 bg-amber-400/10 border border-amber-400/20 rounded-lg px-3 py-2">
-                  🔒 {errMsg}
-                </p>
-              )}
-              {status === "error" && errMsg && (
-                <p className="text-sm text-red-400">{errMsg}</p>
-              )}
-              <button
-                onClick={() => handleSave(activeRound)}
-                disabled={saving || unlockedCount === 0}
-                className={`px-6 py-2.5 rounded-xl font-semibold text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
-                  status === "saved"
-                    ? "bg-green-500 text-white"
-                    : status === "error" || status === "locked"
-                    ? "bg-red-500 text-white"
-                    : "bg-amber-400 hover:bg-amber-300 text-gray-900"
-                }`}
-              >
-                {status === "saved"
-                  ? "Saved!"
-                  : status === "error"
-                  ? "Error — try again"
-                  : status === "locked"
-                  ? "Predictions closed"
-                  : saving
-                  ? "Saving..."
-                  : "Save predictions"}
-              </button>
-            </div>
-          </>
+          roundMatches.map(renderMatch)
         )}
       </div>
     </div>
