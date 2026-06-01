@@ -36,11 +36,13 @@ type Props = {
 const STATUS_BADGE: Record<string, string> = {
   proposed: "bg-amber-500/20 text-amber-400 border border-amber-500/30",
   open:     "bg-blue-500/20 text-blue-400 border border-blue-500/30",
+  ongoing:  "bg-violet-500/20 text-violet-400 border border-violet-500/30",
   settled:  "bg-green-500/20 text-green-400 border border-green-500/30",
 };
 const STATUS_LABEL: Record<string, string> = {
   proposed: "Pending",
   open: "Open",
+  ongoing: "Ongoing",
   settled: "Settled",
 };
 
@@ -146,9 +148,14 @@ export default function SideBetsPanel({ roomId, currentUserId, isManager, tourna
             {activeBetCount > 0 ? `≈ €${estimatedPayoutPerBet.toFixed(2)}` : "—"}
           </span>
         </div>
-        {(tournamentStarted || uberBetsLocked) && (
+        {uberBetsLocked && !tournamentStarted && (
           <span className="text-xs text-amber-400 bg-amber-400/10 border border-amber-400/20 rounded-lg px-3 py-1.5">
-            🔒 {uberBetsLocked && !tournamentStarted ? "Locked by admin" : "Locked — all answers revealed"}
+            🔒 No new proposals — you can still submit answers until the tournament starts
+          </span>
+        )}
+        {tournamentStarted && (
+          <span className="text-xs text-amber-400 bg-amber-400/10 border border-amber-400/20 rounded-lg px-3 py-1.5">
+            🔒 Locked — all answers revealed
           </span>
         )}
       </div>
@@ -181,9 +188,14 @@ export default function SideBetsPanel({ roomId, currentUserId, isManager, tourna
                 )}
               </div>
               <div className="flex items-center gap-2 shrink-0">
-                <span className={`text-xs px-2 py-0.5 rounded-full ${STATUS_BADGE[bet.status]}`}>
-                  {STATUS_LABEL[bet.status]}
-                </span>
+                {(() => {
+                  const displayStatus = bet.status === "open" && tournamentStarted ? "ongoing" : bet.status;
+                  return (
+                    <span className={`text-xs px-2 py-0.5 rounded-full ${STATUS_BADGE[displayStatus]}`}>
+                      {STATUS_LABEL[displayStatus]}
+                    </span>
+                  );
+                })()}
                 {!isSettled && !uberBetsLocked && !tournamentStarted &&
                   (isManager || bet.proposedByUserId === currentUserId) && (
                   <button
@@ -235,8 +247,8 @@ export default function SideBetsPanel({ roomId, currentUserId, isManager, tourna
               </div>
             )}
 
-            {/* Answer input — open + pre-lock */}
-            {isOpen && !tournamentStarted && !uberBetsLocked && (
+            {/* Answer input — open + before tournament start (uberBetsLocked only blocks new proposals) */}
+            {isOpen && !tournamentStarted && (
               <div className="mb-4">
                 <div className="flex gap-2">
                   <input

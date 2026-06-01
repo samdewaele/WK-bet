@@ -265,20 +265,11 @@ export default function GroupAdminPanel({
     const prevState = testState;
     setTestError(""); setTestState({ phase: "running" });
     try {
-      // For Phase 2, always fetch fresh stats first to get the latest prediction counts
+      // For Phase 2, refresh stats so the member table stays up to date
       if (simPhase === 2) {
         const statsRes = await fetch(`/api/admin/groups/${roomId}/members`);
         const freshStats: MemberStat[] = await statsRes.json();
-        if (Array.isArray(freshStats)) {
-          setMemberStats(freshStats);
-          const totalKO = freshStats[0]?.totalKOMatches ?? 0;
-          const membersReady = freshStats.filter((m) => m.koPredictions >= totalKO && totalKO > 0).length;
-          if (totalKO === 0 || membersReady < freshStats.length) {
-            setTestError(`All members must complete their KO bracket first (${membersReady}/${freshStats.length} ready)`);
-            setTestState(prevState.phase === "seeded" ? prevState : { phase: "idle" });
-            return;
-          }
-        }
+        if (Array.isArray(freshStats)) setMemberStats(freshStats);
       }
 
       const res = await fetch(`/api/admin/groups/${roomId}/test`, {
@@ -541,7 +532,7 @@ export default function GroupAdminPanel({
                           </button>
                           {totalKO > 0 && (
                             <p className="w-full text-xs text-gray-500 mt-1">
-                              {membersReady}/{memberStats.length} members have a full KO bracket — Phase 2 checks live on click.
+                              {membersReady}/{memberStats.length} members have a full KO bracket (members without predictions get 0 pts for missing matches).
                             </p>
                           )}
                         </>
