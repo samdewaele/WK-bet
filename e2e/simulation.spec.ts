@@ -209,7 +209,7 @@ test.describe("Simulation flow", () => {
 
     await page.goto(`/groups/${roomId}`);
 
-    // After cleanup room is back to "betting" → standings tab is always visible
+    // After cleanup room is back to "setup" → standings tab is always visible
     await expect(page.getByRole("link", { name: "Standings" })).toBeVisible(
       { timeout: 10_000 }
     );
@@ -229,7 +229,7 @@ test.describe("Simulation flow", () => {
 
     await page.goto(`/groups/${roomId}?tab=predictions`);
 
-    // Back to betting → no global lock banner
+    // Back to setup → no global lock banner
     await expect(
       page.getByText("Group stage predictions are locked")
     ).not.toBeVisible({ timeout: 10_000 });

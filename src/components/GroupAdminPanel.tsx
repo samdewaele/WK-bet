@@ -597,17 +597,21 @@ export default function GroupAdminPanel({
                 )}
               </div>
 
-              {/* Test simulation — platform admin only */}
-              {isPlatformAdmin && (
+              {/* Test simulation — platform admin only, setup status only */}
+              {isPlatformAdmin && (currentStatus === "setup" || settings.simulationMode) && (
                 <div>
                   <h3 className="text-xs font-bold text-violet-400 uppercase tracking-wide mb-2">Test Simulation</h3>
+                  {currentStatus !== "setup" && !settings.simulationMode ? (
+                    <p className="text-xs text-gray-500 italic">Simulation is only available while the group is in Setup. Move back to Setup first.</p>
+                  ) : (
+                  <>
                   <p className="text-xs text-gray-400 mb-2">
                     Adds 5 fake players + random results. <strong className="text-gray-300">Requires at least 1 open Uber Pot bet with answers first.</strong>
-                    {" "}Phase 1 simulates group stage. Then all members fill in KO predictions. Phase 2 simulates KO rounds. Then you settle the Uber Pot bets below.
+                    {" "}Phase 1 simulates group stage. Then all members fill in KO predictions. Phase 2 simulates KO rounds. Then you settle the Uber Pot bets below. Cleanup resets the group back to Setup.
                   </p>
                   {testError && <p className="text-xs text-red-400 mb-1">{testError}</p>}
                   <div className="flex flex-wrap gap-2 mb-2">
-                    {(testState.phase === "idle" || testState.phase === "checking") && (
+                    {(testState.phase === "idle" || testState.phase === "checking") && currentStatus === "setup" && (
                       <button onClick={() => handleSeed(1)} disabled={testState.phase === "checking"}
                         className="bg-emerald-700 hover:bg-emerald-600 disabled:opacity-40 text-white text-xs font-semibold px-3 py-2 rounded-lg transition-colors">
                         {testState.phase === "checking" ? "Checking…" : "▶ Phase 1: Group Stage"}
@@ -752,6 +756,8 @@ export default function GroupAdminPanel({
                       })}
                     </div>
                   )}
+                </>
+                )}
                 </div>
               )}
             </div>

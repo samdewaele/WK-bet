@@ -104,8 +104,8 @@ export async function getTestPhase(roomId: string): Promise<0 | 1 | 2> {
 
   // ko_betting = Phase 1 done, waiting for real members to submit KO picks
   if (room.status === "ko_betting") return 1;
-  // ko_active or finished = Phase 2 done
-  if (room.status === "ko_active" || room.status === "finished") return 2;
+  // ko_active, settling, finished = Phase 2 done
+  if (room.status === "ko_active" || room.status === "settling" || room.status === "finished") return 2;
 
   return 1; // fallback: test users present but status unclear
 }
@@ -679,10 +679,10 @@ export async function cleanupTestInRoom(roomId: string): Promise<void> {
   await db.prediction.updateMany({ where: { roomId }, data: { points: null, earnedAmount: null } });
   await db.groupStandingPrediction.updateMany({ where: { roomId }, data: { earnedAmount: null } });
 
-  // Reset room back to betting mode (not simulation)
+  // Reset room back to setup (simulation is only allowed from setup)
   await db.room.update({
     where: { id: roomId },
-    data: { status: "betting", simulationMode: false },
+    data: { status: "setup", simulationMode: false },
   });
 
   for (const id of ids) {
