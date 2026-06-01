@@ -123,10 +123,13 @@ export async function syncMatches(): Promise<SyncResult> {
     }
 
     // Auto-transition non-simulation rooms through status lifecycle
+    const finalFinished = await db.match.count({ where: { round: "Final", status: "finished" } });
+
     const now = new Date();
     const groupStarted = firstGroupKickoff && now >= firstGroupKickoff.kickoff;
     const allGroupDone = finishedGroupCount === 72;
     const koStarted = !!firstKOKickoff;
+    const tournamentOver = finalFinished > 0;
 
     const rooms = await db.room.findMany({
       where: { simulationMode: false },
@@ -142,6 +145,10 @@ export async function syncMatches(): Promise<SyncResult> {
         newStatus = "ko_betting";
       } else if (room.status === "ko_betting" && koStarted) {
         newStatus = "ko_active";
+      } else if (room.status === "ko_active" && tournamentOver) {
+        // Final whistle → settlement. Admin manually confirms "finished"
+        // once every Uber Pot bet has been settled.
+        newStatus = "settling";
       }
 
       if (newStatus) {

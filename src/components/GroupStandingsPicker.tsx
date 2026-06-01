@@ -107,9 +107,9 @@ export default function GroupStandingsPicker({ roomId, roomStatus }: Props) {
   const [loading, setLoading] = useState(true);
 
   // All groups lock simultaneously at tournament start
-  const LOCKED_STATUSES = ["closed", "group_active", "ko_betting", "ko_active", "finished"];
+  const LOCKED_STATUSES = ["closed", "group_active", "ko_betting", "ko_active", "settling", "finished"];
   const allLocked = roomStatus ? LOCKED_STATUSES.includes(roomStatus) : false;
-  const tournamentStarted = ["group_active", "ko_betting", "ko_active", "finished"].includes(roomStatus ?? "");
+  const tournamentStarted = ["group_active", "ko_betting", "ko_active", "settling", "finished"].includes(roomStatus ?? "");
 
   useEffect(() => {
     async function fetchData() {

@@ -22,6 +22,11 @@ export async function POST(
   });
   if (!membership) return NextResponse.json({ error: "Not a member" }, { status: 403 });
 
+  const roomRow = await db.room.findUnique({ where: { id: roomId }, select: { status: true } });
+  if (roomRow && !["setup", "betting"].includes(roomRow.status)) {
+    return NextResponse.json({ error: "Betting is closed — Uber Pot answers are locked" }, { status: 403 });
+  }
+
   const sideBet = await db.sideBet.findFirst({ where: { id: sideBetId, roomId } });
   if (!sideBet) return NextResponse.json({ error: "Uber Pot Bet not found" }, { status: 404 });
   if (sideBet.status === "proposed") {

@@ -21,7 +21,7 @@ export async function GET(
   }
 
   const KO_ROUNDS = ["R32", "R16", "QF", "SF", "3rd", "Final"];
-  const KO_VISIBLE_STATUSES = ["ko_betting", "ko_active", "finished"];
+  const KO_VISIBLE_STATUSES = ["ko_betting", "ko_active", "settling", "finished"];
 
   const room = await db.room.findUnique({ where: { id: roomId }, select: { status: true } });
 

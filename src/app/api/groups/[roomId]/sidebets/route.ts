@@ -83,7 +83,10 @@ export async function POST(req: NextRequest, { params }: Params) {
   const ctx = await resolveRoom(roomId, userId, session.user.role ?? "");
   if (!ctx) return NextResponse.json({ error: "Room not found" }, { status: 404 });
 
-  const roomRow = await db.room.findUnique({ where: { id: roomId }, select: { uberBetsLocked: true } });
+  const roomRow = await db.room.findUnique({ where: { id: roomId }, select: { uberBetsLocked: true, status: true } });
+  if (roomRow && !["setup", "betting"].includes(roomRow.status)) {
+    return NextResponse.json({ error: "Betting is closed — no new Uber Pot proposals" }, { status: 403 });
+  }
   if (roomRow?.uberBetsLocked) {
     return NextResponse.json({ error: "Uber Pot bets are locked by the group admin" }, { status: 403 });
   }

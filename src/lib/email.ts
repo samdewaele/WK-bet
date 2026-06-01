@@ -277,6 +277,25 @@ export async function emailKOStageActive(
   );
 }
 
+/** Sent when the final whistle blows and the tournament enters settlement. */
+export async function emailSettlingStarted(
+  to: string,
+  name: string,
+  groupName: string,
+  groupId: string,
+  leaderboard: LeaderboardRow[],
+): Promise<void> {
+  await send(
+    to,
+    `⏳ Final whistle! Settling the Uber Pot — ${groupName}`,
+    wrap(`<p>Hi ${name},</p>
+          <p>The last match of the 2026 World Cup is done in <strong>${groupName}</strong>! Here's the standing before the Uber Pot is settled:</p>
+          ${leaderboardHtml(leaderboard)}
+          <p>The admin is now settling all Uber Pot categories. Final earnings will be confirmed once every category has a winner.</p>
+          <p><a href="${APP_URL}/groups/${groupId}?tab=standings" style="display:inline-block;background:#f59e0b;color:#111;font-weight:700;padding:10px 20px;border-radius:8px;text-decoration:none">View Standings →</a></p>`),
+  );
+}
+
 /** Sent when admin marks tournament finished. Mentions uber pot settlement still needed. */
 export async function emailTournamentFinished(
   to: string,

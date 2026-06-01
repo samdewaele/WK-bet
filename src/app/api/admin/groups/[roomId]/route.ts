@@ -8,6 +8,7 @@ import {
   emailGroupStageStarted,
   emailGroupStageComplete,
   emailKOStageActive,
+  emailSettlingStarted,
   emailTournamentFinished,
 } from "@/lib/email";
 import { buildRoomLeaderboard } from "@/lib/notifications";
@@ -55,8 +56,19 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   if (typeof body.simulationMode === "boolean") data.simulationMode = body.simulationMode;
   if (typeof body.uberBetsLocked === "boolean") data.uberBetsLocked = body.uberBetsLocked;
   if ("description" in body) data.description = body.description?.trim() || null;
-  const VALID_STATUSES = ["setup", "betting", "closed", "group_active", "ko_betting", "ko_active", "finished"];
+  const VALID_STATUSES = ["setup", "betting", "closed", "group_active", "ko_betting", "ko_active", "settling", "finished"];
   if (typeof body.status === "string" && VALID_STATUSES.includes(body.status)) data.status = body.status;
+
+  // Guard: cannot finish a tournament until every Uber Pot bet is settled.
+  if (data.status === "finished") {
+    const unsettled = await db.sideBet.count({ where: { roomId, status: "open" } });
+    if (unsettled > 0) {
+      return NextResponse.json(
+        { error: `Settle all ${unsettled} open Uber Pot bet${unsettled > 1 ? "s" : ""} before finishing the tournament.` },
+        { status: 400 },
+      );
+    }
+  }
 
   if (Object.keys(data).length === 0) {
     return NextResponse.json({ error: "Nothing to update" }, { status: 400 });
@@ -79,7 +91,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
       });
       if (!room) return;
 
-      const needsLeaderboard = newStatus && ["ko_betting", "ko_active", "finished"].includes(newStatus);
+      const needsLeaderboard = newStatus && ["ko_betting", "ko_active", "settling", "finished"].includes(newStatus);
       const leaderboard = needsLeaderboard ? await buildRoomLeaderboard(roomId) : [];
 
       for (const member of room.members) {
@@ -91,6 +103,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
         if (newStatus === "group_active") emailGroupStageStarted(email, n, room.name, roomId).catch(() => {});
         if (newStatus === "ko_betting")   emailGroupStageComplete(email, n, room.name, roomId, leaderboard).catch(() => {});
         if (newStatus === "ko_active")    emailKOStageActive(email, n, room.name, roomId, leaderboard).catch(() => {});
+        if (newStatus === "settling")     emailSettlingStarted(email, n, room.name, roomId, leaderboard).catch(() => {});
         if (newStatus === "finished")     emailTournamentFinished(email, n, room.name, roomId, leaderboard).catch(() => {});
         if (uberLocked)                   emailUberPotLocked(email, n, room.name, roomId).catch(() => {});
       }

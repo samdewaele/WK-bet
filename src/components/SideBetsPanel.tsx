@@ -30,6 +30,8 @@ type Props = {
   isManager: boolean;
   tournamentStarted: boolean;
   uberBetsLocked?: boolean;
+  /** True once the room status has moved past betting (closed / group_active …) — all betting is locked. */
+  bettingClosed?: boolean;
   totalPot: number;
 };
 
@@ -46,7 +48,9 @@ const STATUS_LABEL: Record<string, string> = {
   settled: "Settled",
 };
 
-export default function SideBetsPanel({ roomId, currentUserId, isManager, tournamentStarted, uberBetsLocked = false, totalPot }: Props) {
+export default function SideBetsPanel({ roomId, currentUserId, isManager, tournamentStarted, uberBetsLocked = false, bettingClosed = false, totalPot }: Props) {
+  // Betting is "over" (no edits, no proposals) once the tournament starts OR the admin closes the room.
+  const bettingOver = tournamentStarted || bettingClosed;
   const [bets, setBets] = useState<UberBet[]>([]);
   const [loading, setLoading] = useState(true);
   const [answerDrafts, setAnswerDrafts] = useState<Record<string, string>>({});
@@ -148,7 +152,12 @@ export default function SideBetsPanel({ roomId, currentUserId, isManager, tourna
             {activeBetCount > 0 ? `≈ €${estimatedPayoutPerBet.toFixed(2)}` : "—"}
           </span>
         </div>
-        {uberBetsLocked && !tournamentStarted && (
+        {bettingClosed && !tournamentStarted && (
+          <span className="text-xs text-amber-400 bg-amber-400/10 border border-amber-400/20 rounded-lg px-3 py-1.5">
+            🔒 Betting is closed by the admin — answers are locked
+          </span>
+        )}
+        {uberBetsLocked && !bettingClosed && !tournamentStarted && (
           <span className="text-xs text-amber-400 bg-amber-400/10 border border-amber-400/20 rounded-lg px-3 py-1.5">
             🔒 No new proposals — you can still submit answers until the tournament starts
           </span>
@@ -196,7 +205,7 @@ export default function SideBetsPanel({ roomId, currentUserId, isManager, tourna
                     </span>
                   );
                 })()}
-                {!isSettled && !uberBetsLocked && !tournamentStarted &&
+                {!isSettled && !uberBetsLocked && !bettingOver &&
                   (isManager || bet.proposedByUserId === currentUserId) && (
                   <button
                     onClick={() => handlePatch({ sideBetId: bet.id, action: "cancel" }, bet.id)}
@@ -248,7 +257,7 @@ export default function SideBetsPanel({ roomId, currentUserId, isManager, tourna
             )}
 
             {/* Answer input — open + before tournament start (uberBetsLocked only blocks new proposals) */}
-            {isOpen && !tournamentStarted && (
+            {isOpen && !bettingOver && (
               <div className="mb-4">
                 <div className="flex gap-2">
                   <input
@@ -361,7 +370,7 @@ export default function SideBetsPanel({ roomId, currentUserId, isManager, tourna
       )}
 
       {/* Propose / create form — at bottom */}
-      {!tournamentStarted && !uberBetsLocked && (
+      {!bettingOver && !uberBetsLocked && (
         <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
           <h3 className="text-sm font-semibold text-amber-400 mb-1">
             {isManager ? "Create Uber Pot Bet" : "Propose an Uber Pot Bet"}

@@ -584,7 +584,7 @@ export default function KnockoutPredictions({ roomId, roomStatus, simulationMode
       {allKOLocked && roomStatus && roomStatus !== "ko_betting" && availableRounds.length > 0 && (
         <div className="mb-4 flex items-center gap-2 text-sm text-amber-400 bg-amber-400/10 border border-amber-400/20 rounded-xl px-4 py-3">
           <span>🔒</span>
-          {roomStatus === "ko_active" || roomStatus === "finished"
+          {roomStatus === "ko_active" || roomStatus === "settling" || roomStatus === "finished"
             ? <span>KO predictions are locked — bracket is now playing out.</span>
             : simulationMode
             ? <span>Run Phase 1 simulation first to open the KO prediction window.</span>

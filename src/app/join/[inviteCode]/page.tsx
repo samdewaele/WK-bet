@@ -27,7 +27,7 @@ export default async function JoinPage({
   if (!room) redirect("/groups");
 
   // Joining is blocked once the group is closed or the tournament has started
-  const CLOSED_STATUSES = ["closed", "group_active", "ko_betting", "ko_active", "finished"];
+  const CLOSED_STATUSES = ["closed", "group_active", "ko_betting", "ko_active", "settling", "finished"];
   if (CLOSED_STATUSES.includes(room.status) || await isTournamentStarted()) {
     redirect("/groups?joinError=locked");
   }

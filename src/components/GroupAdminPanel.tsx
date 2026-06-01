@@ -41,6 +41,7 @@ const STATUS_LABELS: Record<string, string> = {
   group_active: "Group stage",
   ko_betting: "KO betting",
   ko_active: "KO stage",
+  settling: "Settling",
   finished: "Finished",
 };
 
@@ -399,14 +400,17 @@ export default function GroupAdminPanel({
                         ← Reopen for bets
                       </button>
                     )}
-                    {(currentStatus === "group_active" || currentStatus === "ko_betting") && (
+                    {(currentStatus === "group_active" || currentStatus === "ko_betting" || currentStatus === "ko_active") && (
                       <p className="text-xs text-gray-500 italic">Transitions automatically based on match schedule.</p>
                     )}
-                    {currentStatus === "ko_active" && (
-                      <button onClick={() => handleStatusTransition("finished")} disabled={saving}
-                        className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-purple-700 hover:bg-purple-600 disabled:opacity-40 text-white transition-colors">
-                        Mark as finished →
-                      </button>
+                    {currentStatus === "settling" && (
+                      <div className="w-full">
+                        <button onClick={() => handleStatusTransition("finished")} disabled={saving}
+                          className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-purple-700 hover:bg-purple-600 disabled:opacity-40 text-white transition-colors">
+                          Finish tournament →
+                        </button>
+                        <p className="text-xs text-gray-500 mt-1.5">Settle every open Uber Pot bet below first — finishing is blocked until all are settled.</p>
+                      </div>
                     )}
                     {currentStatus === "finished" && (
                       <p className="text-xs text-emerald-400">Tournament complete.</p>

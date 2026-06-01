@@ -81,13 +81,11 @@ export default async function GroupDetailPage({ params, searchParams }: Props) {
       })
     : null;
 
-  const showStandings = !["setup", "betting", "closed"].includes(roomStatus);
-  // Fall back to predictions if the standings tab isn't available
-  const activeTab = tab === "standings" && !showStandings ? "predictions" : tab;
+  const activeTab = tab;
 
   const tabs = [
     { key: "predictions", label: "Predictions" },
-    ...(showStandings ? [{ key: "standings", label: "Standings" }] : []),
+    { key: "standings", label: "Standings" },
     { key: "sidebets-p2p", label: "Side Bets" },
     { key: "members", label: `Members (${room.members.length})` },
     { key: "rules", label: "How to play" },
@@ -191,6 +189,12 @@ export default async function GroupDetailPage({ params, searchParams }: Props) {
             {roomStatus === "ko_active" && <span>Knockout stage in progress — KO predictions are locked.</span>}
           </div>
         )}
+        {roomStatus === "settling" && (
+          <div className="mb-4 flex items-center gap-2 text-sm text-amber-400 bg-amber-400/10 border border-amber-400/20 rounded-xl px-4 py-3">
+            <span>⏳</span>
+            <span>Final whistle! The admin is settling the Uber Pot categories — final earnings are confirmed once every category has a winner.</span>
+          </div>
+        )}
         {roomStatus === "finished" && (
           <div className="mb-4 flex items-center gap-2 text-sm text-emerald-400 bg-emerald-400/10 border border-emerald-400/20 rounded-xl px-4 py-3">
             <span>🏆</span>
@@ -234,6 +238,7 @@ export default async function GroupDetailPage({ params, searchParams }: Props) {
                 isManager={isManager}
                 tournamentStarted={tournamentStarted}
                 uberBetsLocked={uberBetsLocked}
+                bettingClosed={!["setup", "betting"].includes(roomStatus)}
                 totalPot={pot.totalPot}
               />
             </div>

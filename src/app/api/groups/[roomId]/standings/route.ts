@@ -65,7 +65,7 @@ export async function POST(
   }
 
   const room = await db.room.findUnique({ where: { id: roomId }, select: { status: true } });
-  const STANDINGS_LOCKED = ["closed", "group_active", "ko_betting", "ko_active", "finished"];
+  const STANDINGS_LOCKED = ["closed", "group_active", "ko_betting", "ko_active", "settling", "finished"];
   if (room && STANDINGS_LOCKED.includes(room.status)) {
     return NextResponse.json({ error: "Group stage predictions are locked" }, { status: 403 });
   }
