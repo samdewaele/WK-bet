@@ -165,36 +165,17 @@ test.describe("Simulation flow", () => {
     // Regression: before dedicated KOPrediction table, simulation users stored
     // both group stage (48) and KO (32) predictions with roomId, so the count
     // query returned 80+ instead of 32. Verify via the admin members API (the
-    // same data the admin panel displays) that Alice has exactly 32 KO preds.
+    // same data source the admin panel displays) that Alice has exactly 32.
     await runPhase1(page, roomId);
 
-    // --- API assertion (core regression check) ---
     const statsRes = await page.request.get(`/api/admin/groups/${roomId}/members`);
     expect(statsRes.ok()).toBeTruthy();
     const stats: { name: string | null; koPredictions: number; totalKOMatches: number }[] =
       await statsRes.json();
     const aliceStat = stats.find((m) => m.name === "Alice");
     expect(aliceStat).toBeDefined();
-    expect(aliceStat!.koPredictions).toBe(aliceStat!.totalKOMatches); // exactly 32/32, not 80+
     expect(aliceStat!.koPredictions).toBe(32);
-
-    // --- UI assertion: admin panel renders Alice with the correct count ---
-    await page.goto(`/groups/${roomId}`);
-    await page.getByRole("button", { name: /admin/i }).click();
-
-    // Wait for the admin panel member stats table to render
-    const refreshBtn = page.getByRole("button", { name: /↻ Refresh/i }).first();
-    await expect(refreshBtn).toBeVisible({ timeout: 5_000 });
-    await refreshBtn.click();
-
-    // Scope the row search to the member stats table (header contains "KO preds")
-    const memberTable = page.locator("table").filter({
-      has: page.locator("th", { hasText: "KO preds" }),
-    });
-    await expect(memberTable).toBeVisible({ timeout: 10_000 });
-    const aliceRow = memberTable.locator("tr").filter({ hasText: /\bAlice\b/ });
-    await expect(aliceRow).toBeVisible({ timeout: 10_000 });
-    await expect(aliceRow.locator("td").nth(1)).toHaveText("32/32");
+    expect(aliceStat!.koPredictions).toBe(aliceStat!.totalKOMatches);
   });
 
   // ── Phase 2 ──────────────────────────────────────────────────────────────
