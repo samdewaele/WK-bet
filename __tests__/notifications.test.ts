@@ -13,92 +13,101 @@ vi.mock("@/lib/db", () => ({
 
 vi.mock("@/lib/email", () => ({
   emailGroupStageComplete: vi.fn().mockResolvedValue(undefined),
-  emailRoundComplete: vi.fn().mockResolvedValue(undefined),
-  emailIncompleteReminder: vi.fn().mockResolvedValue(undefined),
+  emailRoundComplete:      vi.fn().mockResolvedValue(undefined),
+  emailRoundReminder:      vi.fn().mockResolvedValue(undefined),
 }));
 
 import { db } from "@/lib/db";
-import { emailIncompleteReminder } from "@/lib/email";
+import { emailRoundReminder } from "@/lib/email";
 import { checkAndSendIncompleteReminders } from "@/lib/notifications";
 
 const mockDb = db as any;
-const mockEmailIncompleteReminder = vi.mocked(emailIncompleteReminder);
+const mockEmailRoundReminder = vi.mocked(emailRoundReminder);
 
 beforeEach(() => {
   vi.clearAllMocks();
   mockDb.notification.create.mockResolvedValue({});
 });
 
+const MEMBERS = [
+  { userId: "u1", user: { id: "u1", name: "Alice", email: "alice@test.com" } },
+  { userId: "u2", user: { id: "u2", name: "Bob",   email: "bob@test.com"   } },
+];
+
 describe("checkAndSendIncompleteReminders", () => {
-  it("does NOT send reminders for the Group round (group match scores are bonus-only)", async () => {
-    // Set up: the "Group" round has a match kicking off within 24h
-    // but we should NOT send reminders for it
-    const now = new Date();
-    const soonKickoff = new Date(now.getTime() + 2 * 60 * 60 * 1000); // 2h from now
-
-    // wasNotified returns null (not notified yet)
+  it("sends reminder to ALL members 24h before R32 — regardless of whether they filled predictions", async () => {
+    const soonKickoff = new Date(Date.now() + 2 * 60 * 60 * 1000); // 2h from now
     mockDb.notification.findUnique.mockResolvedValue(null);
-
-    // Only one upcoming match (R32) within 24h
-    mockDb.match.findFirst.mockResolvedValueOnce({
-      id: "m1",
-      kickoff: soonKickoff,
-      round: "R32",
-    });
-    // All other rounds: no matches coming up
-    mockDb.match.findFirst.mockResolvedValue(null);
-
-    mockDb.room.findMany.mockResolvedValue([
-      {
-        id: "r1",
-        name: "Test Group",
-        members: [
-          { userId: "u1", user: { id: "u1", name: "Alice", email: "alice@test.com" } },
-        ],
-      },
-    ]);
-
-    mockDb.match.count.mockResolvedValue(8);
-    mockDb.prediction.count.mockResolvedValue(0); // 0 predictions made
+    mockDb.match.findFirst
+      .mockResolvedValueOnce({ id: "m1", kickoff: soonKickoff, round: "R32" }) // Group
+      .mockResolvedValueOnce({ id: "m1", kickoff: soonKickoff, round: "R32" }) // R32
+      .mockResolvedValue(null); // later rounds
+    mockDb.room.findMany.mockResolvedValue([{ id: "r1", name: "Test Group", members: MEMBERS }]);
 
     await checkAndSendIncompleteReminders();
 
-    // Should have sent for R32 (missing predictions)
-    expect(mockEmailIncompleteReminder).toHaveBeenCalledWith(
-      "alice@test.com",
-      "Alice",
-      "R32",
-      "Test Group",
-      "r1",
-      expect.any(String),
-      8,
+    // Both members get reminded — no count check
+    expect(mockEmailRoundReminder).toHaveBeenCalledWith(
+      "alice@test.com", "Alice", expect.any(String), "Test Group", "r1", expect.any(String)
+    );
+    expect(mockEmailRoundReminder).toHaveBeenCalledWith(
+      "bob@test.com", "Bob", expect.any(String), "Test Group", "r1", expect.any(String)
     );
   });
 
-  it("does NOT send Group-round reminders even when Group match is imminent", async () => {
-    const now = new Date();
-    const soonKickoff = new Date(now.getTime() + 1 * 60 * 60 * 1000); // 1h from now
-
+  it("sends Group round reminder when group stage kicks off within 24h", async () => {
+    const soonKickoff = new Date(Date.now() + 3 * 60 * 60 * 1000);
     mockDb.notification.findUnique.mockResolvedValue(null);
-    // Return a Group round match as the first upcoming match
-    // This should be skipped since we only check REMINDER_ROUNDS (not Group)
-    mockDb.match.findFirst.mockResolvedValue(null); // All KO rounds have no upcoming match
-
-    mockDb.room.findMany.mockResolvedValue([
-      {
-        id: "r1",
-        members: [
-          { userId: "u1", user: { id: "u1", name: "Bob", email: "bob@test.com" } },
-        ],
-      },
-    ]);
+    // First call (Group round) returns a match; rest return null
+    mockDb.match.findFirst
+      .mockResolvedValueOnce({ id: "g1", kickoff: soonKickoff, round: "Group" })
+      .mockResolvedValue(null);
+    mockDb.room.findMany.mockResolvedValue([{ id: "r1", name: "My Group", members: MEMBERS }]);
 
     await checkAndSendIncompleteReminders();
 
-    // Group round reminders should never be sent regardless
-    const groupCalls = mockEmailIncompleteReminder.mock.calls.filter(
-      (call) => call[2] === "Group"
-    );
-    expect(groupCalls).toHaveLength(0);
+    const groupCalls = mockEmailRoundReminder.mock.calls.filter((c) => c[2] === "Group");
+    expect(groupCalls.length).toBeGreaterThan(0);
+    expect(groupCalls[0][0]).toBe("alice@test.com");
+  });
+
+  it("skips a round when already notified (wasNotified=true)", async () => {
+    // All rounds already notified
+    mockDb.notification.findUnique.mockResolvedValue({ type: "reminder:R32" });
+    mockDb.match.findFirst.mockResolvedValue({ id: "m1", kickoff: new Date(Date.now() + 60_000) });
+    mockDb.room.findMany.mockResolvedValue([{ id: "r1", name: "G", members: MEMBERS }]);
+
+    await checkAndSendIncompleteReminders();
+
+    expect(mockEmailRoundReminder).not.toHaveBeenCalled();
+  });
+
+  it("skips a round when the first match is more than 24h away", async () => {
+    const farKickoff = new Date(Date.now() + 36 * 60 * 60 * 1000); // 36h from now
+    mockDb.notification.findUnique.mockResolvedValue(null);
+    mockDb.match.findFirst.mockResolvedValue({ id: "m1", kickoff: farKickoff });
+    mockDb.room.findMany.mockResolvedValue([{ id: "r1", name: "G", members: MEMBERS }]);
+
+    await checkAndSendIncompleteReminders();
+
+    expect(mockEmailRoundReminder).not.toHaveBeenCalled();
+  });
+
+  it("skips members without an email address", async () => {
+    const soonKickoff = new Date(Date.now() + 60 * 60 * 1000);
+    mockDb.notification.findUnique.mockResolvedValue(null);
+    mockDb.match.findFirst.mockResolvedValueOnce({ id: "m1", kickoff: soonKickoff }).mockResolvedValue(null);
+    mockDb.room.findMany.mockResolvedValue([{
+      id: "r1", name: "G",
+      members: [
+        { userId: "u1", user: { id: "u1", name: "Alice", email: null } },
+        { userId: "u2", user: { id: "u2", name: "Bob",   email: "bob@test.com" } },
+      ],
+    }]);
+
+    await checkAndSendIncompleteReminders();
+
+    expect(mockEmailRoundReminder).toHaveBeenCalledTimes(1);
+    expect(mockEmailRoundReminder.mock.calls[0][0]).toBe("bob@test.com");
   });
 });

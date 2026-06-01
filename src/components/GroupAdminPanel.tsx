@@ -87,6 +87,10 @@ export default function GroupAdminPanel({
 
   // Disband
   const [disbanding, setDisbanding] = useState(false);
+  const [broadcastSubject, setBroadcastSubject] = useState("");
+  const [broadcastMessage, setBroadcastMessage] = useState("");
+  const [broadcasting, setBroadcasting] = useState(false);
+  const [broadcastStatus, setBroadcastStatus] = useState<"idle" | "sent" | "error">("idle");
 
   // Members stats
   const [memberStats, setMemberStats] = useState<MemberStat[]>([]);
@@ -186,6 +190,24 @@ export default function GroupAdminPanel({
       const res = await fetch(`/api/admin/groups/${roomId}`, { method: "DELETE" });
       if (res.ok) router.push("/groups");
     } finally { setDisbanding(false); }
+  }
+
+  async function handleBroadcast() {
+    if (!broadcastSubject.trim() || !broadcastMessage.trim()) return;
+    setBroadcasting(true);
+    setBroadcastStatus("idle");
+    try {
+      const res = await fetch(`/api/admin/groups/${roomId}/broadcast`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ subject: broadcastSubject, message: broadcastMessage }),
+      });
+      setBroadcastStatus(res.ok ? "sent" : "error");
+      if (res.ok) { setBroadcastSubject(""); setBroadcastMessage(""); }
+    } finally {
+      setBroadcasting(false);
+      setTimeout(() => setBroadcastStatus("idle"), 4000);
+    }
   }
 
   async function handleToggleExclude(userId: string, currentlyExcluded: boolean) {
@@ -690,6 +712,38 @@ export default function GroupAdminPanel({
                 )}
               </div>
             )}
+          </div>
+
+          {/* Broadcast email */}
+          <div className="border border-gray-700 rounded-xl p-4">
+            <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wide mb-3">📢 Send Email to All Members</h3>
+            <div className="space-y-2">
+              <input
+                type="text"
+                value={broadcastSubject}
+                onChange={(e) => setBroadcastSubject(e.target.value)}
+                placeholder="Subject"
+                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-amber-400"
+              />
+              <textarea
+                value={broadcastMessage}
+                onChange={(e) => setBroadcastMessage(e.target.value)}
+                placeholder="Message body…"
+                rows={4}
+                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-amber-400 resize-none"
+              />
+              <div className="flex items-center justify-end gap-3">
+                {broadcastStatus === "sent" && <span className="text-xs text-green-400">✓ Sent to all members</span>}
+                {broadcastStatus === "error" && <span className="text-xs text-red-400">Failed — try again</span>}
+                <button
+                  onClick={handleBroadcast}
+                  disabled={broadcasting || !broadcastSubject.trim() || !broadcastMessage.trim()}
+                  className="bg-amber-400 hover:bg-amber-300 disabled:opacity-40 disabled:cursor-not-allowed text-gray-900 font-semibold px-4 py-1.5 rounded-lg text-sm transition-colors"
+                >
+                  {broadcasting ? "Sending…" : "Send to all"}
+                </button>
+              </div>
+            </div>
           </div>
 
           {/* Danger zone */}

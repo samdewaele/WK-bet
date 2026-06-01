@@ -2,6 +2,15 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@auth";
 import { db } from "@/lib/db";
 import { isTournamentStarted } from "@/lib/tournament-lock";
+import {
+  emailBettingOpen,
+  emailUberPotLocked,
+  emailGroupStageStarted,
+  emailGroupStageComplete,
+  emailKOStageActive,
+  emailTournamentFinished,
+} from "@/lib/email";
+import { buildRoomLeaderboard } from "@/lib/notifications";
 
 type Params = { params: Promise<{ roomId: string }> };
 
@@ -54,6 +63,40 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   }
 
   const updated = await db.room.update({ where: { id: roomId }, data });
+
+  // Fire status-change and uberBetsLocked emails in the background.
+  const newStatus = data.status as string | undefined;
+  const uberLocked = data.uberBetsLocked === true;
+  if (newStatus || uberLocked) {
+    (async () => {
+      const room = await db.room.findUnique({
+        where: { id: roomId },
+        select: {
+          name: true,
+          entryFee: true,
+          members: { include: { user: { select: { name: true, email: true } } } },
+        },
+      });
+      if (!room) return;
+
+      const needsLeaderboard = newStatus && ["ko_betting", "ko_active", "finished"].includes(newStatus);
+      const leaderboard = needsLeaderboard ? await buildRoomLeaderboard(roomId) : [];
+
+      for (const member of room.members) {
+        const { email, name } = member.user;
+        if (!email) continue;
+        const n = name ?? "there";
+
+        if (newStatus === "betting")      emailBettingOpen(email, n, room.name, roomId, room.entryFee).catch(() => {});
+        if (newStatus === "group_active") emailGroupStageStarted(email, n, room.name, roomId).catch(() => {});
+        if (newStatus === "ko_betting")   emailGroupStageComplete(email, n, room.name, roomId, leaderboard).catch(() => {});
+        if (newStatus === "ko_active")    emailKOStageActive(email, n, room.name, roomId, leaderboard).catch(() => {});
+        if (newStatus === "finished")     emailTournamentFinished(email, n, room.name, roomId, leaderboard).catch(() => {});
+        if (uberLocked)                   emailUberPotLocked(email, n, room.name, roomId).catch(() => {});
+      }
+    })().catch(() => {});
+  }
+
   return NextResponse.json({ id: updated.id, name: updated.name, entryFee: updated.entryFee, status: updated.status, simulationMode: updated.simulationMode });
 }
 

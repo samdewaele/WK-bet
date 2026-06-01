@@ -3,7 +3,7 @@
 
 const API_KEY = process.env.RESEND_API_KEY;
 const FROM = process.env.EMAIL_FROM ?? "WK-Bet 2026 <onboarding@resend.dev>";
-const APP_URL = process.env.NEXTAUTH_URL ?? "https://wk-bet.fly.dev";
+export const APP_URL = process.env.NEXTAUTH_URL ?? "https://wk-bet.fly.dev";
 
 async function send(to: string, subject: string, html: string): Promise<void> {
   if (!to) return;
@@ -164,5 +164,144 @@ export async function emailIncompleteReminder(
           <p>The <strong>${label}</strong> kicks off <strong>${deadline}</strong> and you still have <strong>${missingCount} missing prediction${missingCount > 1 ? "s" : ""}</strong> in <strong>${groupName}</strong>.</p>
           <p>Predictions lock the moment each match kicks off — don't miss your chance!</p>
           <p><a href="${APP_URL}/groups/${groupId}?tab=predictions" style="display:inline-block;background:#f59e0b;color:#111;font-weight:700;padding:10px 20px;border-radius:8px;text-decoration:none">Submit Predictions Now →</a></p>`),
+  );
+}
+
+/** Simplified reminder sent to all members 24h before any round starts (no prediction count). */
+export async function emailRoundReminder(
+  to: string,
+  name: string,
+  round: string,
+  groupName: string,
+  groupId: string,
+  deadline: string,
+): Promise<void> {
+  const label = ROUND_LABELS[round] ?? round;
+  const isGroup = round === "Group";
+  await send(
+    to,
+    `⏰ ${label} kicks off soon — check your predictions! (${groupName})`,
+    wrap(`<p>Hi ${name},</p>
+          <p>The <strong>${label}</strong> kicks off <strong>${deadline}</strong>.</p>
+          ${isGroup
+            ? `<p>Make sure your group stage predictions and Uber Pot entries are all submitted — they lock when the first match starts!</p>`
+            : `<p>Make sure your knockout predictions are in — they lock the moment each match kicks off!</p>`
+          }
+          <p><a href="${APP_URL}/groups/${groupId}?tab=predictions" style="display:inline-block;background:#f59e0b;color:#111;font-weight:700;padding:10px 20px;border-radius:8px;text-decoration:none">Submit Predictions →</a></p>`),
+  );
+}
+
+/** Sent when admin opens group for predictions (status → betting). */
+export async function emailBettingOpen(
+  to: string,
+  name: string,
+  groupName: string,
+  groupId: string,
+  entryFee: number,
+): Promise<void> {
+  await send(
+    to,
+    `🎯 Predictions are open in "${groupName}"!`,
+    wrap(`<p>Hi ${name},</p>
+          <p>Your betting group <strong>${groupName}</strong> is now open! Here's what to do before the group stage kicks off:</p>
+          <ul style="padding-left:20px;line-height:1.8">
+            <li>Submit your <strong>group stage predictions</strong> for all 12 groups — they lock when the first match starts</li>
+            <li><strong>Propose Uber Pot categories</strong> — creative ideas welcome! The admin reviews and approves proposals. Once the Uber Pot closes, no new categories can be added</li>
+          </ul>
+          <p style="color:#9ca3af;font-size:13px">Entry fee: €${entryFee.toFixed(2)}</p>
+          <p><a href="${APP_URL}/groups/${groupId}?tab=predictions" style="display:inline-block;background:#f59e0b;color:#111;font-weight:700;padding:10px 20px;border-radius:8px;text-decoration:none">Open ${groupName} →</a></p>`),
+  );
+}
+
+/** Sent when admin locks Uber Pot proposals (uberBetsLocked → true). */
+export async function emailUberPotLocked(
+  to: string,
+  name: string,
+  groupName: string,
+  groupId: string,
+): Promise<void> {
+  await send(
+    to,
+    `🔒 Uber Pot is closed — "${groupName}"`,
+    wrap(`<p>Hi ${name},</p>
+          <p>The admin has closed Uber Pot category proposals in <strong>${groupName}</strong>. No new categories can be proposed.</p>
+          <p>Make sure you've submitted your answers for all open Uber Pot categories — they still accept entries until the deadline!</p>
+          <p><a href="${APP_URL}/groups/${groupId}?tab=predictions" style="display:inline-block;background:#f59e0b;color:#111;font-weight:700;padding:10px 20px;border-radius:8px;text-decoration:none">View Uber Pot →</a></p>`),
+  );
+}
+
+/** Sent when admin advances to group_active (group stage has started). */
+export async function emailGroupStageStarted(
+  to: string,
+  name: string,
+  groupName: string,
+  groupId: string,
+): Promise<void> {
+  await send(
+    to,
+    `⚽ The group stage has kicked off! — ${groupName}`,
+    wrap(`<p>Hi ${name},</p>
+          <p>The 2026 World Cup group stage is underway! Your group stage predictions are now locked.</p>
+          <p>Results appear automatically as matches finish. The top 2 from each group and the 8 best third-placed teams advance to the Round of 32.</p>
+          <p><a href="${APP_URL}/groups/${groupId}?tab=standings" style="display:inline-block;background:#f59e0b;color:#111;font-weight:700;padding:10px 20px;border-radius:8px;text-decoration:none">Follow the Standings →</a></p>`),
+  );
+}
+
+/** Sent when admin advances to ko_active (KO predictions locked, bracket live). */
+export async function emailKOStageActive(
+  to: string,
+  name: string,
+  groupName: string,
+  groupId: string,
+  leaderboard: LeaderboardRow[],
+): Promise<void> {
+  await send(
+    to,
+    `🔒 Knockout predictions locked — the bracket is live! (${groupName})`,
+    wrap(`<p>Hi ${name},</p>
+          <p>The knockout stage has begun in <strong>${groupName}</strong> — predictions are now locked. Here's how you stand:</p>
+          ${leaderboardHtml(leaderboard)}
+          <p>Follow the action as results come in!</p>
+          <p><a href="${APP_URL}/groups/${groupId}?tab=standings" style="display:inline-block;background:#f59e0b;color:#111;font-weight:700;padding:10px 20px;border-radius:8px;text-decoration:none">View Bracket →</a></p>`),
+  );
+}
+
+/** Sent when admin marks tournament finished. Mentions uber pot settlement still needed. */
+export async function emailTournamentFinished(
+  to: string,
+  name: string,
+  groupName: string,
+  groupId: string,
+  leaderboard: LeaderboardRow[],
+): Promise<void> {
+  await send(
+    to,
+    `🏆 The tournament is over! — ${groupName}`,
+    wrap(`<p>Hi ${name},</p>
+          <p>The 2026 World Cup is over! Here's how <strong>${groupName}</strong> currently stands:</p>
+          ${leaderboardHtml(leaderboard)}
+          <p style="background:#1f2937;border-left:3px solid #f59e0b;padding:10px 14px;border-radius:4px;font-size:14px">
+            ⚠️ <strong>Note:</strong> The admin still needs to settle all Uber Pot categories before final earnings are confirmed. Final standings will update once that's done.
+          </p>
+          <p><a href="${APP_URL}/groups/${groupId}?tab=standings" style="display:inline-block;background:#f59e0b;color:#111;font-weight:700;padding:10px 20px;border-radius:8px;text-decoration:none">View Standings →</a></p>`),
+  );
+}
+
+/** Admin-composed broadcast to all members of a group. */
+export async function emailAdminBroadcast(
+  to: string,
+  name: string,
+  groupName: string,
+  groupId: string,
+  subject: string,
+  message: string,
+): Promise<void> {
+  await send(
+    to,
+    subject,
+    wrap(`<p>Hi ${name},</p>
+          <p style="white-space:pre-wrap">${message.replace(/\n/g, "<br>")}</p>
+          <p style="margin-top:16px;font-size:12px;color:#6b7280">This message was sent by the admin of <strong>${groupName}</strong>.</p>
+          <p><a href="${APP_URL}/groups/${groupId}">Open ${groupName} →</a></p>`),
   );
 }

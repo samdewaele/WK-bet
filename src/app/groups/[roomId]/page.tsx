@@ -72,6 +72,15 @@ export default async function GroupDetailPage({ params, searchParams }: Props) {
   });
   const paidMap = new Map(membersPaid.map((m) => [m.userId, m.paid]));
 
+  // KO countdown: first R32 match that hasn't kicked off yet
+  const firstKOMatch = roomStatus === "ko_betting"
+    ? await db.match.findFirst({
+        where: { round: "R32", kickoff: { gt: new Date() } },
+        orderBy: { kickoff: "asc" },
+        select: { kickoff: true },
+      })
+    : null;
+
   const showStandings = !["setup", "betting", "closed"].includes(roomStatus);
   // Fall back to predictions if the standings tab isn't available
   const activeTab = tab === "standings" && !showStandings ? "predictions" : tab;
@@ -191,6 +200,15 @@ export default async function GroupDetailPage({ params, searchParams }: Props) {
         {(roomStatus === "setup" || roomStatus === "betting" || roomStatus === "closed") && !tournamentStarted && (
           <div className="mb-4">
             <CountdownTimer />
+          </div>
+        )}
+        {roomStatus === "ko_betting" && firstKOMatch && (
+          <div className="mb-4">
+            <CountdownTimer
+              target={firstKOMatch.kickoff.toISOString()}
+              label="First KO match in"
+              finishedMessage="KO stage is live! 🏆"
+            />
           </div>
         )}
 
