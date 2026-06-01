@@ -8,6 +8,7 @@ import GroupStandingsPicker from "@/components/GroupStandingsPicker";
 import KnockoutPredictions from "@/components/KnockoutPredictions";
 import GroupLeaderboard from "@/components/GroupLeaderboard";
 import SideBetsPanel from "@/components/SideBetsPanel";
+import SharedPredictions from "@/components/SharedPredictions";
 import P2PBetsPanel from "@/components/P2PBetsPanel";
 import GroupAdminPanel from "@/components/GroupAdminPanel";
 import MemberList from "@/components/MemberList";
@@ -81,10 +82,14 @@ export default async function GroupDetailPage({ params, searchParams }: Props) {
       })
     : null;
 
-  const activeTab = tab;
+  // Everyone's predictions become viewable once the group stage starts.
+  const showSharedPredictions = ["group_active", "ko_betting", "ko_active", "settling", "finished"].includes(roomStatus);
+  // Fall back to my-predictions if the shared tab isn't available yet.
+  const activeTab = tab === "all-predictions" && !showSharedPredictions ? "predictions" : tab;
 
   const tabs = [
-    { key: "predictions", label: "Predictions" },
+    { key: "predictions", label: "My predictions" },
+    ...(showSharedPredictions ? [{ key: "all-predictions", label: "Predictions" }] : []),
     { key: "standings", label: "Standings" },
     { key: "sidebets-p2p", label: "Side Bets" },
     { key: "members", label: `Members (${room.members.length})` },
@@ -242,6 +247,16 @@ export default async function GroupDetailPage({ params, searchParams }: Props) {
                 totalPot={pot.totalPot}
               />
             </div>
+          </div>
+        )}
+
+        {activeTab === "all-predictions" && showSharedPredictions && (
+          <div>
+            <h2 className="text-xl font-bold text-white mb-2">Everyone&apos;s Predictions</h2>
+            <p className="text-sm text-gray-400 mb-4">
+              Group standings are visible to all once the group stage starts. Knockout picks are revealed when the bracket locks.
+            </p>
+            <SharedPredictions roomId={roomId} />
           </div>
         )}
 
