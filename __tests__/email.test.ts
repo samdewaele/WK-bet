@@ -1,15 +1,19 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-const mockFetch = vi.fn();
+// Mock nodemailer so no real SMTP connection is made.
+const mockSendMail = vi.fn().mockResolvedValue({});
+vi.mock("nodemailer", () => ({
+  default: {
+    createTransport: () => ({ sendMail: mockSendMail }),
+  },
+}));
 
 beforeEach(() => {
-  vi.stubGlobal("fetch", mockFetch);
-  mockFetch.mockResolvedValue({ ok: true, text: async () => "" });
+  mockSendMail.mockClear();
   vi.resetModules();
 });
 
 afterEach(() => {
-  vi.unstubAllGlobals();
   vi.unstubAllEnvs();
 });
 
@@ -18,7 +22,9 @@ afterEach(() => {
 // ---------------------------------------------------------------------------
 
 async function getEmailBody(callIndex = 0) {
-  return JSON.parse((mockFetch.mock.calls[callIndex][1] as RequestInit).body as string);
+  return mockSendMail.mock.calls[callIndex][0] as {
+    from: string; to: string; subject: string; html: string;
+  };
 }
 
 const FAKE_LEADERBOARD = [
@@ -30,10 +36,10 @@ const FAKE_LEADERBOARD = [
 // With API key set
 // ---------------------------------------------------------------------------
 
-describe("email functions (with API key set)", () => {
+describe("email functions (with credentials set)", () => {
   beforeEach(() => {
-    vi.stubEnv("RESEND_API_KEY", "test-key");
-    vi.stubEnv("EMAIL_FROM", "WK-Bet <test@example.com>");
+    vi.stubEnv("EMAIL_USER", "wkbet@gmail.com");
+    vi.stubEnv("EMAIL_PASS", "test-app-password");
     vi.stubEnv("NEXTAUTH_URL", "https://wk-bet.example.com");
   });
 
@@ -42,7 +48,7 @@ describe("email functions (with API key set)", () => {
   it("emailMemberJoined sends to creator email with correct subject", async () => {
     const { emailMemberJoined } = await import("@/lib/email");
     await emailMemberJoined("creator@test.com", "Bob", "My Group", "r1");
-    expect(mockFetch).toHaveBeenCalledWith("https://api.resend.com/emails", expect.objectContaining({ method: "POST" }));
+    expect(mockSendMail).toHaveBeenCalledTimes(1);
     const body = await getEmailBody();
     expect(body.to).toBe("creator@test.com");
     expect(body.subject).toContain("Bob");
@@ -77,7 +83,7 @@ describe("email functions (with API key set)", () => {
   it("does not send when email address is empty string", async () => {
     const { emailMemberJoined } = await import("@/lib/email");
     await emailMemberJoined("", "Bob", "Group", "r1");
-    expect(mockFetch).not.toHaveBeenCalled();
+    expect(mockSendMail).not.toHaveBeenCalled();
   });
 
   it("emailGroupStageComplete: subject mentions group stage and group name", async () => {
@@ -205,10 +211,10 @@ describe("email functions (with API key set)", () => {
       async () => { const { emailAdminBroadcast } = await import("@/lib/email"); await emailAdminBroadcast("p@test.com", "A", "G", "rid", "subj", "msg"); },
     ];
     for (const fn of fns) {
-      mockFetch.mockClear();
+      mockSendMail.mockClear();
       vi.resetModules();
       await fn();
-      if (mockFetch.mock.calls.length > 0) {
+      if (mockSendMail.mock.calls.length > 0) {
         const body = await getEmailBody();
         expect(body.html, `${fn.toString()} should include APP_URL`).toContain("https://wk-bet.example.com");
       }
@@ -220,25 +226,26 @@ describe("email functions (with API key set)", () => {
 // Without API key
 // ---------------------------------------------------------------------------
 
-describe("email functions (without API key)", () => {
+describe("email functions (without credentials)", () => {
   beforeEach(() => {
-    vi.stubEnv("RESEND_API_KEY", "");
+    vi.stubEnv("EMAIL_USER", "");
+    vi.stubEnv("EMAIL_PASS", "");
   });
 
-  it("falls back to console.log when RESEND_API_KEY is not set", async () => {
+  it("falls back to console.log when EMAIL_USER/EMAIL_PASS are not set", async () => {
     const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     const { emailMemberJoined } = await import("@/lib/email");
     await emailMemberJoined("creator@test.com", "Bob", "My Group", "r1");
-    expect(mockFetch).not.toHaveBeenCalled();
+    expect(mockSendMail).not.toHaveBeenCalled();
     expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining("[email]"));
     consoleSpy.mockRestore();
   });
 
-  it("new emails also fall back to console.log without API key", async () => {
+  it("new emails also fall back to console.log without credentials", async () => {
     const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     const { emailBettingOpen } = await import("@/lib/email");
     await emailBettingOpen("p@test.com", "Alice", "Group", "r1", 10);
-    expect(mockFetch).not.toHaveBeenCalled();
+    expect(mockSendMail).not.toHaveBeenCalled();
     expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining("[email]"));
     consoleSpy.mockRestore();
   });

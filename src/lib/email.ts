@@ -1,23 +1,34 @@
-// Email via Resend REST API — no npm package needed.
-// Set RESEND_API_KEY + EMAIL_FROM in env. Falls back to console.log if unset.
+// Email via Nodemailer + Gmail SMTP.
+// Set EMAIL_USER + EMAIL_PASS (Gmail App Password) in env.
+// Falls back to console.log if either is unset.
 
-const API_KEY = process.env.RESEND_API_KEY;
-const FROM = process.env.EMAIL_FROM ?? "WK-Bet 2026 <onboarding@resend.dev>";
+import nodemailer from "nodemailer";
+
+const EMAIL_USER = process.env.EMAIL_USER;
+const EMAIL_PASS = process.env.EMAIL_PASS;
 export const APP_URL = process.env.NEXTAUTH_URL ?? "https://wk-bet.fly.dev";
+
+const FROM = `WK-Bet 2026 <${EMAIL_USER ?? "wkbet@example.com"}>`;
+
+function getTransporter() {
+  return nodemailer.createTransport({
+    host: "smtp.gmail.com",
+    port: 587,
+    secure: false,
+    auth: { user: EMAIL_USER, pass: EMAIL_PASS },
+  });
+}
 
 async function send(to: string, subject: string, html: string): Promise<void> {
   if (!to) return;
-  if (!API_KEY) {
+  if (!EMAIL_USER || !EMAIL_PASS) {
     console.log(`[email] ${subject} → ${to}`);
     return;
   }
-  const res = await fetch("https://api.resend.com/emails", {
-    method: "POST",
-    headers: { Authorization: `Bearer ${API_KEY}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ from: FROM, to, subject, html }),
-  });
-  if (!res.ok) {
-    console.error("[email] Resend error:", res.status, await res.text());
+  try {
+    await getTransporter().sendMail({ from: FROM, to, subject, html });
+  } catch (err) {
+    console.error("[email] Send error:", err);
   }
 }
 
