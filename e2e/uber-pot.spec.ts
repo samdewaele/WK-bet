@@ -123,7 +123,7 @@ test.describe("Uber Pot bets", () => {
     // After reload, the predictions tab create form should be hidden
     await page.goto(`/groups/${roomId}?tab=predictions`);
     await expect(page.getByPlaceholder(/question \/ title/i)).not.toBeVisible();
-    await expect(page.getByText(/locked by admin/i)).toBeVisible();
+    await expect(page.getByText(/no new proposals/i)).toBeVisible();
   });
 
   test("admin can cancel an open Uber Pot bet", async ({ page }) => {

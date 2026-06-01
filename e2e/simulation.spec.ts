@@ -200,7 +200,7 @@ test.describe("Simulation flow", () => {
 
   // ── Cleanup ───────────────────────────────────────────────────────────────
 
-  test("Cleanup: standings tab disappears and KO bracket resets", async ({
+  test("Cleanup: standings tab stays visible and KO bracket resets", async ({
     page,
   }) => {
     await runPhase1(page, roomId);
@@ -209,8 +209,8 @@ test.describe("Simulation flow", () => {
 
     await page.goto(`/groups/${roomId}`);
 
-    // After cleanup room is back to "betting" → standings tab is hidden
-    await expect(page.getByRole("link", { name: "Standings" })).not.toBeVisible(
+    // After cleanup room is back to "betting" → standings tab is always visible
+    await expect(page.getByRole("link", { name: "Standings" })).toBeVisible(
       { timeout: 10_000 }
     );
 
