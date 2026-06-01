@@ -46,7 +46,7 @@ export async function GET(
     select: { userId: true, earnedAmount: true },
   });
 
-  const knockoutPredictions = await db.prediction.findMany({
+  const knockoutPredictions = await db.kOPrediction.findMany({
     where: { roomId },
     select: { userId: true, earnedAmount: true },
   });

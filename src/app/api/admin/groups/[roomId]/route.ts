@@ -74,6 +74,7 @@ export async function DELETE(_req: Request, { params }: Params) {
   await db.sideBet.deleteMany({ where: { roomId } });
   await db.p2PSideBet.deleteMany({ where: { roomId } });
   await db.groupStandingPrediction.deleteMany({ where: { roomId } });
+  await db.kOPrediction.deleteMany({ where: { roomId } });
   await db.prediction.deleteMany({ where: { roomId } });
   await db.roomMember.deleteMany({ where: { roomId } });
   await db.room.delete({ where: { id: roomId } });

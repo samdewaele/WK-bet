@@ -37,7 +37,7 @@ export async function GET(
     orderBy: { wcGroup: "asc" },
   });
 
-  const koPreds = await db.prediction.findMany({
+  const koPreds = await db.kOPrediction.findMany({
     where: { roomId, userId: targetUserId },
     include: {
       match: {
@@ -55,7 +55,7 @@ export async function GET(
 
   const [groupAgg, koAgg] = await Promise.all([
     db.groupStandingPrediction.aggregate({ where: { roomId }, _sum: { earnedAmount: true } }),
-    db.prediction.aggregate({ where: { roomId }, _sum: { earnedAmount: true } }),
+    db.kOPrediction.aggregate({ where: { roomId }, _sum: { earnedAmount: true } }),
   ]);
   const totalGroupDistributed = groupAgg._sum.earnedAmount ?? 0;
   const totalKODistributed = koAgg._sum.earnedAmount ?? 0;

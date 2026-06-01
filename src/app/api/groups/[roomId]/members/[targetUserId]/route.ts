@@ -85,6 +85,7 @@ export async function DELETE(_req: Request, { params }: Params) {
 
   // Cascading removal within the room
   await db.prediction.deleteMany({ where: { userId: targetUserId, roomId } });
+  await db.kOPrediction.deleteMany({ where: { userId: targetUserId, roomId } });
   await db.groupStandingPrediction.deleteMany({ where: { userId: targetUserId, roomId } });
 
   // Before deleting entries: un-settle any side bet whose winner was this member

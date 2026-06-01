@@ -3,6 +3,8 @@ import { auth } from "@auth";
 import { db } from "@/lib/db";
 import { calculatePoints, type Round } from "@/lib/points";
 
+const KO_ROUNDS = ["R32", "R16", "QF", "SF", "3rd", "Final"];
+
 export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ matchId: string }> }
@@ -24,14 +26,12 @@ export async function PATCH(
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  // Validate
   const { homeScore, awayScore, status } = body;
   const validStatuses = ["scheduled", "live", "finished"];
   if (status && !validStatuses.includes(status)) {
     return NextResponse.json({ error: "Invalid status" }, { status: 400 });
   }
 
-  // Update match
   const match = await db.match.update({
     where: { id: matchId },
     data: {
@@ -41,30 +41,28 @@ export async function PATCH(
     },
     include: {
       predictions: true,
+      koPredictions: true,
     },
   });
 
   // Recalculate points for all predictions if match is finished with scores
-  if (
-    match.status === "finished" &&
-    match.homeScore !== null &&
-    match.awayScore !== null
-  ) {
+  if (match.status === "finished" && match.homeScore !== null && match.awayScore !== null) {
     const round = match.round as Round;
-    const updatePromises = match.predictions.map((pred) => {
-      const points = calculatePoints(
-        round,
-        pred.homeScore,
-        pred.awayScore,
-        match.homeScore!,
-        match.awayScore!
+    if (KO_ROUNDS.includes(round)) {
+      await Promise.all(
+        match.koPredictions.map((pred) => {
+          const points = calculatePoints(round, pred.homeScore, pred.awayScore, match.homeScore!, match.awayScore!);
+          return db.kOPrediction.update({ where: { id: pred.id }, data: { points } });
+        })
       );
-      return db.prediction.update({
-        where: { id: pred.id },
-        data: { points },
-      });
-    });
-    await Promise.all(updatePromises);
+    } else {
+      await Promise.all(
+        match.predictions.map((pred) => {
+          const points = calculatePoints(round, pred.homeScore, pred.awayScore, match.homeScore!, match.awayScore!);
+          return db.prediction.update({ where: { id: pred.id }, data: { points } });
+        })
+      );
+    }
   }
 
   return NextResponse.json({
@@ -72,7 +70,8 @@ export async function PATCH(
     homeScore: match.homeScore,
     awayScore: match.awayScore,
     status: match.status,
-    predictionsUpdated:
-      match.status === "finished" ? match.predictions.length : 0,
+    predictionsUpdated: match.status === "finished"
+      ? (KO_ROUNDS.includes(match.round) ? match.koPredictions.length : match.predictions.length)
+      : 0,
   });
 }

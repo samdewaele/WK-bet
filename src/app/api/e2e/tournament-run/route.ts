@@ -130,6 +130,7 @@ export async function DELETE(req: NextRequest) {
   await resetKOBracket();
   await resetNotification("Group").catch(() => {});
 
+  await db.kOPrediction.deleteMany({ where: { roomId } });
   await db.prediction.updateMany({ where: { roomId }, data: { points: null, earnedAmount: null } });
   await db.groupStandingPrediction.updateMany({ where: { roomId }, data: { earnedAmount: null } });
 
@@ -293,7 +294,7 @@ async function runPresetKOStage(roomId: string, entryFee: number) {
     }
 
     const matchPrize = pot.prizePerKOMatch[match.round as KORound] ?? 0;
-    const allMatchPreds = await db.prediction.findMany({ where: { matchId: match.id, roomId } });
+    const allMatchPreds = await db.kOPrediction.findMany({ where: { matchId: match.id, roomId } });
 
     const scored = allMatchPreds.map((pred) => {
       const scoreMultiplier = (() => {
@@ -316,7 +317,7 @@ async function runPresetKOStage(roomId: string, entryFee: number) {
         const earnedAmount = earnedFromKOMatch(
           s.homeScore, s.awayScore, PRESET_HOME, PRESET_AWAY, matchPrize, winnersCount
         );
-        return db.prediction.update({ where: { id: s.id }, data: { points: s.pts, earnedAmount } });
+        return db.kOPrediction.update({ where: { id: s.id }, data: { points: s.pts, earnedAmount } });
       })
     );
   }

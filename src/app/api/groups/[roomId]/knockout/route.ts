@@ -25,7 +25,6 @@ export async function GET(
 
   const room = await db.room.findUnique({ where: { id: roomId }, select: { status: true } });
 
-  // Only show KO matches once the group stage is complete and KO betting is open
   if (!room || !KO_VISIBLE_STATUSES.includes(room.status)) {
     return NextResponse.json([]);
   }
@@ -39,9 +38,9 @@ export async function GET(
       },
       orderBy: { kickoff: "asc" },
     }),
-    db.prediction.findMany({
-      where: { userId: session.user.id, roomId, match: { round: { in: KO_ROUNDS } } },
-      select: { matchId: true, homeScore: true, awayScore: true, earnedAmount: true },
+    db.kOPrediction.findMany({
+      where: { userId: session.user.id, roomId },
+      select: { matchId: true, homeScore: true, awayScore: true, penaltyWinner: true, earnedAmount: true },
     }),
   ]);
 
@@ -55,7 +54,7 @@ export async function GET(
         matchId: m.id,
         homeScore: pred?.homeScore ?? 0,
         awayScore: pred?.awayScore ?? 0,
-        penaltyWinner: (pred as { penaltyWinner?: string | null } | undefined)?.penaltyWinner ?? null,
+        penaltyWinner: pred?.penaltyWinner ?? null,
         earnedAmount: pred?.earnedAmount ?? null,
         predicted: !!pred,
         match: {
@@ -152,7 +151,7 @@ export async function POST(
 
   const upserted = await Promise.all(
     valid.map((pred) =>
-      db.prediction.upsert({
+      db.kOPrediction.upsert({
         where: { userId_matchId_roomId: { userId, matchId: pred.matchId, roomId } },
         create: {
           userId,

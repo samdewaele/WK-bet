@@ -27,7 +27,7 @@ export async function GET(
       where: { roomId, userId: targetUserId },
       orderBy: { wcGroup: "asc" },
     }),
-    db.prediction.findMany({
+    db.kOPrediction.findMany({
       where: { roomId, userId: targetUserId },
       include: {
         match: {

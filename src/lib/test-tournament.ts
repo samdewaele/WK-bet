@@ -340,7 +340,7 @@ async function _seedGroupStageRandomly(
       let home = randomGoals();
       let away = randomGoals();
       if (home === away) home += 1; // KO picks must have a winner
-      await db.prediction.upsert({
+      await db.kOPrediction.upsert({
         where: { userId_matchId_roomId: { userId: user.id, matchId: match.id, roomId } },
         create: { userId: user.id, matchId: match.id, roomId, homeScore: home, awayScore: away },
         update: { homeScore: home, awayScore: away, points: null, earnedAmount: null },
@@ -502,9 +502,9 @@ async function _seedKORoundsRandomly(
       }
     }
 
-    // Score ALL predictions for this match (test users + real members who submitted)
+    // Score ALL KO predictions for this match (test users + real members who submitted)
     const matchPrize = pot.prizePerKOMatch[match.round as KORound] ?? 0;
-    const allMatchPreds = await db.prediction.findMany({
+    const allMatchPreds = await db.kOPrediction.findMany({
       where: { matchId: match.id, roomId },
     });
 
@@ -528,7 +528,7 @@ async function _seedKORoundsRandomly(
       scored.map((s) => {
         const winnersCount = byMultiplier.get(s.scoreMultiplier) ?? 0;
         const earnedAmount = earnedFromKOMatch(s.homeScore, s.awayScore, actualHome, actualAway, matchPrize, winnersCount);
-        return db.prediction.update({ where: { id: s.id }, data: { points: s.pts, earnedAmount } });
+        return db.kOPrediction.update({ where: { id: s.id }, data: { points: s.pts, earnedAmount } });
       })
     );
   }
@@ -595,12 +595,15 @@ export async function buildReport(roomId: string): Promise<TestTournamentReport>
   });
 
   const memberIds = members.map((m) => m.userId);
-  // Test users store preds with roomId; real members store group match preds with roomId: null
+  // Group match predictions: test users use roomId, real members use roomId: null
   const predictions = await db.prediction.findMany({
     where: {
       userId: { in: memberIds },
       OR: [{ roomId }, { roomId: null }],
     },
+  });
+  const koPredictions = await db.kOPrediction.findMany({
+    where: { userId: { in: memberIds }, roomId },
   });
   const groupPreds = await db.groupStandingPrediction.findMany({ where: { roomId } });
 
@@ -610,6 +613,12 @@ export async function buildReport(roomId: string): Promise<TestTournamentReport>
   }
 
   for (const pred of predictions) {
+    const entry = byUser.get(pred.userId);
+    if (!entry) continue;
+    entry.points += pred.points ?? 0;
+    entry.earned += pred.earnedAmount ?? 0;
+  }
+  for (const pred of koPredictions) {
     const entry = byUser.get(pred.userId);
     if (!entry) continue;
     entry.points += pred.points ?? 0;
@@ -663,11 +672,13 @@ export async function cleanupTestInRoom(roomId: string): Promise<void> {
   await db.sideBet.deleteMany({ where: { roomId, proposedByUserId: { in: ids } } });
   await db.p2PSideBet.deleteMany({ where: { roomId, proposerId: { in: ids } } });
   await db.p2PSideBet.deleteMany({ where: { roomId, acceptorId: { in: ids } } });
+  await db.kOPrediction.deleteMany({ where: { roomId, userId: { in: ids } } });
   await db.prediction.deleteMany({ where: { roomId, userId: { in: ids } } });
   await db.groupStandingPrediction.deleteMany({ where: { roomId, userId: { in: ids } } });
   await db.roomMember.deleteMany({ where: { roomId, userId: { in: ids } } });
 
   // Reset scores on real member predictions that were scored against test match results
+  await db.kOPrediction.updateMany({ where: { roomId }, data: { points: null, earnedAmount: null } });
   await db.prediction.updateMany({ where: { roomId }, data: { points: null, earnedAmount: null } });
   await db.groupStandingPrediction.updateMany({ where: { roomId }, data: { earnedAmount: null } });
 
@@ -694,6 +705,7 @@ export async function cleanupTestTournament(): Promise<void> {
     await db.sideBet.deleteMany({ where: { roomId: room.id } });
     await db.p2PSideBet.deleteMany({ where: { roomId: room.id } });
     await db.groupStandingPrediction.deleteMany({ where: { roomId: room.id } });
+    await db.kOPrediction.deleteMany({ where: { roomId: room.id } });
     await db.prediction.deleteMany({ where: { roomId: room.id } });
     await db.roomMember.deleteMany({ where: { roomId: room.id } });
     await db.room.delete({ where: { id: room.id } });

@@ -25,8 +25,9 @@ export async function GET(_req: Request, { params }: Params) {
     include: { user: { select: { id: true, name: true, email: true } } },
   });
 
+  const KO_ROUNDS = ["R32", "R16", "QF", "SF", "3rd", "Final"];
   const totalGroupMatches = await db.match.count({ where: { round: "Group" } });
-  const totalKOMatches = await db.match.count({ where: { round: { not: "Group" } } });
+  const totalKOMatches = await db.match.count({ where: { round: { in: KO_ROUNDS } } });
 
   const stats = await Promise.all(
     members.map(async (m) => {
@@ -34,9 +35,7 @@ export async function GET(_req: Request, { params }: Params) {
       const groupPredictions = await db.prediction.count({
         where: { userId: m.userId, roomId: null, match: { round: "Group" } },
       });
-      // Group predictions: stored with roomId=null. KO predictions: stored with roomId=<id>.
-      // Filtering by roomId alone is sufficient — no need for a match-relation join.
-      const koPredictions = await db.prediction.count({
+      const koPredictions = await db.kOPrediction.count({
         where: { userId: m.userId, roomId },
       });
       const groupStandingGroups = await db.groupStandingPrediction.count({
