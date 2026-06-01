@@ -53,9 +53,17 @@ export async function GET(
   const activeMemberCount = room.members.filter((m) => !m.excludedFromPot).length;
   const pot = calculatePot(room.entryFee, activeMemberCount);
 
+  // Exclude earnings from pot-excluded members to match the main leaderboard calculation.
+  const excludedIds = room.members.filter((m) => m.excludedFromPot).map((m) => m.userId);
   const [groupAgg, koAgg] = await Promise.all([
-    db.groupStandingPrediction.aggregate({ where: { roomId }, _sum: { earnedAmount: true } }),
-    db.kOPrediction.aggregate({ where: { roomId }, _sum: { earnedAmount: true } }),
+    db.groupStandingPrediction.aggregate({
+      where: { roomId, ...(excludedIds.length > 0 ? { userId: { notIn: excludedIds } } : {}) },
+      _sum: { earnedAmount: true },
+    }),
+    db.kOPrediction.aggregate({
+      where: { roomId, ...(excludedIds.length > 0 ? { userId: { notIn: excludedIds } } : {}) },
+      _sum: { earnedAmount: true },
+    }),
   ]);
   const totalGroupDistributed = groupAgg._sum.earnedAmount ?? 0;
   const totalKODistributed = koAgg._sum.earnedAmount ?? 0;

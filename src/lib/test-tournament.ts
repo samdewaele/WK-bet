@@ -388,17 +388,14 @@ async function _seedGroupStageRandomly(
         a4
       ).scoreMultiplier,
     }));
-    const byMultiplier = new Map<number, number>();
-    for (const s of allScored) byMultiplier.set(s.multiplier, (byMultiplier.get(s.multiplier) ?? 0) + 1);
+    // Only the top-scoring tier wins — lower tiers receive nothing.
+    const maxMultiplier = allScored.reduce((max, s) => Math.max(max, s.multiplier), 0);
+    const topCount = allScored.filter(s => s.multiplier === maxMultiplier && maxMultiplier > 0).length;
 
     for (const s of allScored) {
-      const winnersCount = byMultiplier.get(s.multiplier) ?? 1;
-      const earnedAmount = earnedFromGroupStanding(
-        s.predicted as [string, string, string, string],
-        a4,
-        prizePerGroup,
-        s.multiplier > 0 ? winnersCount : 0
-      );
+      const earnedAmount = (s.multiplier === maxMultiplier && maxMultiplier > 0)
+        ? earnedFromGroupStanding(s.predicted as [string, string, string, string], a4, prizePerGroup, topCount)
+        : 0;
       await db.groupStandingPrediction.update({
         where: { userId_roomId_wcGroup: { userId: s.userId, roomId, wcGroup: group } },
         data: { earnedAmount },
@@ -519,15 +516,15 @@ async function _seedKORoundsRandomly(
       return { id: pred.id, homeScore: pred.homeScore, awayScore: pred.awayScore, scoreMultiplier, pts };
     });
 
-    const byMultiplier = new Map<number, number>();
-    for (const s of scored) {
-      if (s.scoreMultiplier > 0) byMultiplier.set(s.scoreMultiplier, (byMultiplier.get(s.scoreMultiplier) ?? 0) + 1);
-    }
+    // Only the top-scoring tier wins — lower tiers receive nothing.
+    const maxMultiplier = scored.reduce((max, s) => Math.max(max, s.scoreMultiplier), 0);
+    const topCount = scored.filter(s => s.scoreMultiplier === maxMultiplier && maxMultiplier > 0).length;
 
     await Promise.all(
       scored.map((s) => {
-        const winnersCount = byMultiplier.get(s.scoreMultiplier) ?? 0;
-        const earnedAmount = earnedFromKOMatch(s.homeScore, s.awayScore, actualHome, actualAway, matchPrize, winnersCount);
+        const earnedAmount = (s.scoreMultiplier === maxMultiplier && maxMultiplier > 0)
+          ? earnedFromKOMatch(s.homeScore, s.awayScore, actualHome, actualAway, matchPrize, topCount)
+          : 0;
         return db.kOPrediction.update({ where: { id: s.id }, data: { points: s.pts, earnedAmount } });
       })
     );
