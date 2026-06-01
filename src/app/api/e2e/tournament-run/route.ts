@@ -15,9 +15,6 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import {
   calculatePot,
-  scoreGroupStanding,
-  earnedFromGroupStanding,
-  earnedFromKOMatch,
   KO_ROUNDS,
   type KORound,
 } from "@/lib/pot";
@@ -30,6 +27,7 @@ import {
   NEXT_ROUND_SLOT,
 } from "@/lib/ko-seeding";
 import { calculatePoints, type Round } from "@/lib/points";
+import { scoreRoomGroupStanding, scoreRoomKOMatch } from "@/lib/scoring";
 import { resetNotification } from "@/lib/notifications";
 
 const PRESET_HOME = 2;
@@ -208,30 +206,7 @@ async function runPresetGroupStage(roomId: string, entryFee: number) {
 
   for (const [group, actual] of actualStandings.entries()) {
     const a4 = actual.slice(0, 4) as [string, string, string, string];
-
-    const allGroupPreds = await db.groupStandingPrediction.findMany({
-      where: { roomId, wcGroup: group },
-    });
-
-    const allScored = allGroupPreds.map((gp) => ({
-      id: gp.id,
-      predicted: [gp.position1, gp.position2, gp.position3, gp.position4] as [string, string, string, string],
-      multiplier: scoreGroupStanding(
-        [gp.position1, gp.position2, gp.position3, gp.position4] as [string, string, string, string],
-        a4
-      ).scoreMultiplier,
-    }));
-
-    // Only the top-scoring tier wins — lower tiers receive nothing.
-    const maxMultiplier = allScored.reduce((max, s) => Math.max(max, s.multiplier), 0);
-    const topCount = allScored.filter(s => s.multiplier === maxMultiplier && maxMultiplier > 0).length;
-
-    for (const s of allScored) {
-      const earnedAmount = (s.multiplier === maxMultiplier && maxMultiplier > 0)
-        ? earnedFromGroupStanding(s.predicted, a4, prizePerGroup, topCount)
-        : 0;
-      await db.groupStandingPrediction.update({ where: { id: s.id }, data: { earnedAmount } });
-    }
+    await scoreRoomGroupStanding(roomId, group, a4, prizePerGroup);
   }
 
   await db.room.update({
@@ -289,31 +264,7 @@ async function runPresetKOStage(roomId: string, entryFee: number) {
     }
 
     const matchPrize = pot.prizePerKOMatch[match.round as KORound] ?? 0;
-    const allMatchPreds = await db.kOPrediction.findMany({ where: { matchId: match.id, roomId } });
-
-    const aWin = PRESET_HOME > PRESET_AWAY ? "home" : PRESET_HOME < PRESET_AWAY ? "away" : "draw";
-    const scored = allMatchPreds.map((pred) => {
-      const scoreMultiplier = (() => {
-        if (pred.homeScore === PRESET_HOME && pred.awayScore === PRESET_AWAY) return 1.0;
-        const pWin = pred.homeScore > pred.awayScore ? "home" : pred.homeScore < pred.awayScore ? "away" : "draw";
-        return pWin === aWin ? 0.75 : 0;
-      })();
-      const pts = calculatePoints(match.round as Round, pred.homeScore, pred.awayScore, PRESET_HOME, PRESET_AWAY);
-      return { id: pred.id, homeScore: pred.homeScore, awayScore: pred.awayScore, scoreMultiplier, pts };
-    });
-
-    // Only the top-scoring tier wins — lower tiers receive nothing.
-    const maxMultiplier = scored.reduce((max, s) => Math.max(max, s.scoreMultiplier), 0);
-    const topCount = scored.filter(s => s.scoreMultiplier === maxMultiplier && maxMultiplier > 0).length;
-
-    await Promise.all(
-      scored.map((s) => {
-        const earnedAmount = (s.scoreMultiplier === maxMultiplier && maxMultiplier > 0)
-          ? earnedFromKOMatch(s.homeScore, s.awayScore, PRESET_HOME, PRESET_AWAY, matchPrize, topCount)
-          : 0;
-        return db.kOPrediction.update({ where: { id: s.id }, data: { points: s.pts, earnedAmount } });
-      })
-    );
+    await scoreRoomKOMatch(roomId, match.id, match.round as Round, matchPrize, PRESET_HOME, PRESET_AWAY);
   }
 
   await db.room.update({ where: { id: roomId }, data: { status: "ko_active" } });

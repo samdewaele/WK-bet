@@ -287,6 +287,40 @@ export async function populateR32Bracket(
 }
 
 /**
+ * Progressive R32 fill: drop a single completed group's winner (1st) and
+ * runner-up (2nd) into their R32 home/away slots. Best-third-place slots are
+ * left untouched (they need cross-group ranking once all groups are done).
+ *
+ * Safe to call repeatedly — only the slots referencing this group are written.
+ */
+export async function populateGroupQualifiers(
+  group: string,
+  winnerId: string,
+  runnerUpId: string,
+): Promise<void> {
+  const r32Matches = await db.match.findMany({
+    where: { round: "R32" },
+    orderBy: { matchNumber: "asc" },
+    select: { id: true },
+  });
+  if (r32Matches.length !== R32_SLOTS.length) return;
+
+  await Promise.all(
+    R32_SLOTS.map((slot, i) => {
+      const data: { homeTeamId?: string; awayTeamId?: string } = {};
+      if (slot.home.type === "group" && slot.home.group === group) {
+        data.homeTeamId = slot.home.position === 0 ? winnerId : runnerUpId;
+      }
+      if (slot.away.type === "group" && slot.away.group === group) {
+        data.awayTeamId = slot.away.position === 0 ? winnerId : runnerUpId;
+      }
+      if (Object.keys(data).length === 0) return Promise.resolve();
+      return db.match.update({ where: { id: r32Matches[i].id }, data });
+    }),
+  );
+}
+
+/**
  * Reset R32 bracket team assignments back to null.
  * Called during cleanup so the bracket is blank again for the next simulation.
  */

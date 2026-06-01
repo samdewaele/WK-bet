@@ -3,6 +3,8 @@ import { fetchWCMatches, mapStatus } from "@/lib/football-data";
 import { calculatePoints, type Round } from "@/lib/points";
 import { checkAndSendRoundNotifications, checkAndSendIncompleteReminders } from "@/lib/notifications";
 import { computeGroupStandings, populateR32Bracket, populateNextRoundSlot } from "@/lib/ko-seeding";
+import { scoreAndAdvanceCompletedGroups, scoreKOMatchForAllRooms } from "@/lib/scoring";
+import type { KORound } from "@/lib/pot";
 
 export type SyncResult = {
   updated: number;
@@ -99,23 +101,34 @@ export async function syncMatches(): Promise<SyncResult> {
             (err) => console.error("[sync] KO bracket progression failed:", err)
           );
         }
+
+        // Score every room's KO predictions for this finished match (live money).
+        await scoreKOMatchForAllRooms(dbMatch.id, dbMatch.round as KORound, apiHome, apiAway).catch(
+          (err) => console.error("[sync] KO scoring failed:", err)
+        );
       }
     }
   }
 
   // Auto-populate R32 bracket and drive room status transitions
   if (updated > 0) {
-    const [finishedGroupCount, r32WithTeams, firstGroupKickoff, firstKOKickoff, finishedKOCount, totalKOCount] = await Promise.all([
+    const [finishedGroupCount, firstGroupKickoff, firstKOKickoff] = await Promise.all([
       db.match.count({ where: { round: "Group", status: "finished" } }),
-      db.match.count({ where: { round: "R32", homeTeamId: { not: null } } }),
       db.match.findFirst({ where: { round: "Group" }, orderBy: { kickoff: "asc" }, select: { kickoff: true } }),
       db.match.findFirst({ where: { round: { in: ["R32", "R16", "QF", "SF", "3rd", "Final"] }, kickoff: { lte: new Date() } }, orderBy: { kickoff: "asc" }, select: { kickoff: true } }),
-      db.match.count({ where: { round: { in: ["R32", "R16", "QF", "SF", "3rd", "Final"] }, status: "finished" } }),
-      db.match.count({ where: { round: { in: ["R32", "R16", "QF", "SF", "3rd", "Final"] } } }),
     ]);
 
-    // Populate R32 bracket once all group matches are done
-    if (finishedGroupCount === 72 && r32WithTeams === 0) {
+    // Score completed groups + progressively drop their qualifiers into R32.
+    await scoreAndAdvanceCompletedGroups().catch((err) =>
+      console.error("[sync] group scoring failed:", err)
+    );
+
+    // Once all groups are done, run the full seeding to fill the best-third
+    // slots that progressive per-group fill leaves blank.
+    const r32FullyPopulated = await db.match.count({
+      where: { round: "R32", homeTeamId: { not: null }, awayTeamId: { not: null } },
+    });
+    if (finishedGroupCount === 72 && r32FullyPopulated < 16) {
       const standings = await computeGroupStandings();
       await populateR32Bracket(standings).catch((err) =>
         console.error("[sync] R32 seeding failed:", err)

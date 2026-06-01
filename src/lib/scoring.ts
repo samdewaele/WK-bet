@@ -1,0 +1,157 @@
+/**
+ * Shared money-scoring logic for the real tournament (sync-matches) AND the
+ * preset e2e harness. Keeping a single source of truth here prevents the two
+ * paths from drifting apart — the class of bug that produced "total winnings
+ * exceed the pot".
+ *
+ * Both group standings and KO matches use the same rule:
+ *   only the highest-scoring tier of predictions wins a prize; the prize is
+ *   split equally within that tier. Everything below the top tier earns 0,
+ *   and that unclaimed money is what flows into the Uber Pot.
+ */
+import { db } from "@/lib/db";
+import {
+  calculatePot,
+  scoreGroupStanding,
+  earnedFromGroupStanding,
+  scoreKnockoutMatch,
+  earnedFromKOMatch,
+  type KORound,
+} from "@/lib/pot";
+import { calculatePoints, type Round } from "@/lib/points";
+import { buildStandingsFromMatches, populateGroupQualifiers, type WCGroup } from "@/lib/ko-seeding";
+
+type Top4 = [string, string, string, string];
+
+/** Rooms with the data needed to compute their pot. */
+async function roomsWithPot() {
+  return db.room.findMany({
+    select: { id: true, entryFee: true, _count: { select: { members: true } } },
+  });
+}
+
+/**
+ * Score one room's group-standing predictions for a single completed group.
+ * Sets earnedAmount on every prediction (0 for non-winners).
+ */
+export async function scoreRoomGroupStanding(
+  roomId: string,
+  group: string,
+  actualTop4: Top4,
+  prizePerGroup: number,
+): Promise<void> {
+  const preds = await db.groupStandingPrediction.findMany({ where: { roomId, wcGroup: group } });
+  if (preds.length === 0) return;
+
+  const scored = preds.map((gp) => {
+    const predicted = [gp.position1, gp.position2, gp.position3, gp.position4] as Top4;
+    return { id: gp.id, predicted, multiplier: scoreGroupStanding(predicted, actualTop4).scoreMultiplier };
+  });
+  const maxMultiplier = scored.reduce((m, s) => Math.max(m, s.multiplier), 0);
+  const topCount = scored.filter((s) => s.multiplier === maxMultiplier && maxMultiplier > 0).length;
+
+  await Promise.all(
+    scored.map((s) => {
+      const earnedAmount =
+        s.multiplier === maxMultiplier && maxMultiplier > 0
+          ? earnedFromGroupStanding(s.predicted, actualTop4, prizePerGroup, topCount)
+          : 0;
+      return db.groupStandingPrediction.update({ where: { id: s.id }, data: { earnedAmount } });
+    }),
+  );
+}
+
+/**
+ * Score one room's KO predictions for a single finished match.
+ * Sets both points (accuracy) and earnedAmount (money).
+ */
+export async function scoreRoomKOMatch(
+  roomId: string,
+  matchId: string,
+  round: Round,
+  matchPrize: number,
+  actualHome: number,
+  actualAway: number,
+): Promise<void> {
+  const preds = await db.kOPrediction.findMany({ where: { matchId, roomId } });
+  if (preds.length === 0) return;
+
+  const scored = preds.map((p) => ({
+    id: p.id,
+    homeScore: p.homeScore,
+    awayScore: p.awayScore,
+    points: calculatePoints(round, p.homeScore, p.awayScore, actualHome, actualAway),
+    multiplier: scoreKnockoutMatch(p.homeScore, p.awayScore, actualHome, actualAway).scoreMultiplier,
+  }));
+  const maxMultiplier = scored.reduce((m, s) => Math.max(m, s.multiplier), 0);
+  const topCount = scored.filter((s) => s.multiplier === maxMultiplier && maxMultiplier > 0).length;
+
+  await Promise.all(
+    scored.map((s) => {
+      const earnedAmount =
+        s.multiplier === maxMultiplier && maxMultiplier > 0
+          ? earnedFromKOMatch(s.homeScore, s.awayScore, actualHome, actualAway, matchPrize, topCount)
+          : 0;
+      return db.kOPrediction.update({ where: { id: s.id }, data: { points: s.points, earnedAmount } });
+    }),
+  );
+}
+
+/** Score a single finished KO match across every room. */
+export async function scoreKOMatchForAllRooms(
+  matchId: string,
+  round: KORound,
+  actualHome: number,
+  actualAway: number,
+): Promise<void> {
+  const rooms = await roomsWithPot();
+  for (const room of rooms) {
+    const pot = calculatePot(room.entryFee, room._count.members);
+    const matchPrize = pot.prizePerKOMatch[round] ?? 0;
+    await scoreRoomKOMatch(room.id, matchId, round, matchPrize, actualHome, actualAway);
+  }
+}
+
+/**
+ * Find every WC group whose matches are ALL finished, then for each:
+ *   1. drop its winner + runner-up into their R32 slots (progressive bracket)
+ *   2. score every room's standing prediction for that group (live Uber Pot)
+ *
+ * Idempotent — safe to run on every sync; re-scoring a settled group is a
+ * deterministic no-op.
+ */
+export async function scoreAndAdvanceCompletedGroups(): Promise<void> {
+  const groupMatches = await db.match.findMany({
+    where: { round: "Group" },
+    select: { group: true, status: true, homeTeamId: true, awayTeamId: true, homeScore: true, awayScore: true },
+  });
+
+  const tally = new Map<string, { finished: number; total: number }>();
+  for (const m of groupMatches) {
+    if (!m.group) continue;
+    const e = tally.get(m.group) ?? { finished: 0, total: 0 };
+    e.total++;
+    if (m.status === "finished") e.finished++;
+    tally.set(m.group, e);
+  }
+  const completeGroups = [...tally.entries()]
+    .filter(([, v]) => v.total > 0 && v.finished === v.total)
+    .map(([g]) => g);
+  if (completeGroups.length === 0) return;
+
+  const standings = buildStandingsFromMatches(groupMatches.filter((m) => m.status === "finished"));
+  const rooms = await roomsWithPot();
+
+  for (const g of completeGroups) {
+    const ordered = standings.get(g as WCGroup);
+    if (!ordered || ordered.length < 4) continue;
+    const top4 = [ordered[0].teamId, ordered[1].teamId, ordered[2].teamId, ordered[3].teamId] as Top4;
+
+    await populateGroupQualifiers(g, ordered[0].teamId, ordered[1].teamId).catch(() => {});
+
+    for (const room of rooms) {
+      const pot = calculatePot(room.entryFee, room._count.members);
+      await scoreRoomGroupStanding(room.id, g, top4, pot.groupStagePot / 12);
+    }
+  }
+}
