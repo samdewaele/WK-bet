@@ -1,13 +1,5 @@
-/**
- * Validates the TEAMS constant in prisma/seed.ts.
- * These are pure data checks — no DB required.
- * Catches regressions like wrong group counts, duplicate teams, or bad group letters.
- */
 import { describe, it, expect } from "vitest";
-
-// Re-export TEAMS from seed.ts by reading it as a module.
-// seed.ts uses a top-level async main(), so we import just the constant.
-import { TEAMS } from "../prisma/seed";
+import { TEAMS } from "@/lib/teams-data";
 
 const VALID_GROUPS = ["A","B","C","D","E","F","G","H","I","J","K","L"] as const;
 

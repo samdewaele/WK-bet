@@ -92,6 +92,10 @@ export default function GroupAdminPanel({
   const [broadcasting, setBroadcasting] = useState(false);
   const [broadcastStatus, setBroadcastStatus] = useState<"idle" | "sent" | "error">("idle");
 
+  // Reseed teams (platform admin)
+  const [reseeding, setReseeding] = useState(false);
+  const [reseedResult, setReseedResult] = useState<string | null>(null);
+
   // Members stats
   const [memberStats, setMemberStats] = useState<MemberStat[]>([]);
   const [memberStatsLoading, setMemberStatsLoading] = useState(false);
@@ -207,6 +211,25 @@ export default function GroupAdminPanel({
     } finally {
       setBroadcasting(false);
       setTimeout(() => setBroadcastStatus("idle"), 4000);
+    }
+  }
+
+  async function handleReseedTeams() {
+    if (!confirm("Rebuild all group-stage matches from the current team list? This deletes and recreates all group matches but leaves KO matches and user data untouched.")) return;
+    setReseeding(true);
+    setReseedResult(null);
+    try {
+      const res = await fetch("/api/admin/reseed-teams", { method: "POST" });
+      const data = await res.json();
+      if (res.ok) {
+        setReseedResult(`✓ Done — ${data.teamsUpserted} teams, ${data.groupMatchesRebuilt} group matches rebuilt, ${data.staleTeamsRemoved} stale teams removed`);
+      } else {
+        setReseedResult(`✗ ${data.error ?? "Failed"}`);
+      }
+    } catch {
+      setReseedResult("✗ Network error");
+    } finally {
+      setReseeding(false);
     }
   }
 
@@ -745,6 +768,28 @@ export default function GroupAdminPanel({
               </div>
             </div>
           </div>
+
+          {/* Reseed teams — platform admin only */}
+          {isPlatformAdmin && (
+            <div className="border border-violet-800/40 rounded-xl p-4">
+              <h3 className="text-xs font-bold text-violet-400 uppercase tracking-wide mb-2">Repair Team Data</h3>
+              <p className="text-xs text-gray-400 mb-3">
+                Rebuilds teams and group-stage matches from the authoritative FIFA WC 2026 draw. Use this to fix stale teams showing in group dropdowns. KO matches and all user data are untouched.
+              </p>
+              {reseedResult && (
+                <p className={`text-xs mb-2 ${reseedResult.startsWith("✓") ? "text-green-400" : "text-red-400"}`}>
+                  {reseedResult}
+                </p>
+              )}
+              <button
+                onClick={handleReseedTeams}
+                disabled={reseeding}
+                className="bg-violet-700 hover:bg-violet-600 disabled:opacity-40 text-white text-xs font-semibold px-3 py-2 rounded-lg transition-colors"
+              >
+                {reseeding ? "Rebuilding…" : "🔄 Rebuild Group Matches"}
+              </button>
+            </div>
+          )}
 
           {/* Danger zone */}
           <div className="border border-red-800/40 rounded-xl p-4">
