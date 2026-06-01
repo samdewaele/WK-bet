@@ -13,6 +13,9 @@ vi.mock('@/lib/db', () => ({
     prediction: {
       update: vi.fn(),
     },
+    kOPrediction: {
+      update: vi.fn(),
+    },
   },
 }));
 
@@ -67,6 +70,7 @@ describe('PATCH /api/admin/matches/[matchId]', () => {
       status: 'live',
       round: 'Group',
       predictions: [],
+      koPredictions: [],
     } as never);
 
     const res = await PATCH(makeRequest({ status: 'live' }), defaultParams);
@@ -86,6 +90,7 @@ describe('PATCH /api/admin/matches/[matchId]', () => {
       status: 'live',
       round: 'Group',
       predictions: [],
+      koPredictions: [],
     } as never);
 
     const res = await PATCH(
@@ -119,6 +124,7 @@ describe('PATCH /api/admin/matches/[matchId]', () => {
         // Wrong result (away win): should get 0 points
         { id: 'pred3', homeScore: 0, awayScore: 2 },
       ],
+      koPredictions: [],
     } as never);
 
     mockDb.prediction.update.mockResolvedValue({} as never);
@@ -156,6 +162,7 @@ describe('PATCH /api/admin/matches/[matchId]', () => {
       status: 'live',
       round: 'Group',
       predictions: [{ id: 'pred1', homeScore: 1, awayScore: 0 }],
+      koPredictions: [],
     } as never);
 
     await PATCH(makeRequest({ homeScore: 1, awayScore: 0, status: 'live' }), defaultParams);
@@ -171,6 +178,7 @@ describe('PATCH /api/admin/matches/[matchId]', () => {
       status: 'finished',
       round: 'Group',
       predictions: [{ id: 'pred1', homeScore: 1, awayScore: 0 }],
+      koPredictions: [],
     } as never);
 
     await PATCH(makeRequest({ status: 'finished' }), defaultParams);
@@ -185,15 +193,16 @@ describe('PATCH /api/admin/matches/[matchId]', () => {
       awayScore: 1,
       status: 'finished',
       round: 'R16',
-      predictions: [
+      predictions: [],
+      koPredictions: [
         // Exact draw score: R16 result(8) + exact(4) = 12 points
         { id: 'pred1', homeScore: 1, awayScore: 1 },
       ],
     } as never);
-    mockDb.prediction.update.mockResolvedValue({} as never);
+    mockDb.kOPrediction.update.mockResolvedValue({} as never);
 
     await PATCH(makeRequest({ homeScore: 1, awayScore: 1, status: 'finished' }), defaultParams);
-    expect(mockDb.prediction.update).toHaveBeenCalledWith(
+    expect(mockDb.kOPrediction.update).toHaveBeenCalledWith(
       expect.objectContaining({ where: { id: 'pred1' }, data: { points: 12 } })
     );
   });

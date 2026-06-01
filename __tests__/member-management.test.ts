@@ -13,6 +13,7 @@ vi.mock("@/lib/db", () => ({
     room: { findUnique: vi.fn() },
     roomMember: { delete: vi.fn(), update: vi.fn() },
     prediction: { deleteMany: vi.fn() },
+    kOPrediction: { deleteMany: vi.fn() },
     groupStandingPrediction: { deleteMany: vi.fn() },
     sideBet: { updateMany: vi.fn() },
     sideBetEntry: { findMany: vi.fn(), deleteMany: vi.fn() },
@@ -55,6 +56,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mockTournamentStarted.mockResolvedValue(false);
   mockDb.prediction.deleteMany.mockResolvedValue({});
+  mockDb.kOPrediction.deleteMany.mockResolvedValue({});
   mockDb.groupStandingPrediction.deleteMany.mockResolvedValue({});
   mockDb.sideBet.updateMany.mockResolvedValue({});
   mockDb.sideBetEntry.findMany.mockResolvedValue([]);
