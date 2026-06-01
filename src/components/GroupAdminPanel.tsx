@@ -482,8 +482,26 @@ export default function GroupAdminPanel({
                         ← Reopen for bets
                       </button>
                     )}
-                    {(currentStatus === "group_active" || currentStatus === "ko_betting" || currentStatus === "ko_active") && (
+                    {currentStatus === "group_active" && (
                       <p className="text-xs text-gray-500 italic">Transitions automatically based on match schedule.</p>
+                    )}
+                    {currentStatus === "ko_betting" && (
+                      <div className="w-full">
+                        <button onClick={() => handleStatusTransition("ko_active")} disabled={saving}
+                          className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-600 disabled:opacity-40 text-white transition-colors">
+                          Start KO stage →
+                        </button>
+                        <p className="text-xs text-gray-500 mt-1.5">Normally transitions automatically when the first KO match kicks off. Use this if it gets stuck.</p>
+                      </div>
+                    )}
+                    {currentStatus === "ko_active" && (
+                      <div className="w-full">
+                        <button onClick={() => handleStatusTransition("settling")} disabled={saving}
+                          className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-amber-700 hover:bg-amber-600 disabled:opacity-40 text-white transition-colors">
+                          Move to settling →
+                        </button>
+                        <p className="text-xs text-gray-500 mt-1.5">Normally transitions automatically after the Final. Use this if it gets stuck.</p>
+                      </div>
                     )}
                     {currentStatus === "settling" && (
                       <div className="w-full">

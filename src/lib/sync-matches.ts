@@ -110,18 +110,16 @@ export async function syncMatches(): Promise<SyncResult> {
     }
   }
 
-  // Auto-populate R32 bracket and drive room status transitions
+  // Score / seed work runs only when matches were actually updated.
   if (updated > 0) {
-    const [finishedGroupCount, firstGroupKickoff, firstKOKickoff] = await Promise.all([
-      db.match.count({ where: { round: "Group", status: "finished" } }),
-      db.match.findFirst({ where: { round: "Group" }, orderBy: { kickoff: "asc" }, select: { kickoff: true } }),
-      db.match.findFirst({ where: { round: { in: ["R32", "R16", "QF", "SF", "3rd", "Final"] }, kickoff: { lte: new Date() } }, orderBy: { kickoff: "asc" }, select: { kickoff: true } }),
-    ]);
-
     // Score completed groups + progressively drop their qualifiers into R32.
     await scoreAndAdvanceCompletedGroups().catch((err) =>
       console.error("[sync] group scoring failed:", err)
     );
+
+    const [finishedGroupCount] = await Promise.all([
+      db.match.count({ where: { round: "Group", status: "finished" } }),
+    ]);
 
     // Once all groups are done, run the full seeding to fill the best-third
     // slots that progressive per-group fill leaves blank.
@@ -134,9 +132,19 @@ export async function syncMatches(): Promise<SyncResult> {
         console.error("[sync] R32 seeding failed:", err)
       );
     }
+  }
 
-    // Auto-transition non-simulation rooms through status lifecycle
-    const finalFinished = await db.match.count({ where: { round: "Final", status: "finished" } });
+  // Auto-transition non-simulation rooms — runs every sync so time-based
+  // triggers (e.g. ko_betting → ko_active when KO kickoffs arrive) fire even
+  // when no match scores changed in this cycle.
+  {
+    const [finishedGroupCount, firstGroupKickoff, firstKOKickoff, finalFinished] =
+      await Promise.all([
+        db.match.count({ where: { round: "Group", status: "finished" } }),
+        db.match.findFirst({ where: { round: "Group" }, orderBy: { kickoff: "asc" }, select: { kickoff: true } }),
+        db.match.findFirst({ where: { round: { in: ["R32", "R16", "QF", "SF", "3rd", "Final"] }, kickoff: { lte: new Date() } }, orderBy: { kickoff: "asc" }, select: { kickoff: true } }),
+        db.match.count({ where: { round: "Final", status: "finished" } }),
+      ]);
 
     const now = new Date();
     const groupStarted = firstGroupKickoff && now >= firstGroupKickoff.kickoff;
