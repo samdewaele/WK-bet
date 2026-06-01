@@ -90,21 +90,27 @@ export async function GET(
     }
   }
 
+  const toCents = (v: number) => Math.round(v * 100);
+  const fromCents = (c: number) => c / 100;
+
   const leaderboard = room.members
     .map((m) => {
       const excluded = m.excludedFromPot;
-      const groupStage = excluded ? 0 : (groupEarnings.get(m.userId) ?? 0);
-      const knockout = excluded ? 0 : (koEarnings.get(m.userId) ?? 0);
-      const sideBets = excluded ? 0 : (sideBetEarnings.get(m.userId) ?? 0);
-      const totalEarned = groupStage + knockout + sideBets;
+      // Round each component to whole cents before summing to avoid
+      // floating-point display inconsistency (columns summing to a different
+      // value than the total when each is independently .toFixed(2)'d).
+      const groupStageCents = toCents(excluded ? 0 : (groupEarnings.get(m.userId) ?? 0));
+      const knockoutCents   = toCents(excluded ? 0 : (koEarnings.get(m.userId) ?? 0));
+      const sideBetsCents   = toCents(excluded ? 0 : (sideBetEarnings.get(m.userId) ?? 0));
+      const totalCents      = groupStageCents + knockoutCents + sideBetsCents;
       return {
         userId: m.userId,
         name: m.user.name,
         image: m.user.image,
-        groupStage,
-        knockout,
-        sideBets,
-        totalEarned,
+        groupStage:  fromCents(groupStageCents),
+        knockout:    fromCents(knockoutCents),
+        sideBets:    fromCents(sideBetsCents),
+        totalEarned: fromCents(totalCents),
         excludedFromPot: excluded,
       };
     })

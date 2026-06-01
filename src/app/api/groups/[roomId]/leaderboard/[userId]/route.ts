@@ -71,18 +71,21 @@ export async function GET(
     })
     .map((sb) => ({ betTitle: sb.title, earnedAmount: prizeEach }));
 
-  const groupStageTotal = groupPreds.reduce((s, p) => s + (p.earnedAmount ?? 0), 0);
-  const knockoutTotal = koPreds.reduce((s, p) => s + (p.earnedAmount ?? 0), 0);
-  const sideBetsTotal = sideBetWins.reduce((s, b) => s + b.earnedAmount, 0);
+  const toCents = (v: number) => Math.round(v * 100);
+  const fromCents = (c: number) => c / 100;
+
+  const groupStageCents = groupPreds.reduce((s, p) => s + toCents(p.earnedAmount ?? 0), 0);
+  const knockoutCents   = koPreds.reduce((s, p) => s + toCents(p.earnedAmount ?? 0), 0);
+  const sideBetsCents   = sideBetWins.reduce((s, b) => s + toCents(b.earnedAmount), 0);
 
   return NextResponse.json({
     userId: targetUserId,
     groupStage: {
-      total: groupStageTotal,
-      groups: groupPreds.map((p) => ({ wcGroup: p.wcGroup, earnedAmount: p.earnedAmount ?? 0 })),
+      total: fromCents(groupStageCents),
+      groups: groupPreds.map((p) => ({ wcGroup: p.wcGroup, earnedAmount: fromCents(toCents(p.earnedAmount ?? 0)) })),
     },
     knockout: {
-      total: knockoutTotal,
+      total: fromCents(knockoutCents),
       matches: koPreds
         .filter((p) => (p.earnedAmount ?? 0) > 0)
         .map((p) => ({
@@ -91,13 +94,13 @@ export async function GET(
           homeTeam: p.match.homeTeam?.name ?? "TBD",
           awayTeam: p.match.awayTeam?.name ?? "TBD",
           predicted: `${p.homeScore}–${p.awayScore}`,
-          earnedAmount: p.earnedAmount ?? 0,
+          earnedAmount: fromCents(toCents(p.earnedAmount ?? 0)),
         })),
     },
     sideBets: {
-      total: sideBetsTotal,
-      bets: sideBetWins,
+      total: fromCents(sideBetsCents),
+      bets: sideBetWins.map((b) => ({ ...b, earnedAmount: fromCents(toCents(b.earnedAmount)) })),
     },
-    total: groupStageTotal + knockoutTotal + sideBetsTotal,
+    total: fromCents(groupStageCents + knockoutCents + sideBetsCents),
   });
 }
