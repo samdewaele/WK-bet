@@ -21,7 +21,7 @@ export async function POST() {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  const currentNames = new Set(TEAMS.map((t) => t.name));
+  const currentNames = new Set<string>(TEAMS.map((t) => t.name));
 
   // 1. Find stale team IDs (in DB but not in current TEAMS)
   const allDbTeams = await db.team.findMany({ select: { id: true, name: true } });
