@@ -49,6 +49,27 @@ const ROUND_LABELS: Record<string, string> = {
   Final: "Final",
 };
 
+// Static source labels for each R32 match slot (matchNumber → home/away label).
+// Derived from the official FIFA WC 2026 bracket seeding rules in ko-seeding.ts.
+const R32_SOURCE_LABELS: Record<number, { home: string; away: string }> = {
+  73:  { home: "2nd A",                   away: "2nd B" },
+  74:  { home: "1st E",                   away: "Best 3rd (A/B/C/D/F)" },
+  75:  { home: "1st F",                   away: "2nd C" },
+  76:  { home: "1st C",                   away: "2nd F" },
+  77:  { home: "1st I",                   away: "Best 3rd (C/D/F/G/H)" },
+  78:  { home: "2nd E",                   away: "2nd I" },
+  79:  { home: "1st A",                   away: "Best 3rd (C/E/F/H/I)" },
+  80:  { home: "1st L",                   away: "Best 3rd (E/H/I/J/K)" },
+  81:  { home: "1st D",                   away: "Best 3rd (B/E/F/I/J)" },
+  82:  { home: "1st G",                   away: "Best 3rd (A/E/H/I/J)" },
+  83:  { home: "2nd K",                   away: "2nd L" },
+  84:  { home: "1st H",                   away: "2nd J" },
+  85:  { home: "1st B",                   away: "Best 3rd (E/F/G/I/J)" },
+  86:  { home: "1st J",                   away: "2nd H" },
+  87:  { home: "1st K",                   away: "Best 3rd (D/E/I/J/L)" },
+  88:  { home: "2nd D",                   away: "2nd G" },
+};
+
 const BRACKET_PATH: Record<number, {
   home: { matchNum: number; side: "winner" | "loser" };
   away: { matchNum: number; side: "winner" | "loser" };
@@ -117,6 +138,15 @@ export default function KnockoutPredictions({ roomId, roomStatus, simulationMode
   }, [roomId, roomStatus]);
 
   const matchByNum = new Map(predictions.map((p) => [p.match.matchNumber, p.match]));
+
+  function getSlotLabel(matchNumber: number, side: "home" | "away"): string {
+    const r32 = R32_SOURCE_LABELS[matchNumber];
+    if (r32) return side === "home" ? r32.home : r32.away;
+    const path = BRACKET_PATH[matchNumber];
+    if (!path) return "TBD";
+    const ref = side === "home" ? path.home : path.away;
+    return ref.side === "winner" ? `W M${ref.matchNum}` : `L M${ref.matchNum}`;
+  }
   const predMap = new Map(predictions.filter((p) => p.predicted).map((p) => [p.matchId, p]));
 
   const getEffectiveScore = (matchId: string): { h: number; a: number; pw: "home" | "away" | null } | null => {
@@ -329,13 +359,13 @@ export default function KnockoutPredictions({ roomId, roomStatus, simulationMode
     );
   }
 
-  const renderTeamSlot = (team: Team | null, side: "home" | "away") => {
+  const renderTeamSlot = (team: Team | null, side: "home" | "away", label?: string) => {
     const alignClass = side === "home" ? "justify-end text-right" : "justify-start text-left";
     const flagFirst = side === "away";
     if (!team) {
       return (
         <div className={`flex items-center gap-2 flex-1 ${alignClass}`}>
-          <span className="text-sm text-gray-600 italic">TBD</span>
+          <span className="text-sm text-gray-500 italic">{label ?? "TBD"}</span>
         </div>
       );
     }
@@ -357,6 +387,8 @@ export default function KnockoutPredictions({ roomId, roomStatus, simulationMode
     const { home: projectedHome, away: projectedAway } = getDisplayTeams(match);
     const displayHome = match.homeTeam ?? projectedHome;
     const displayAway = match.awayTeam ?? projectedAway;
+    const homeLabel = getSlotLabel(match.matchNumber, "home");
+    const awayLabel = getSlotLabel(match.matchNumber, "away");
 
     const hasActualResult = match.status === "finished" && match.homeScore !== null && match.awayScore !== null;
     const isLive = match.status === "live";
@@ -404,7 +436,7 @@ export default function KnockoutPredictions({ roomId, roomStatus, simulationMode
         {/* Actual result row */}
         {(hasActualResult || isLive) && (
           <div className="flex items-center gap-3 w-full">
-            {renderTeamSlot(displayHome, "home")}
+            {renderTeamSlot(displayHome, "home", homeLabel)}
             <div className="flex items-center gap-2">
               <div className={`w-10 h-10 flex items-center justify-center rounded-lg font-bold text-lg ${
                 isLive ? "bg-green-900/40 text-green-300" : "bg-gray-800 text-white"
@@ -418,13 +450,13 @@ export default function KnockoutPredictions({ roomId, roomStatus, simulationMode
                 {match.awayScore ?? "—"}
               </div>
             </div>
-            {renderTeamSlot(displayAway, "away")}
+            {renderTeamSlot(displayAway, "away", awayLabel)}
           </div>
         )}
 
         {/* User prediction row */}
         <div className="flex items-center gap-3 w-full">
-          {!hasActualResult && !isLive && renderTeamSlot(displayHome, "home")}
+          {!hasActualResult && !isLive && renderTeamSlot(displayHome, "home", homeLabel)}
 
           {hasActualResult || isLive ? (
             <div className="flex-1 flex items-center justify-center gap-2">
@@ -501,7 +533,7 @@ export default function KnockoutPredictions({ roomId, roomStatus, simulationMode
             </div>
           )}
 
-          {!hasActualResult && !isLive && renderTeamSlot(displayAway, "away")}
+          {!hasActualResult && !isLive && renderTeamSlot(displayAway, "away", awayLabel)}
         </div>
 
         {/* Penalty shootout selector — appears when score is tied */}

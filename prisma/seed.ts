@@ -9,66 +9,66 @@ const adapter = new PrismaBetterSqlite3({ url: dbPath });
 const db = new PrismaClient({ adapter } as any);
 
 const TEAMS = [
-  // Group A
-  { name: "USA",          flag: "🇺🇸", group: "A" },
-  { name: "Panama",       flag: "🇵🇦", group: "A" },
-  { name: "Honduras",     flag: "🇭🇳", group: "A" },
-  { name: "Morocco",      flag: "🇲🇦", group: "A" },
-  // Group B
-  { name: "Argentina",    flag: "🇦🇷", group: "B" },
-  { name: "Chile",        flag: "🇨🇱", group: "B" },
-  { name: "Peru",         flag: "🇵🇪", group: "B" },
-  { name: "Australia",    flag: "🇦🇺", group: "B" },
+  // Group A — hosts: Mexico
+  { name: "Mexico",                 flag: "🇲🇽", group: "A" },
+  { name: "South Africa",           flag: "🇿🇦", group: "A" },
+  { name: "South Korea",            flag: "🇰🇷", group: "A" },
+  { name: "Czechia",                flag: "🇨🇿", group: "A" },
+  // Group B — hosts: Canada
+  { name: "Canada",                 flag: "🇨🇦", group: "B" },
+  { name: "Switzerland",            flag: "🇨🇭", group: "B" },
+  { name: "Qatar",                  flag: "🇶🇦", group: "B" },
+  { name: "Bosnia and Herzegovina", flag: "🇧🇦", group: "B" },
   // Group C
-  { name: "Mexico",       flag: "🇲🇽", group: "C" },
-  { name: "Ecuador",      flag: "🇪🇨", group: "C" },
-  { name: "Venezuela",    flag: "🇻🇪", group: "C" },
-  { name: "New Zealand",  flag: "🇳🇿", group: "C" },
-  // Group D
-  { name: "France",       flag: "🇫🇷", group: "D" },
-  { name: "Belgium",      flag: "🇧🇪", group: "D" },
-  { name: "Paraguay",     flag: "🇵🇾", group: "D" },
-  { name: "Saudi Arabia", flag: "🇸🇦", group: "D" },
+  { name: "Brazil",                 flag: "🇧🇷", group: "C" },
+  { name: "Morocco",                flag: "🇲🇦", group: "C" },
+  { name: "Haiti",                  flag: "🇭🇹", group: "C" },
+  { name: "Scotland",               flag: "🏴󠁧󠁢󠁳󠁣󠁴󠁿", group: "C" },
+  // Group D — hosts: United States
+  { name: "United States",          flag: "🇺🇸", group: "D" },
+  { name: "Paraguay",               flag: "🇵🇾", group: "D" },
+  { name: "Australia",              flag: "🇦🇺", group: "D" },
+  { name: "Türkiye",                flag: "🇹🇷", group: "D" },
   // Group E
-  { name: "Germany",      flag: "🇩🇪", group: "E" },
-  { name: "Portugal",     flag: "🇵🇹", group: "E" },
-  { name: "Mexico B",     flag: "🇲🇽", group: "E" }, // placeholder
-  { name: "Cameroon",     flag: "🇨🇲", group: "E" },
+  { name: "Germany",                flag: "🇩🇪", group: "E" },
+  { name: "Curaçao",                flag: "🇨🇼", group: "E" },
+  { name: "Côte d'Ivoire",          flag: "🇨🇮", group: "E" },
+  { name: "Ecuador",                flag: "🇪🇨", group: "E" },
   // Group F
-  { name: "Spain",        flag: "🇪🇸", group: "F" },
-  { name: "Croatia",      flag: "🇭🇷", group: "F" },
-  { name: "Bolivia",      flag: "🇧🇴", group: "F" },
-  { name: "Japan",        flag: "🇯🇵", group: "F" },
+  { name: "Netherlands",            flag: "🇳🇱", group: "F" },
+  { name: "Japan",                  flag: "🇯🇵", group: "F" },
+  { name: "Tunisia",                flag: "🇹🇳", group: "F" },
+  { name: "Sweden",                 flag: "🇸🇪", group: "F" },
   // Group G
-  { name: "Brazil",       flag: "🇧🇷", group: "G" },
-  { name: "Colombia",     flag: "🇨🇴", group: "G" },
-  { name: "Costa Rica",   flag: "🇨🇷", group: "G" },
-  { name: "Nigeria",      flag: "🇳🇬", group: "G" },
+  { name: "Belgium",                flag: "🇧🇪", group: "G" },
+  { name: "Egypt",                  flag: "🇪🇬", group: "G" },
+  { name: "Iran",                   flag: "🇮🇷", group: "G" },
+  { name: "New Zealand",            flag: "🇳🇿", group: "G" },
   // Group H
-  { name: "England",      flag: "🏴󠁧󠁢󠁥󠁮󠁧󠁿", group: "H" },
-  { name: "Netherlands",  flag: "🇳🇱", group: "H" },
-  { name: "Senegal",      flag: "🇸🇳", group: "H" },
-  { name: "Iran",         flag: "🇮🇷", group: "H" },
+  { name: "Spain",                  flag: "🇪🇸", group: "H" },
+  { name: "Cabo Verde",             flag: "🇨🇻", group: "H" },
+  { name: "Saudi Arabia",           flag: "🇸🇦", group: "H" },
+  { name: "Uruguay",                flag: "🇺🇾", group: "H" },
   // Group I
-  { name: "Italy",        flag: "🇮🇹", group: "I" },
-  { name: "Switzerland",  flag: "🇨🇭", group: "I" },
-  { name: "Canada",       flag: "🇨🇦", group: "I" },
-  { name: "Uruguay",      flag: "🇺🇾", group: "I" },
+  { name: "France",                 flag: "🇫🇷", group: "I" },
+  { name: "Senegal",                flag: "🇸🇳", group: "I" },
+  { name: "Iraq",                   flag: "🇮🇶", group: "I" },
+  { name: "Norway",                 flag: "🇳🇴", group: "I" },
   // Group J
-  { name: "Denmark",      flag: "🇩🇰", group: "J" },
-  { name: "Serbia",       flag: "🇷🇸", group: "J" },
-  { name: "Tunisia",      flag: "🇹🇳", group: "J" },
-  { name: "Cuba",         flag: "🇨🇺", group: "J" },
+  { name: "Argentina",              flag: "🇦🇷", group: "J" },
+  { name: "Algeria",                flag: "🇩🇿", group: "J" },
+  { name: "Austria",                flag: "🇦🇹", group: "J" },
+  { name: "Jordan",                 flag: "🇯🇴", group: "J" },
   // Group K
-  { name: "South Korea",  flag: "🇰🇷", group: "K" },
-  { name: "Ghana",        flag: "🇬🇭", group: "K" },
-  { name: "South Africa", flag: "🇿🇦", group: "K" },
-  { name: "Indonesia",    flag: "🇮🇩", group: "K" },
+  { name: "Portugal",               flag: "🇵🇹", group: "K" },
+  { name: "Uzbekistan",             flag: "🇺🇿", group: "K" },
+  { name: "Colombia",               flag: "🇨🇴", group: "K" },
+  { name: "Congo DR",               flag: "🇨🇩", group: "K" },
   // Group L
-  { name: "Turkey",       flag: "🇹🇷", group: "L" },
-  { name: "Czech Republic", flag: "🇨🇿", group: "L" },
-  { name: "Qatar",        flag: "🇶🇦", group: "L" },
-  { name: "Jamaica",      flag: "🇯🇲", group: "L" },
+  { name: "England",                flag: "🏴󠁧󠁢󠁥󠁮󠁧󠁿", group: "L" },
+  { name: "Croatia",                flag: "🇭🇷", group: "L" },
+  { name: "Ghana",                  flag: "🇬🇭", group: "L" },
+  { name: "Panama",                 flag: "🇵🇦", group: "L" },
 ];
 
 // Generate group stage matches: each group has 6 matches (C(4,2))
