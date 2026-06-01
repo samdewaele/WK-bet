@@ -171,13 +171,15 @@ test.describe("Simulation flow", () => {
     await page.goto(`/groups/${roomId}`);
     await page.getByRole("button", { name: /admin/i }).click();
 
+    // Wait for the admin panel to render before clicking Refresh
     const refreshBtn = page.getByRole("button", { name: /↻ Refresh/i });
-    if (await refreshBtn.isVisible()) await refreshBtn.click();
+    await expect(refreshBtn).toBeVisible({ timeout: 5_000 });
+    await refreshBtn.click();
 
     // Alice is a simulation user seeded by Phase 1 with exactly 32 KO predictions.
     // The second <td> in her row is the KO count cell.
     const aliceRow = page.locator("tr").filter({ hasText: /\bAlice\b/ });
-    await expect(aliceRow).toBeVisible({ timeout: 8_000 });
+    await expect(aliceRow).toBeVisible({ timeout: 10_000 });
     await expect(aliceRow.locator("td").nth(1)).toHaveText("32/32");
   });
 

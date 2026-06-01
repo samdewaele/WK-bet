@@ -15,9 +15,8 @@
  *   Groups E-L — Both wrong (×0)                                  → All 8 prizes → Uber Pot
  *
  * KO prediction variety (32 matches, split into thirds):
- *   First ~10  — Admin exact (2-0), Member wrong winner (0-2)   → Admin earns full
- *   Middle ~10 — Admin correct winner wrong score (3-0),         → Admin earns ×0.75,
- *                Member exact (2-0)                                Member earns ×1.0
+ *   First ~10  — Admin wrong winner (0-2), Member exact (2-0)   → Member earns (10 R32 × 0.125 = 1.25)
+ *   Middle ~10 — Admin exact (2-0),        Member wrong (0-2)   → Admin earns (6 R32 + 4 R16 = 1.75)
  *   Last  ~12  — Both wrong winner (0-1)                        → Both earn nothing → Uber Pot
  *
  * Uber Pot bets:
@@ -230,19 +229,21 @@ test.describe("Full betting journey", () => {
     /**
      * KO prediction matrix (ordered by kickoff → R32 first, then R16, QF, SF, 3rd, Final):
      *
-     *  Matches 0…third-1   Admin exact (2-0),              Member wrong (0-2)
-     *  Matches third…2t-1  Admin correct winner (3-0 ×0.75), Member exact (2-0 ×1.0)
-     *  Matches 2t…end      Both wrong winner (0-1)         → prize → Uber Pot
+     *  Matches 0…third-1   Admin wrong winner (0-2),  Member exact (2-0)       → Member earns (small R32 prizes)
+     *  Matches third…2t-1  Admin exact (2-0),          Member wrong (0-2)      → Admin earns (larger R32+R16 prizes)
+     *  Matches 2t…end      Both wrong winner (0-1)    → prize → Uber Pot
+     *
+     * Only the top-scoring tier wins per match. Admin's 1.75 > Member's 1.25.
      */
     const adminKOPreds = koMatches.map((m, i) => {
-      if (i < third)         return { matchId: m.matchId, homeScore: 2, awayScore: 0 }; // exact
-      if (i < 2 * third)     return { matchId: m.matchId, homeScore: 3, awayScore: 0 }; // correct winner, wrong score
+      if (i < third)         return { matchId: m.matchId, homeScore: 0, awayScore: 2 }; // wrong winner
+      if (i < 2 * third)     return { matchId: m.matchId, homeScore: 2, awayScore: 0 }; // exact
       return                        { matchId: m.matchId, homeScore: 0, awayScore: 1 }; // wrong winner
     });
 
     const memberKOPreds = koMatches.map((m, i) => {
-      if (i < third)         return { matchId: m.matchId, homeScore: 0, awayScore: 2 }; // wrong winner
-      if (i < 2 * third)     return { matchId: m.matchId, homeScore: 2, awayScore: 0 }; // exact
+      if (i < third)         return { matchId: m.matchId, homeScore: 2, awayScore: 0 }; // exact
+      if (i < 2 * third)     return { matchId: m.matchId, homeScore: 0, awayScore: 2 }; // wrong winner
       return                        { matchId: m.matchId, homeScore: 0, awayScore: 2 }; // wrong winner
     });
 
