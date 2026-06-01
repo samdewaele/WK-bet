@@ -159,6 +159,28 @@ test.describe("Simulation flow", () => {
     ).toBeVisible({ timeout: 8_000 });
   });
 
+  test("Phase 1 → KO: simulation users show exact KO count, not inflated by group predictions", async ({
+    page,
+  }) => {
+    // Regression: before dedicated KOPrediction table, simulation users stored
+    // both group stage (48) and KO (32) predictions with roomId, so the count
+    // query returned 80+ instead of 32. This test checks a simulation user's
+    // row in the admin panel — something the previous test never covered.
+    await runPhase1(page, roomId);
+
+    await page.goto(`/groups/${roomId}`);
+    await page.getByRole("button", { name: /admin/i }).click();
+
+    const refreshBtn = page.getByRole("button", { name: /↻ Refresh/i });
+    if (await refreshBtn.isVisible()) await refreshBtn.click();
+
+    // Alice is a simulation user seeded by Phase 1 with exactly 32 KO predictions.
+    // The second <td> in her row is the KO count cell.
+    const aliceRow = page.locator("tr").filter({ hasText: /\bAlice\b/ });
+    await expect(aliceRow).toBeVisible({ timeout: 8_000 });
+    await expect(aliceRow.locator("td").nth(1)).toHaveText("32/32");
+  });
+
   // ── Phase 2 ──────────────────────────────────────────────────────────────
 
   test("Phase 2: leaderboard shows earnings after KO stage simulation", async ({
