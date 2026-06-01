@@ -8,7 +8,7 @@ const dbPath = path.isAbsolute(filePath) ? filePath : path.resolve(process.cwd()
 const adapter = new PrismaBetterSqlite3({ url: dbPath });
 const db = new PrismaClient({ adapter } as any);
 
-const TEAMS = [
+export const TEAMS = [
   // Group A — hosts: Mexico
   { name: "Mexico",                 flag: "🇲🇽", group: "A" },
   { name: "South Africa",           flag: "🇿🇦", group: "A" },
@@ -107,6 +107,15 @@ function generateGroupMatches() {
 async function main() {
   console.log("Seeding database...");
 
+  const existingMatchCount = await db.match.count();
+
+  // Remove stale teams (only safe when no matches reference them yet)
+  if (existingMatchCount === 0) {
+    const teamNames = TEAMS.map((t) => t.name);
+    const deleted = await db.team.deleteMany({ where: { name: { notIn: teamNames } } });
+    if (deleted.count > 0) console.log(`✓ Removed ${deleted.count} stale teams`);
+  }
+
   // Upsert teams
   for (const team of TEAMS) {
     await db.team.upsert({
@@ -118,7 +127,6 @@ async function main() {
   console.log(`✓ ${TEAMS.length} teams seeded`);
 
   // Only seed matches on first run — don't overwrite admin-entered scores
-  const existingMatchCount = await db.match.count();
   if (existingMatchCount > 0) {
     console.log(`✓ Matches already seeded (${existingMatchCount}), skipping`);
     return;
