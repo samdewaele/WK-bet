@@ -67,10 +67,11 @@ model Room {
   id               String                   @id @default(cuid())
   name             String
   description      String?
+  image            String?                  // base64 data URL (small avatar)
   inviteCode       String                   @unique @default(cuid())
   creatorId        String?
   entryFee         Float                    @default(0)
-  // setup | betting | closed | group_active | ko_betting | ko_active | finished
+  // setup | betting | closed | group_active | ko_betting | ko_active | settling | finished
   status           String                   @default("setup")
   simulationMode   Boolean                  @default(false)
   uberBetsLocked   Boolean                  @default(false)

@@ -32,7 +32,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   const access = await resolveAccess(roomId, session.user.id, session.user.role ?? "");
   if (!access) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
-  let body: { name?: string; entryFee?: number; status?: string; simulationMode?: boolean; newCreatorId?: string; description?: string | null; uberBetsLocked?: boolean };
+  let body: { name?: string; entryFee?: number; status?: string; simulationMode?: boolean; newCreatorId?: string; description?: string | null; uberBetsLocked?: boolean; image?: string | null };
   try { body = await req.json(); } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
@@ -56,6 +56,16 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   if (typeof body.simulationMode === "boolean") data.simulationMode = body.simulationMode;
   if (typeof body.uberBetsLocked === "boolean") data.uberBetsLocked = body.uberBetsLocked;
   if ("description" in body) data.description = body.description?.trim() || null;
+  if ("image" in body) {
+    const img = body.image;
+    if (img === null || img === "") {
+      data.image = null;
+    } else if (typeof img === "string" && img.startsWith("data:image/") && img.length <= 800_000) {
+      data.image = img;
+    } else {
+      return NextResponse.json({ error: "Image must be a data URL under ~600KB" }, { status: 400 });
+    }
+  }
   const VALID_STATUSES = ["setup", "betting", "closed", "group_active", "ko_betting", "ko_active", "settling", "finished"];
   if (typeof body.status === "string" && VALID_STATUSES.includes(body.status)) data.status = body.status;
 

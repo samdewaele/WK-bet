@@ -57,6 +57,7 @@ export default function GroupAdminPanel({
   members,
   initialDescription,
   initialUberBetsLocked,
+  initialImage,
 }: {
   roomId: string;
   initialName: string;
@@ -69,6 +70,7 @@ export default function GroupAdminPanel({
   members: Member[];
   initialDescription?: string | null;
   initialUberBetsLocked?: boolean;
+  initialImage?: string | null;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -96,6 +98,11 @@ export default function GroupAdminPanel({
   // Reseed teams (platform admin)
   const [reseeding, setReseeding] = useState(false);
   const [reseedResult, setReseedResult] = useState<string | null>(null);
+
+  // Group image
+  const [image, setImage] = useState<string | null>(initialImage ?? null);
+  const [imageBusy, setImageBusy] = useState(false);
+  const [imageError, setImageError] = useState("");
 
   // Members stats
   const [memberStats, setMemberStats] = useState<MemberStat[]>([]);
@@ -234,6 +241,58 @@ export default function GroupAdminPanel({
     }
   }
 
+  // Downscale a chosen image to a small square avatar (data URL) before saving.
+  function downscaleImage(file: File): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const img = new Image();
+        img.onload = () => {
+          const size = 256;
+          const canvas = document.createElement("canvas");
+          canvas.width = size; canvas.height = size;
+          const ctx = canvas.getContext("2d");
+          if (!ctx) return reject(new Error("Canvas unsupported"));
+          // cover-crop to square
+          const scale = Math.max(size / img.width, size / img.height);
+          const w = img.width * scale, h = img.height * scale;
+          ctx.drawImage(img, (size - w) / 2, (size - h) / 2, w, h);
+          resolve(canvas.toDataURL("image/jpeg", 0.8));
+        };
+        img.onerror = () => reject(new Error("Invalid image"));
+        img.src = reader.result as string;
+      };
+      reader.onerror = () => reject(new Error("Could not read file"));
+      reader.readAsDataURL(file);
+    });
+  }
+
+  async function handleImageChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // allow re-selecting the same file
+    if (!file) return;
+    if (!file.type.startsWith("image/")) { setImageError("Please choose an image file"); return; }
+    setImageBusy(true); setImageError("");
+    try {
+      const dataUrl = await downscaleImage(file);
+      const res = await patch({ image: dataUrl });
+      if (res.ok) { setImage(dataUrl); router.refresh(); }
+      else setImageError((await res.json()).error ?? "Upload failed");
+    } catch (err) {
+      setImageError(err instanceof Error ? err.message : "Upload failed");
+    } finally { setImageBusy(false); }
+  }
+
+  async function handleImageRemove() {
+    setImageBusy(true); setImageError("");
+    try {
+      const res = await patch({ image: null });
+      if (res.ok) { setImage(null); router.refresh(); }
+      else setImageError((await res.json()).error ?? "Failed");
+    } catch { setImageError("Failed"); }
+    finally { setImageBusy(false); }
+  }
+
   async function handleToggleExclude(userId: string, currentlyExcluded: boolean) {
     setTogglingMember(userId);
     try {
@@ -350,6 +409,29 @@ export default function GroupAdminPanel({
                     maxLength={500}
                     className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-violet-500 resize-none"
                   />
+                </div>
+                <div>
+                  <label className="block text-xs text-gray-400 mb-1">Group image (optional)</label>
+                  <div className="flex items-center gap-3">
+                    {image ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={image} alt="Group" className="w-14 h-14 rounded-lg object-cover border border-gray-700" />
+                    ) : (
+                      <div className="w-14 h-14 rounded-lg bg-gray-800 border border-gray-700 flex items-center justify-center text-2xl">⚽</div>
+                    )}
+                    <div className="flex flex-col gap-1.5">
+                      <label className={`text-xs font-semibold px-3 py-1.5 rounded-lg cursor-pointer transition-colors w-fit ${imageBusy ? "bg-gray-700 text-gray-400" : "bg-violet-600 hover:bg-violet-500 text-white"}`}>
+                        {imageBusy ? "Saving…" : image ? "Change image" : "Upload image"}
+                        <input type="file" accept="image/*" onChange={handleImageChange} disabled={imageBusy} className="hidden" />
+                      </label>
+                      {image && !imageBusy && (
+                        <button onClick={handleImageRemove} className="text-xs text-gray-400 hover:text-red-400 transition-colors w-fit">
+                          Remove
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  {imageError && <p className="text-xs text-red-400 mt-1">{imageError}</p>}
                 </div>
 
                 {/* Status — current stage + contextual action buttons */}

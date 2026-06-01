@@ -106,7 +106,13 @@ export default async function GroupDetailPage({ params, searchParams }: Props) {
             ← Back to groups
           </Link>
           <div className="flex items-start justify-between gap-4 mt-2">
-            <h1 className="text-3xl font-bold text-white">{room.name}</h1>
+            <div className="flex items-center gap-3 min-w-0">
+              {room.image && (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={room.image} alt={room.name} className="w-12 h-12 rounded-lg object-cover border border-gray-700 shrink-0" />
+              )}
+              <h1 className="text-3xl font-bold text-white truncate">{room.name}</h1>
+            </div>
             {isManager && (
               <GroupAdminPanel
                 roomId={roomId}
@@ -120,6 +126,7 @@ export default async function GroupDetailPage({ params, searchParams }: Props) {
                 members={room.members.map((m) => ({ userId: m.userId, name: m.user.name }))}
                 initialDescription={room.description}
                 initialUberBetsLocked={room.uberBetsLocked}
+                initialImage={room.image}
               />
             )}
           </div>
