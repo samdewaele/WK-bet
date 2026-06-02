@@ -598,7 +598,7 @@ export default function GroupAdminPanel({
               </div>
 
               {/* Test simulation — platform admin only, setup status only */}
-              {isPlatformAdmin && (
+              {isPlatformAdmin && (currentStatus === "setup" || settings.simulationMode) && (
                 <div>
                   <h3 className="text-xs font-bold text-violet-400 uppercase tracking-wide mb-2">Test Simulation</h3>
                   {currentStatus !== "setup" && !settings.simulationMode ? (
