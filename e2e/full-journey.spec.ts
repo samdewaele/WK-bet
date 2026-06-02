@@ -14,10 +14,11 @@
  *   Group D  — Both top-2-correct (×0.75)                         → Partial prize split
  *   Groups E-L — Both wrong (×0)                                  → All 8 prizes → Uber Pot
  *
- * KO prediction variety (32 matches, split into thirds):
- *   First ~10  — Admin wrong winner (0-2), Member exact (2-0)   → Member earns (10 R32 × 0.125 = 1.25)
- *   Middle ~10 — Admin exact (2-0),        Member wrong (0-2)   → Admin earns (6 R32 + 4 R16 = 1.75)
- *   Last  ~12  — Both wrong winner (0-1)                        → Both earn nothing → Uber Pot
+ * KO prediction variety (32 matches):
+ *   All 32   — Admin always exact (2-0): correct teams propagate → Admin earns from every match
+ *   First ~10 — Member also exact (2-0)                         → Admin+Member split those prizes
+ *   Rest      — Member wrong winner (0-2)                       → Admin earns solo, Member earns nothing
+ *   Net: Admin KO total >> Member KO total
  *
  * Uber Pot bets:
  *   "Total goals in group stage" — admin answers "144" (correct), member "999" (wrong)
@@ -229,23 +230,24 @@ test.describe("Full betting journey", () => {
     /**
      * KO prediction matrix (ordered by kickoff → R32 first, then R16, QF, SF, 3rd, Final):
      *
-     *  Matches 0…third-1   Admin wrong winner (0-2),  Member exact (2-0)       → Member earns (small R32 prizes)
-     *  Matches third…2t-1  Admin exact (2-0),          Member wrong (0-2)      → Admin earns (larger R32+R16 prizes)
-     *  Matches 2t…end      Both wrong winner (0-1)    → prize → Uber Pot
+     *  Admin always predicts 2-0. Because home always wins in the simulation, Admin's predicted
+     *  winners are always correct — they propagate through every R16/QF/SF/Final slot, so Admin
+     *  earns from all 32 matches (exact score, correct teams throughout).
      *
-     * Only the top-scoring tier wins per match. Admin's 1.75 > Member's 1.25.
+     *  Member matches Admin for the first 'third' of matches (both predict 2-0 → split prize),
+     *  then predicts 0-2 (wrong winner) for the rest, earning nothing from those.
      */
-    const adminKOPreds = koMatches.map((m, i) => {
-      if (i < third)         return { matchId: m.matchId, homeScore: 0, awayScore: 2 }; // wrong winner
-      if (i < 2 * third)     return { matchId: m.matchId, homeScore: 2, awayScore: 0 }; // exact
-      return                        { matchId: m.matchId, homeScore: 0, awayScore: 1 }; // wrong winner
-    });
+    // Admin always predicts home wins 2-0 → correct teams propagate through bracket
+    const adminKOPreds = koMatches.map((m) => ({
+      matchId: m.matchId, homeScore: 2, awayScore: 0,
+    }));
 
-    const memberKOPreds = koMatches.map((m, i) => {
-      if (i < third)         return { matchId: m.matchId, homeScore: 2, awayScore: 0 }; // exact
-      if (i < 2 * third)     return { matchId: m.matchId, homeScore: 0, awayScore: 2 }; // wrong winner
-      return                        { matchId: m.matchId, homeScore: 0, awayScore: 2 }; // wrong winner
-    });
+    // Member: first third matches admin (split prize), rest predicts wrong winner → 0
+    const memberKOPreds = koMatches.map((m, i) => ({
+      matchId: m.matchId,
+      homeScore: i < third ? 2 : 0,
+      awayScore: i < third ? 0 : 2,
+    }));
 
     const adminKORes = await page.request.post(`/api/groups/${roomId}/knockout`, {
       data: { predictions: adminKOPreds },
@@ -280,7 +282,7 @@ test.describe("Full betting journey", () => {
     const memberEntry2 = lb2.find((e) => e.name === "Member")!;
 
     expect(adminEntry2.knockout).toBeGreaterThan(0);
-    expect(memberEntry2.knockout).toBeGreaterThan(0); // member earned from the middle third
+    expect(memberEntry2.knockout).toBeGreaterThan(0); // member earned from first third (split with admin)
     expect(adminEntry2.knockout).toBeGreaterThan(memberEntry2.knockout);
     expect(adminEntry2.totalEarned).toBeGreaterThan(memberEntry2.totalEarned);
 
