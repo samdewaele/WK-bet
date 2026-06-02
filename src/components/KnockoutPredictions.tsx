@@ -95,6 +95,20 @@ const BRACKET_PATH: Record<number, {
 type ScoreState = Record<string, { home: string; away: string }>;
 type MatchSaveStatus = "idle" | "saving" | "saved" | "error";
 
+function randomKOScore(): { home: number; away: number } {
+  const goals = () => {
+    const r = Math.random();
+    if (r < 0.28) return 0;
+    if (r < 0.60) return 1;
+    if (r < 0.82) return 2;
+    if (r < 0.95) return 3;
+    return 4;
+  };
+  let home: number, away: number;
+  do { home = goals(); away = goals(); } while (home === away);
+  return { home, away };
+}
+
 export default function KnockoutPredictions({ roomId, roomStatus, simulationMode }: Props) {
   const [predictions, setPredictions] = useState<Prediction[]>([]);
   const [scores, setScores] = useState<ScoreState>({});
@@ -323,6 +337,42 @@ export default function KnockoutPredictions({ roomId, roomStatus, simulationMode
     setTimeout(() => setGlobalStatus("idle"), 3000);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roomId, predictions, scores, penaltyWinners]);
+
+  const handlePickForMe = useCallback(async () => {
+    const newScores: ScoreState = { ...scores };
+    for (const pred of predictions) {
+      if (isLocked(pred.match)) continue;
+      const { home, away } = randomKOScore();
+      newScores[pred.match.id] = { home: String(home), away: String(away) };
+    }
+    setScores(newScores);
+    // Clear any stale penalty winners (all random scores are decisive)
+    setPenaltyWinners({});
+
+    // Save all immediately using the fresh scores (avoids stale closure)
+    const toSave = predictions
+      .map((p) => p.match)
+      .filter((m) => !isLocked(m) && newScores[m.id])
+      .map((m) => ({
+        matchId: m.id,
+        homeScore: parseInt(newScores[m.id].home, 10),
+        awayScore: parseInt(newScores[m.id].away, 10),
+        penaltyWinner: null as null | "home" | "away",
+      }));
+
+    if (toSave.length === 0) return;
+    setGlobalSaving(true);
+    setGlobalStatus("idle");
+    const res = await fetch(`/api/groups/${roomId}/knockout`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ predictions: toSave }),
+    });
+    setGlobalSaving(false);
+    setGlobalStatus(res.ok ? "saved" : "error");
+    setTimeout(() => setGlobalStatus("idle"), 3000);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [roomId, predictions, scores]);
 
   if (loading) {
     return <div className="animate-pulse bg-gray-900 border border-gray-800 rounded-xl h-48" />;
@@ -596,10 +646,20 @@ export default function KnockoutPredictions({ roomId, roomStatus, simulationMode
       {/* Global save bar */}
       {!allKOLocked && (
         <div className="flex items-center justify-between mb-4 bg-gray-900 border border-gray-800 rounded-xl px-4 py-3">
-          <span className="text-sm text-gray-400">
-            {filledCount}/{allPredictions.length} predictions filled
-            <span className="ml-2 text-xs text-gray-600">(auto-saves as you type)</span>
-          </span>
+          <div className="flex items-center gap-3">
+            <span className="text-sm text-gray-400">
+              {filledCount}/{allPredictions.length} predictions filled
+              <span className="ml-2 text-xs text-gray-600">(auto-saves as you type)</span>
+            </span>
+            <button
+              onClick={handlePickForMe}
+              disabled={globalSaving}
+              title="Randomly fill all knockout predictions — handy when you're stuck or just want to get on with it"
+              className="text-sm text-gray-400 hover:text-white bg-gray-800 hover:bg-gray-700 border border-gray-700 px-3 py-1 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              🎲 Pick for me
+            </button>
+          </div>
           <button
             onClick={handleSaveAll}
             disabled={globalSaving || filledCount === 0}
@@ -611,7 +671,7 @@ export default function KnockoutPredictions({ roomId, roomStatus, simulationMode
                 : "bg-amber-400 hover:bg-amber-300 text-gray-900"
             }`}
           >
-            {globalStatus === "saved" ? "Saved!" : globalStatus === "error" ? "Error — retry" : globalSaving ? "Saving…" : "Save all"}
+            {globalStatus === "saved" ? "Saved!" : globalStatus === "error" ? "Error — retry" : globalSaving ? "Saving…" : `Save all`}
           </button>
         </div>
       )}

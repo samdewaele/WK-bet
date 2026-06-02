@@ -230,6 +230,53 @@ export default function GroupStandingsPicker({ roomId, roomStatus }: Props) {
     }
   }, [roomId, groupStates, savedStates, allLocked]);
 
+  const handlePickForMe = useCallback(async () => {
+    const newStates: Record<string, GroupState> = { ...groupStates };
+    for (const group of WC_GROUPS) {
+      if (allLocked) continue;
+      const groupTeams = teams.filter((t) => t.group === group);
+      if (groupTeams.length < 4) continue;
+      const shuffled = [...groupTeams].sort(() => Math.random() - 0.5);
+      newStates[group] = {
+        position1: shuffled[0].id,
+        position2: shuffled[1].id,
+        position3: shuffled[2].id,
+        position4: shuffled[3].id,
+      };
+    }
+    setGroupStates(newStates);
+
+    // Save immediately with the freshly computed states
+    const toSave = WC_GROUPS.filter((g) => !allLocked && newStates[g]);
+    if (toSave.length === 0) return;
+    setSaving(true);
+    setSaveResult(null);
+    try {
+      const res = await fetch(`/api/groups/${roomId}/standings`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          predictions: toSave.map((g) => ({ wcGroup: g, ...newStates[g] })),
+        }),
+      });
+      if (res.ok) {
+        const saved: Record<string, GroupState> = { ...savedStates };
+        for (const g of toSave) saved[g] = newStates[g];
+        setSavedStates(saved);
+        setSaveResult({ count: toSave.length });
+        setTimeout(() => setSaveResult(null), 3000);
+      } else {
+        setSaveResult({ count: 0, error: "Save failed — try again" });
+        setTimeout(() => setSaveResult(null), 5000);
+      }
+    } catch {
+      setSaveResult({ count: 0, error: "Network error — try again" });
+      setTimeout(() => setSaveResult(null), 3000);
+    } finally {
+      setSaving(false);
+    }
+  }, [roomId, groupStates, savedStates, allLocked, teams]);
+
   if (loading) {
     return (
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
@@ -393,12 +440,22 @@ export default function GroupStandingsPicker({ roomId, roomStatus }: Props) {
         })}
       </div>
 
-      {/* Single save button — only shown when not locked */}
+      {/* Footer bar — only shown when not locked */}
       {unlockedTotal > 0 && (
         <div className="flex items-center justify-between gap-4 py-4 border-t border-gray-800">
-          <span className="text-sm text-gray-500">
-            {unlockedComplete}/{unlockedTotal} groups filled in
-          </span>
+          <div className="flex items-center gap-3">
+            <span className="text-sm text-gray-500">
+              {unlockedComplete}/{unlockedTotal} groups filled in
+            </span>
+            <button
+              onClick={handlePickForMe}
+              disabled={saving}
+              title="Randomly fill all groups — handy when you're stuck or just want to get on with it"
+              className="text-sm text-gray-400 hover:text-white bg-gray-800 hover:bg-gray-700 border border-gray-700 px-3 py-1.5 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              🎲 Pick for me
+            </button>
+          </div>
           <div className="flex items-center gap-3">
             {saveResult && (
               <span className={`text-sm ${saveResult.error ? "text-red-400" : "text-green-400"}`}>
