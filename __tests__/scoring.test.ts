@@ -4,6 +4,7 @@ vi.mock("@/lib/db", () => ({
   db: {
     groupStandingPrediction: { findMany: vi.fn(), update: vi.fn().mockResolvedValue({}) },
     kOPrediction: { findMany: vi.fn(), update: vi.fn().mockResolvedValue({}) },
+    match: { findMany: vi.fn() },
   },
 }));
 
@@ -25,6 +26,10 @@ beforeEach(() => {
   vi.clearAllMocks();
   mockDb.groupStandingPrediction.update.mockResolvedValue({});
   mockDb.kOPrediction.update.mockResolvedValue({});
+  // Default: single R32 match with fixed teams, no other rounds
+  mockDb.match.findMany.mockResolvedValue([
+    { id: "m1", matchNumber: 73, homeTeamId: "tA", awayTeamId: "tB" },
+  ]);
 });
 
 // ---------------------------------------------------------------------------
@@ -113,19 +118,22 @@ describe("scoreRoomGroupStanding — top tier wins, split within tier", () => {
 });
 
 // ---------------------------------------------------------------------------
-// KO matches
+// KO matches — R32 (teams fixed, same as actual for all players)
 // ---------------------------------------------------------------------------
 
-function ko(id: string, home: number, away: number) {
-  return { id, homeScore: home, awayScore: away };
+// For R32, all players see the same actual teams (tA vs tB). Scoring reduces
+// to: did you predict the right 90-minute winner?
+
+function ko(id: string, userId: string, matchId: string, home: number, away: number) {
+  return { id, userId, matchId, homeScore: home, awayScore: away };
 }
 
-describe("scoreRoomKOMatch — exact > correct-winner > wrong", () => {
+describe("scoreRoomKOMatch — R32 (team-aware, same teams for all)", () => {
   it("sole exact score takes the whole match prize", async () => {
     mockDb.kOPrediction.findMany.mockResolvedValue([
-      ko("exact", 2, 0),
-      ko("winner", 1, 0),
-      ko("wrong", 0, 1),
+      ko("exact", "u1", "m1", 2, 0),
+      ko("winner", "u2", "m1", 1, 0),
+      ko("wrong", "u3", "m1", 0, 1),
     ]);
 
     await scoreRoomKOMatch("r1", "m1", "R32", 80, 2, 0);
@@ -138,9 +146,9 @@ describe("scoreRoomKOMatch — exact > correct-winner > wrong", () => {
 
   it("with no exact score, correct-winner tier splits the prize", async () => {
     mockDb.kOPrediction.findMany.mockResolvedValue([
-      ko("w1", 1, 0),
-      ko("w2", 3, 0),
-      ko("wrong", 0, 2),
+      ko("w1", "u1", "m1", 1, 0),
+      ko("w2", "u2", "m1", 3, 0),
+      ko("wrong", "u3", "m1", 0, 2),
     ]);
 
     await scoreRoomKOMatch("r1", "m1", "R32", 80, 2, 0);
@@ -153,7 +161,7 @@ describe("scoreRoomKOMatch — exact > correct-winner > wrong", () => {
   });
 
   it("also writes accuracy points", async () => {
-    mockDb.kOPrediction.findMany.mockResolvedValue([ko("exact", 2, 0)]);
+    mockDb.kOPrediction.findMany.mockResolvedValue([ko("exact", "u1", "m1", 2, 0)]);
     await scoreRoomKOMatch("r1", "m1", "R32", 80, 2, 0);
     const call = mockDb.kOPrediction.update.mock.calls[0][0];
     expect(call.data.points).toBeGreaterThan(0);
@@ -163,5 +171,80 @@ describe("scoreRoomKOMatch — exact > correct-winner > wrong", () => {
     mockDb.kOPrediction.findMany.mockResolvedValue([]);
     await scoreRoomKOMatch("r1", "m1", "R32", 80, 2, 0);
     expect(mockDb.kOPrediction.update).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// KO matches — team-aware: wrong bracket prediction earns 0
+// ---------------------------------------------------------------------------
+// NEXT_ROUND_SLOT[73] = { winner: { matchNumber: 89, side: "home" } }
+// so the winner of R32 match #73 becomes the home team in R16 match #89.
+
+describe("scoreRoomKOMatch — team-aware bracket scoring (R16)", () => {
+  beforeEach(() => {
+    // Two matches: R32 #73 (tA vs tB) and R16 #89 (actual home=tA, away=tC)
+    mockDb.match.findMany.mockResolvedValue([
+      { id: "m73", matchNumber: 73, homeTeamId: "tA", awayTeamId: "tB" },
+      { id: "m89", matchNumber: 89, homeTeamId: "tA", awayTeamId: "tC" },
+    ]);
+  });
+
+  it("awards full prize when player predicted the correct team to advance AND exact score", async () => {
+    mockDb.kOPrediction.findMany.mockResolvedValue([
+      // u1 correctly predicted tA to win R32 (home wins 2-0)
+      ko("u1_r32", "u1", "m73", 2, 0),
+      // u1 predicts 2-1 in the R16 match → tA (home) wins → exact score
+      ko("u1_r16", "u1", "m89", 2, 1),
+    ]);
+
+    // Actual R16 result: tA wins 2-1
+    await scoreRoomKOMatch("r1", "m89", "R16", 80, 2, 1);
+
+    const earned = earnedById(mockDb.kOPrediction.update);
+    expect(earned["u1_r16"]).toBe(80); // exact score + correct team = 1.0x = 80
+  });
+
+  it("awards 0 when player predicted the wrong team to advance, even if score digits match", async () => {
+    mockDb.kOPrediction.findMany.mockResolvedValue([
+      // u2 wrongly predicted tB to win R32 (away wins 0-2) → tB in R16 home slot
+      ko("u2_r32", "u2", "m73", 0, 2),
+      // u2 predicts 2-1 in R16 → predicted home (tB) wins, but actual home is tA
+      ko("u2_r16", "u2", "m89", 2, 1),
+    ]);
+
+    // Actual R16 result: tA wins 2-1 (same score, wrong team)
+    await scoreRoomKOMatch("r1", "m89", "R16", 80, 2, 1);
+
+    const earned = earnedById(mockDb.kOPrediction.update);
+    expect(earned["u2_r16"]).toBe(0); // correct score digits but wrong team → 0
+  });
+
+  it("correct winner, wrong exact score → 0.75x partial prize", async () => {
+    mockDb.kOPrediction.findMany.mockResolvedValue([
+      ko("u1_r32", "u1", "m73", 2, 0), // correctly predicted tA to advance
+      ko("u1_r16", "u1", "m89", 3, 1), // correct winner (tA) but wrong score
+    ]);
+
+    // Actual: tA wins 2-1
+    await scoreRoomKOMatch("r1", "m89", "R16", 80, 2, 1);
+
+    const earned = earnedById(mockDb.kOPrediction.update);
+    expect(earned["u1_r16"]).toBe(60); // 0.75 × 80 = 60
+  });
+
+  it("two players: one correct team, one wrong — only correct team player earns", async () => {
+    mockDb.kOPrediction.findMany.mockResolvedValue([
+      ko("u1_r32", "u1", "m73", 2, 0), // tA wins R32
+      ko("u1_r16", "u1", "m89", 3, 0), // correct winner (tA), wrong score → 0.75x
+      ko("u2_r32", "u2", "m73", 0, 2), // tB "wins" R32 in u2's prediction
+      ko("u2_r16", "u2", "m89", 3, 0), // same score, but wrong team in bracket → 0
+    ]);
+
+    // Actual: tA wins 2-1
+    await scoreRoomKOMatch("r1", "m89", "R16", 80, 2, 1);
+
+    const earned = earnedById(mockDb.kOPrediction.update);
+    expect(earned["u1_r16"]).toBe(60); // 0.75 × 80, sole winner in top tier
+    expect(earned["u2_r16"]).toBe(0);  // wrong team → excluded entirely
   });
 });

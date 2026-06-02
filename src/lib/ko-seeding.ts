@@ -431,3 +431,75 @@ export async function resetKOBracket(): Promise<void> {
     data: { homeTeamId: null, awayTeamId: null },
   });
 }
+
+// ---------------------------------------------------------------------------
+// Player bracket simulation
+// ---------------------------------------------------------------------------
+
+type PredInput = { matchId: string; homeScore: number; awayScore: number };
+type KOMatchInfo = { id: string; matchNumber: number; homeTeamId: string | null; awayTeamId: string | null };
+
+/**
+ * Given a player's KO predictions and the actual KO match team assignments,
+ * simulate the player's predicted bracket to determine which teams they
+ * predicted to appear in each match slot.
+ *
+ * Starts from actual R32 teams (fixed after group stage), then propagates
+ * through the bracket using the player's own score predictions to infer
+ * which teams they expected to advance in each round.
+ *
+ * This is the source of truth for team-aware KO scoring: a prediction only
+ * earns money if the player predicted the correct winning team to be in
+ * that match (not just a numerically matching score with the wrong teams).
+ *
+ * Returns Map<matchId, { homeTeamId, awayTeamId }>.
+ */
+export function buildPlayerBracket(
+  preds: PredInput[],
+  koMatches: KOMatchInfo[],
+): Map<string, { homeTeamId: string | null; awayTeamId: string | null }> {
+  const predMap = new Map(preds.map((p) => [p.matchId, p]));
+  const numberToId = new Map(koMatches.map((m) => [m.matchNumber, m.id]));
+
+  // Start with actual team assignments — R32 teams are fixed; R16+ slots will
+  // be overwritten as we propagate the player's predicted winners upward.
+  const bracket = new Map(
+    koMatches.map((m) => [m.id, { homeTeamId: m.homeTeamId, awayTeamId: m.awayTeamId }]),
+  );
+
+  // Process ascending by matchNumber: R32 first → R16 → QF → SF → Finals.
+  const sorted = [...koMatches].sort((a, b) => a.matchNumber - b.matchNumber);
+
+  for (const match of sorted) {
+    const pred = predMap.get(match.id);
+    if (!pred) continue;
+
+    const slots = bracket.get(match.id)!;
+    // KO must have a decisive winner (no draw ⇒ use home as tiebreak)
+    const predictedWinnerId = pred.homeScore >= pred.awayScore ? slots.homeTeamId : slots.awayTeamId;
+    const predictedLoserId  = pred.homeScore >= pred.awayScore ? slots.awayTeamId : slots.homeTeamId;
+
+    const nextSlot = NEXT_ROUND_SLOT[match.matchNumber];
+    if (!nextSlot) continue;
+
+    const nextMatchId = numberToId.get(nextSlot.winner.matchNumber);
+    if (nextMatchId && predictedWinnerId) {
+      const next = bracket.get(nextMatchId) ?? { homeTeamId: null, awayTeamId: null };
+      if (nextSlot.winner.side === "home") next.homeTeamId = predictedWinnerId;
+      else next.awayTeamId = predictedWinnerId;
+      bracket.set(nextMatchId, next);
+    }
+
+    if (nextSlot.loser && predictedLoserId) {
+      const loserMatchId = numberToId.get(nextSlot.loser.matchNumber);
+      if (loserMatchId) {
+        const loserSlots = bracket.get(loserMatchId) ?? { homeTeamId: null, awayTeamId: null };
+        if (nextSlot.loser.side === "home") loserSlots.homeTeamId = predictedLoserId;
+        else loserSlots.awayTeamId = predictedLoserId;
+        bracket.set(loserMatchId, loserSlots);
+      }
+    }
+  }
+
+  return bracket;
+}

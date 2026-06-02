@@ -9,12 +9,12 @@ import {
   calculatePot,
   scoreGroupStanding,
   earnedFromGroupStanding,
-  earnedFromKOMatch,
+  scoreKnockoutMatchWithTeams,
   KO_ROUNDS,
   type KORound,
 } from "@/lib/pot";
 import { checkAndSendRoundNotifications, resetNotification } from "@/lib/notifications";
-import { buildStandingsFromMatches, populateR32Bracket, resetR32Bracket, populateNextRoundSlot, resetKOBracket, NEXT_ROUND_SLOT } from "@/lib/ko-seeding";
+import { buildStandingsFromMatches, populateR32Bracket, resetR32Bracket, populateNextRoundSlot, resetKOBracket, NEXT_ROUND_SLOT, buildPlayerBracket } from "@/lib/ko-seeding";
 
 export const TEST_PREFIX = "test-tournament-";
 const TEST_ROOM_INVITE = `${TEST_PREFIX}invite`;
@@ -454,14 +454,32 @@ async function _seedKORoundsRandomly(
   });
   if (koMatches.length === 0) return;
 
-  // Track team slots in memory so we can propagate bracket progression
-  // without re-fetching from DB. Starts with R32 teams (set by populateR32Bracket).
+  // Fetch all room KO predictions upfront for bracket simulation.
+  // Includes test users (stored with roomId) and real members.
+  const allRoomPreds = await db.kOPrediction.findMany({
+    where: { roomId },
+    select: { id: true, userId: true, matchId: true, homeScore: true, awayScore: true },
+  });
+
+  // Build each user's predicted bracket from their R32 predictions upward.
+  // This tells us which team each player predicted to be in each KO slot.
+  const predsByUser = new Map<string, typeof allRoomPreds>();
+  for (const p of allRoomPreds) {
+    if (!predsByUser.has(p.userId)) predsByUser.set(p.userId, []);
+    predsByUser.get(p.userId)!.push(p);
+  }
+  const userBrackets = new Map<string, ReturnType<typeof buildPlayerBracket>>();
+  for (const [userId, userPreds] of predsByUser) {
+    userBrackets.set(userId, buildPlayerBracket(userPreds, koMatches));
+  }
+
+  // Track actual team slots in memory for bracket progression.
+  // Starts with R32 teams (set by populateR32Bracket in Phase 1).
   const teamSlots = new Map<number, { homeTeamId: string | null; awayTeamId: string | null }>();
   for (const m of koMatches) {
     teamSlots.set(m.matchNumber, { homeTeamId: m.homeTeamId, awayTeamId: m.awayTeamId });
   }
 
-  // Random results + predictions for each KO match (ascending matchNumber order)
   for (const match of koMatches) {
     // KO can't draw — if equal, home wins by 1
     let actualHome = randomGoals();
@@ -473,15 +491,16 @@ async function _seedKORoundsRandomly(
       data: { homeScore: actualHome, awayScore: actualAway, status: "finished" },
     });
 
-    // Propagate winner to next round bracket slot (both in memory and DB)
+    // Propagate actual winner to next round bracket slot (in memory + DB)
     const slots = teamSlots.get(match.matchNumber)!;
-    const winnerId = actualHome > actualAway ? slots.homeTeamId : slots.awayTeamId;
-    const loserId  = actualHome > actualAway ? slots.awayTeamId : slots.homeTeamId;
+    const actualHomeTeamId = slots.homeTeamId;
+    const actualAwayTeamId = slots.awayTeamId;
+    const winnerId = actualHome > actualAway ? actualHomeTeamId : actualAwayTeamId;
+    const loserId  = actualHome > actualAway ? actualAwayTeamId : actualHomeTeamId;
 
     if (winnerId) {
       const nextSlot = NEXT_ROUND_SLOT[match.matchNumber];
       if (nextSlot) {
-        // Update in-memory map for subsequent matches
         const nextSlots = teamSlots.get(nextSlot.winner.matchNumber);
         if (nextSlots) {
           if (nextSlot.winner.side === "home") nextSlots.homeTeamId = winnerId;
@@ -494,39 +513,39 @@ async function _seedKORoundsRandomly(
             else loserSlots.awayTeamId = loserId;
           }
         }
-        // Persist to DB
         await populateNextRoundSlot(match.matchNumber, winnerId, loserId);
       }
     }
 
-    // Score ALL KO predictions for this match (test users + real members who submitted)
+    // Score ALL KO predictions for this match (team-aware: only earns money
+    // if the player predicted the correct winning team to be in this slot).
     const matchPrize = pot.prizePerKOMatch[match.round as KORound] ?? 0;
-    const allMatchPreds = await db.kOPrediction.findMany({
-      where: { matchId: match.id, roomId },
-    });
+    const matchPreds = allRoomPreds.filter((p) => p.matchId === match.id);
 
-    const scored = allMatchPreds.map((pred) => {
-      const scoreMultiplier = (() => {
-        if (pred.homeScore === actualHome && pred.awayScore === actualAway) return 1.0;
-        const pWin = pred.homeScore > pred.awayScore ? "home" : pred.homeScore < pred.awayScore ? "away" : "draw";
-        const aWin = actualHome > actualAway ? "home" : actualHome < actualAway ? "away" : "draw";
-        return pWin === aWin ? 0.75 : 0;
-      })();
+    const scored = matchPreds.map((pred) => {
+      const predictedSlot = userBrackets.get(pred.userId)?.get(match.id);
+      const scoreMultiplier = scoreKnockoutMatchWithTeams(
+        pred.homeScore, pred.awayScore, actualHome, actualAway,
+        predictedSlot?.homeTeamId ?? null,
+        predictedSlot?.awayTeamId ?? null,
+        actualHomeTeamId,
+        actualAwayTeamId,
+      ).scoreMultiplier;
       const pts = calculatePoints(match.round as Round, pred.homeScore, pred.awayScore, actualHome, actualAway);
       return { id: pred.id, homeScore: pred.homeScore, awayScore: pred.awayScore, scoreMultiplier, pts };
     });
 
-    // Only the top-scoring tier wins — lower tiers receive nothing.
     const maxMultiplier = scored.reduce((max, s) => Math.max(max, s.scoreMultiplier), 0);
-    const topCount = scored.filter(s => s.scoreMultiplier === maxMultiplier && maxMultiplier > 0).length;
+    const topCount = scored.filter((s) => s.scoreMultiplier === maxMultiplier && maxMultiplier > 0).length;
 
     await Promise.all(
       scored.map((s) => {
-        const earnedAmount = (s.scoreMultiplier === maxMultiplier && maxMultiplier > 0)
-          ? earnedFromKOMatch(s.homeScore, s.awayScore, actualHome, actualAway, matchPrize, topCount)
-          : 0;
+        const earnedAmount =
+          s.scoreMultiplier === maxMultiplier && maxMultiplier > 0
+            ? (matchPrize * s.scoreMultiplier) / topCount
+            : 0;
         return db.kOPrediction.update({ where: { id: s.id }, data: { points: s.pts, earnedAmount } });
-      })
+      }),
     );
   }
 }

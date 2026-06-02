@@ -14,12 +14,11 @@ import {
   calculatePot,
   scoreGroupStanding,
   earnedFromGroupStanding,
-  scoreKnockoutMatch,
-  earnedFromKOMatch,
+  scoreKnockoutMatchWithTeams,
   type KORound,
 } from "@/lib/pot";
 import { calculatePoints, type Round } from "@/lib/points";
-import { buildStandingsFromMatches, populateGroupQualifiers, type WCGroup } from "@/lib/ko-seeding";
+import { buildStandingsFromMatches, populateGroupQualifiers, buildPlayerBracket, type WCGroup } from "@/lib/ko-seeding";
 
 type Top4 = [string, string, string, string];
 
@@ -64,6 +63,10 @@ export async function scoreRoomGroupStanding(
 /**
  * Score one room's KO predictions for a single finished match.
  * Sets both points (accuracy) and earnedAmount (money).
+ *
+ * Scoring is team-aware: a prediction only earns money if the player
+ * predicted the correct winning team to be in this match, determined by
+ * tracing their full bracket from R32 upward.
  */
 export async function scoreRoomKOMatch(
   roomId: string,
@@ -73,16 +76,53 @@ export async function scoreRoomKOMatch(
   actualHome: number,
   actualAway: number,
 ): Promise<void> {
-  const preds = await db.kOPrediction.findMany({ where: { matchId, roomId } });
-  if (preds.length === 0) return;
+  const [koMatches, allRoomPreds] = await Promise.all([
+    db.match.findMany({
+      where: { round: { in: ["R32", "R16", "QF", "SF", "3rd", "Final"] } },
+      select: { id: true, matchNumber: true, homeTeamId: true, awayTeamId: true },
+      orderBy: { matchNumber: "asc" },
+    }),
+    db.kOPrediction.findMany({
+      where: { roomId },
+      select: { id: true, userId: true, matchId: true, homeScore: true, awayScore: true },
+    }),
+  ]);
 
-  const scored = preds.map((p) => ({
-    id: p.id,
-    homeScore: p.homeScore,
-    awayScore: p.awayScore,
-    points: calculatePoints(round, p.homeScore, p.awayScore, actualHome, actualAway),
-    multiplier: scoreKnockoutMatch(p.homeScore, p.awayScore, actualHome, actualAway).scoreMultiplier,
-  }));
+  const matchPreds = allRoomPreds.filter((p) => p.matchId === matchId);
+  if (matchPreds.length === 0) return;
+
+  const thisMatch = koMatches.find((m) => m.id === matchId);
+  const actualHomeTeamId = thisMatch?.homeTeamId ?? null;
+  const actualAwayTeamId = thisMatch?.awayTeamId ?? null;
+
+  // Build each user's predicted bracket (traces R32 predictions upward)
+  const predsByUser = new Map<string, typeof allRoomPreds>();
+  for (const p of allRoomPreds) {
+    if (!predsByUser.has(p.userId)) predsByUser.set(p.userId, []);
+    predsByUser.get(p.userId)!.push(p);
+  }
+  const userBrackets = new Map<string, ReturnType<typeof buildPlayerBracket>>();
+  for (const [userId, userPreds] of predsByUser) {
+    userBrackets.set(userId, buildPlayerBracket(userPreds, koMatches));
+  }
+
+  const scored = matchPreds.map((p) => {
+    const predictedSlot = userBrackets.get(p.userId)?.get(matchId);
+    return {
+      id: p.id,
+      homeScore: p.homeScore,
+      awayScore: p.awayScore,
+      points: calculatePoints(round, p.homeScore, p.awayScore, actualHome, actualAway),
+      multiplier: scoreKnockoutMatchWithTeams(
+        p.homeScore, p.awayScore, actualHome, actualAway,
+        predictedSlot?.homeTeamId ?? null,
+        predictedSlot?.awayTeamId ?? null,
+        actualHomeTeamId,
+        actualAwayTeamId,
+      ).scoreMultiplier,
+    };
+  });
+
   const maxMultiplier = scored.reduce((m, s) => Math.max(m, s.multiplier), 0);
   const topCount = scored.filter((s) => s.multiplier === maxMultiplier && maxMultiplier > 0).length;
 
@@ -90,7 +130,7 @@ export async function scoreRoomKOMatch(
     scored.map((s) => {
       const earnedAmount =
         s.multiplier === maxMultiplier && maxMultiplier > 0
-          ? earnedFromKOMatch(s.homeScore, s.awayScore, actualHome, actualAway, matchPrize, topCount)
+          ? (matchPrize * s.multiplier) / topCount
           : 0;
       return db.kOPrediction.update({ where: { id: s.id }, data: { points: s.points, earnedAmount } });
     }),

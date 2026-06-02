@@ -5,6 +5,7 @@ import {
   earnedFromGroupStanding,
   scoreKnockoutMatch,
   earnedFromKOMatch,
+  scoreKnockoutMatchWithTeams,
   prizePerSideBet,
   KO_MATCH_WEIGHT,
   KO_ROUNDS,
@@ -236,6 +237,61 @@ describe("earnedFromKOMatch", () => {
 
   it("wrong prediction → 0", () => {
     expect(earnedFromKOMatch(1, 0, 0, 1, matchPrize, 1)).toBe(0);
+  });
+});
+
+// ─── scoreKnockoutMatchWithTeams ────────────────────────────────────────────
+// The team-aware version: earning money requires predicting the correct winner
+// team (derived from bracket simulation), not just matching score digits.
+
+describe("scoreKnockoutMatchWithTeams", () => {
+  it("correct team + exact score → 1.0", () => {
+    const r = scoreKnockoutMatchWithTeams(2, 1, 2, 1, "tA", "tB", "tA", "tB");
+    expect(r.scoreMultiplier).toBe(1.0);
+    expect(r.label).toMatch(/exact/i);
+  });
+
+  it("correct team, wrong score → 0.75", () => {
+    const r = scoreKnockoutMatchWithTeams(3, 0, 2, 1, "tA", "tB", "tA", "tB");
+    expect(r.scoreMultiplier).toBe(0.75);
+    expect(r.label).toMatch(/winner/i);
+  });
+
+  it("wrong winner team → 0, even if score digits match", () => {
+    // Player predicted tB in home slot (wrong team), actual home is tA.
+    // Both predict home wins 2-1, but the "home" team is different.
+    const r = scoreKnockoutMatchWithTeams(2, 1, 2, 1, "tB", "tC", "tA", "tB");
+    // predictedWinner = tB (home, 2>1), actualWinner = tA (home, 2>1) → mismatch
+    expect(r.scoreMultiplier).toBe(0);
+    expect(r.label).toMatch(/wrong/i);
+  });
+
+  it("correct winner team but teams swapped (home/away) → 0.75 not 1.0", () => {
+    // Player predicted tA as away (score 1-2, away wins). Actual: tA is home, wins 2-1.
+    // predictedWinner = tA (from away slot), actualWinner = tA (from home slot) → correct winner
+    // But teams are in different slots → no exact score
+    const r = scoreKnockoutMatchWithTeams(1, 2, 2, 1, "tB", "tA", "tA", "tB");
+    expect(r.scoreMultiplier).toBe(0.75);
+  });
+
+  it("both draw, same teams, same score → 1.0", () => {
+    const r = scoreKnockoutMatchWithTeams(1, 1, 1, 1, "tA", "tB", "tA", "tB");
+    expect(r.scoreMultiplier).toBe(1.0);
+  });
+
+  it("both draw but wrong teams → 0.75", () => {
+    const r = scoreKnockoutMatchWithTeams(1, 1, 1, 1, "tX", "tY", "tA", "tB");
+    expect(r.scoreMultiplier).toBe(0.75);
+  });
+
+  it("predicted draw but actual decisive → 0", () => {
+    const r = scoreKnockoutMatchWithTeams(1, 1, 2, 1, "tA", "tB", "tA", "tB");
+    expect(r.scoreMultiplier).toBe(0);
+  });
+
+  it("missing actual team ID → 0", () => {
+    const r = scoreKnockoutMatchWithTeams(2, 1, 2, 1, "tA", "tB", null, "tB");
+    expect(r.scoreMultiplier).toBe(0);
   });
 });
 

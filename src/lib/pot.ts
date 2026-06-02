@@ -117,6 +117,64 @@ export function earnedFromKOMatch(
   return (matchPrize * scoreMultiplier) / winnersCount;
 }
 
+// --- Team-aware knockout match scoring ---
+// A prediction only earns money if the player predicted the correct winning
+// team to be in that match (determined via bracket simulation from their R32
+// predictions upward).  Getting the score digits right with the wrong teams
+// in the slot earns nothing.
+
+export function scoreKnockoutMatchWithTeams(
+  predHome: number,
+  predAway: number,
+  actualHome: number,
+  actualAway: number,
+  predictedHomeTeamId: string | null,
+  predictedAwayTeamId: string | null,
+  actualHomeTeamId: string | null,
+  actualAwayTeamId: string | null,
+): KOMatchResult {
+  const actualWinner = getMatchWinner(actualHome, actualAway);
+  const predictedWinner = getMatchWinner(predHome, predAway);
+
+  const actualWinnerTeamId =
+    actualWinner === "home" ? actualHomeTeamId :
+    actualWinner === "away" ? actualAwayTeamId : null;
+  const predictedWinnerTeamId =
+    predictedWinner === "home" ? predictedHomeTeamId :
+    predictedWinner === "away" ? predictedAwayTeamId : null;
+
+  // Both draw: correct outcome — check team alignment + exact score
+  if (actualWinner === "draw" && predictedWinner === "draw") {
+    const teamsMatch =
+      predictedHomeTeamId === actualHomeTeamId &&
+      predictedAwayTeamId === actualAwayTeamId;
+    if (teamsMatch && predHome === actualHome && predAway === actualAway) {
+      return { scoreMultiplier: 1.0, label: "Exact score" };
+    }
+    return { scoreMultiplier: 0.75, label: "Correct draw" };
+  }
+
+  // Missing team ID or mismatched draw/decisive outcome → wrong
+  if (!actualWinnerTeamId || !predictedWinnerTeamId) {
+    return { scoreMultiplier: 0, label: "Wrong" };
+  }
+
+  // Wrong winner team → no money, even if score digits coincidentally match
+  if (predictedWinnerTeamId !== actualWinnerTeamId) {
+    return { scoreMultiplier: 0, label: "Wrong winner" };
+  }
+
+  // Correct winner team — check for exact score (requires same team slot assignment too)
+  const teamsMatch =
+    predictedHomeTeamId === actualHomeTeamId &&
+    predictedAwayTeamId === actualAwayTeamId;
+  if (teamsMatch && predHome === actualHome && predAway === actualAway) {
+    return { scoreMultiplier: 1.0, label: "Exact score" };
+  }
+
+  return { scoreMultiplier: 0.75, label: "Correct winner" };
+}
+
 // --- Uber Pot ---
 
 export interface UberPotInput {
