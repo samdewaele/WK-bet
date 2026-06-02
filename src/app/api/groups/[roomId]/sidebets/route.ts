@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@auth";
 import { db } from "@/lib/db";
 import { isTournamentStarted } from "@/lib/tournament-lock";
+import { computeUberPotResults } from "@/lib/uber-pot";
 
 type Params = { params: Promise<{ roomId: string }> };
 
@@ -25,7 +26,10 @@ export async function GET(_req: Request, { params }: Params) {
   if (!membership) return NextResponse.json({ error: "Not a member" }, { status: 403 });
 
   const ctx = await resolveRoom(roomId, userId, session.user.role ?? "");
-  const locked = await isTournamentStarted();
+  const [locked, uber] = await Promise.all([
+    isTournamentStarted(),
+    computeUberPotResults(roomId),
+  ]);
 
   const sideBets = await db.sideBet.findMany({
     where: { roomId },
@@ -52,6 +56,8 @@ export async function GET(_req: Request, { params }: Params) {
         description: sb.description,
         status: sb.status,
         winnerEntryId: sb.winnerEntryId,
+        // Money the winner won — only known once the bet is settled.
+        prize: sb.status === "settled" ? (uber.byBet.get(sb.id)?.prize ?? 0) : null,
         createdAt: sb.createdAt.toISOString(),
         proposedByUserId: sb.proposedByUserId,
         proposedByName: sb.proposedBy?.name ?? null,

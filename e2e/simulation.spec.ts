@@ -198,6 +198,43 @@ test.describe("Simulation flow", () => {
     await expect(page.locator("tbody tr").first()).toBeVisible();
   });
 
+  test("Phase 2: shared Predictions tab shows flags, group winnings, KO picks and Uber Pot money", async ({
+    page,
+  }) => {
+    // A bet the admin answers before kick-off, so we can settle it after Phase 2.
+    const betId = await createSideBet(page, roomId, "Golden Boot?");
+    const entryRes = await page.request.post(
+      `/api/groups/${roomId}/sidebets/${betId}/entries`,
+      { data: { answer: "Mbappé" } }
+    );
+    const { id: entryId } = await entryRes.json();
+
+    await runPhase1(page, roomId);
+    await runPhase2(page, roomId);
+
+    // Settle the bet (admin) so the Uber Pot pays out.
+    await page.request.patch(`/api/groups/${roomId}/sidebets`, {
+      data: { sideBetId: betId, winnerEntryId: entryId },
+    });
+
+    await page.goto(`/groups/${roomId}?tab=all-predictions`);
+
+    // Group standings view: flags render as flagcdn images, and a "Won" column appears.
+    await expect(page.getByRole("button", { name: /group standings/i })).toBeVisible({ timeout: 15_000 });
+    await expect(page.locator('img[src*="flagcdn.com"]').first()).toBeVisible();
+    await expect(page.getByText("Won").first()).toBeVisible();
+
+    // Knockout picks view is available (issue #3) and renders per-match cards.
+    await page.getByRole("button", { name: /knockout picks/i }).click();
+    await expect(page.getByText(/round of 32/i).first()).toBeVisible();
+
+    // Uber Pot view shows the settled bet's payout (issue #5).
+    await page.getByRole("button", { name: /uber pot/i }).click();
+    await expect(page.getByText("Golden Boot?")).toBeVisible();
+    await expect(page.getByText(/pays €/i)).toBeVisible();
+    await expect(page.getByText("Mbappé")).toBeVisible();
+  });
+
   // ── Cleanup ───────────────────────────────────────────────────────────────
 
   test("Cleanup: standings tab stays visible and KO bracket resets", async ({

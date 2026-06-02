@@ -16,6 +16,7 @@ type UberBet = {
   description: string | null;
   status: "proposed" | "open" | "settled";
   winnerEntryId: string | null;
+  prize?: number | null;
   createdAt: string;
   proposedByUserId: string | null;
   proposedByName: string | null;
@@ -248,11 +249,18 @@ export default function SideBetsPanel({ roomId, currentUserId, isManager, tourna
 
             {/* Settled winner banner */}
             {isSettled && winnerEntry && (
-              <div className="bg-green-500/10 border border-green-500/20 rounded-lg p-3 mb-4 text-sm">
-                <span className="text-gray-400">Winner: </span>
-                <span className="text-green-400 font-semibold">
-                  {winnerEntry.userName ?? "Unknown"} — &quot;{winnerEntry.answer}&quot;
+              <div className="bg-green-500/10 border border-green-500/20 rounded-lg p-3 mb-4 text-sm flex items-center justify-between gap-2">
+                <span>
+                  <span className="text-gray-400">Winner: </span>
+                  <span className="text-green-400 font-semibold">
+                    {winnerEntry.userName ?? "Unknown"} — &quot;{winnerEntry.answer}&quot;
+                  </span>
                 </span>
+                {bet.prize != null && (
+                  <span className="shrink-0 text-xs font-bold bg-amber-400/20 text-amber-300 px-2 py-1 rounded-full">
+                    won €{bet.prize.toFixed(2)}
+                  </span>
+                )}
               </div>
             )}
 

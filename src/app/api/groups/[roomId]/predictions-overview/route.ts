@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { auth } from "@auth";
 import { db } from "@/lib/db";
+import { computeUberPotResults } from "@/lib/uber-pot";
 
 // Group standings become visible to everyone once the group stage starts.
 const STANDINGS_VISIBLE = ["group_active", "ko_betting", "ko_active", "settling", "finished"];
@@ -10,10 +11,11 @@ const KO_VISIBLE = ["ko_active", "settling", "finished"];
 /**
  * GET /api/groups/[roomId]/predictions-overview
  *
- * Cross-member view of everyone's predictions:
- *   - group standings: revealed from group_active onwards
- *   - KO predictions:  revealed from ko_active onwards
- * Uber Pot answers are NOT included here (revealed in the Side Bets panel).
+ * Cross-member view of everyone's predictions + winnings:
+ *   - group standings: revealed from group_active onwards (with earned money once scored)
+ *   - KO predictions:  revealed from ko_active onwards (with earned money once scored)
+ *   - Uber Pot bets:   everyone's answers, revealed once the tournament kicks off;
+ *                      winner + money shown once the admin settles each bet.
  */
 export async function GET(
   _req: Request,
@@ -36,7 +38,7 @@ export async function GET(
   }
   const revealKO = KO_VISIBLE.includes(room.status);
 
-  const [members, groupStandings, koPredictions, teams] = await Promise.all([
+  const [members, groupStandings, koPredictions, teams, sideBets, uber] = await Promise.all([
     db.roomMember.findMany({
       where: { roomId },
       include: { user: { select: { id: true, name: true, image: true } } },
@@ -63,6 +65,14 @@ export async function GET(
         })
       : Promise.resolve([] as never[]),
     db.team.findMany({ select: { id: true, name: true, flag: true } }),
+    db.sideBet.findMany({
+      where: { roomId },
+      include: {
+        entries: { include: { user: { select: { id: true, name: true } } }, orderBy: { createdAt: "asc" } },
+      },
+      orderBy: { createdAt: "asc" },
+    }),
+    computeUberPotResults(roomId),
   ]);
 
   const teamMap = new Map(teams.map((t) => [t.id, t]));
@@ -112,5 +122,29 @@ export async function GET(
           }))
         : null,
     })),
+    // Uber Pot: every member's answer per bet; winner + money once settled.
+    uberPot: {
+      prizePerSettledBet: uber.prizePerSettledBet,
+      bets: sideBets
+        .filter((sb) => sb.status !== "proposed")
+        .map((sb) => {
+          const result = uber.byBet.get(sb.id);
+          return {
+            id: sb.id,
+            title: sb.title,
+            description: sb.description,
+            status: sb.status,
+            winnerEntryId: sb.winnerEntryId,
+            winnerUserId: result?.winnerUserId ?? null,
+            prize: sb.status === "settled" ? (result?.prize ?? 0) : null,
+            entries: sb.entries.map((e) => ({
+              entryId: e.id,
+              userId: e.userId,
+              userName: e.user.name,
+              answer: e.answer,
+            })),
+          };
+        }),
+    },
   });
 }
