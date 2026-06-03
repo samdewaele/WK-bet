@@ -21,6 +21,8 @@ function getTransporter() {
 
 async function send(to: string, subject: string, html: string): Promise<void> {
   if (!to) return;
+  // Skip unroutable test domains (e.g. @test.local used by simulation users)
+  if (to.endsWith(".local")) return;
   if (!EMAIL_USER || !EMAIL_PASS) {
     console.log(`[email] ${subject} → ${to}`);
     return;
