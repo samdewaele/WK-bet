@@ -357,6 +357,7 @@ export default function GroupAdminPanel({
     setTestError(""); setTestState({ phase: "cleaning" });
     try {
       await fetch(`/api/admin/groups/${roomId}/test`, { method: "DELETE" });
+      setSettings((s) => ({ ...s, status: "setup", simulationMode: false }));
       setTestState({ phase: "idle" }); router.refresh();
     } catch { setTestError("Cleanup failed"); setTestState({ phase: "idle" }); }
   }
