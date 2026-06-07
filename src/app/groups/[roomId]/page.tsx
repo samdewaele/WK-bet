@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import Link from "next/link";
 import { auth } from "@auth";
@@ -20,6 +21,12 @@ type Props = {
   params: Promise<{ roomId: string }>;
   searchParams: Promise<{ tab?: string }>;
 };
+
+export async function generateMetadata({ params }: { params: Promise<{ roomId: string }> }): Promise<Metadata> {
+  const { roomId } = await params;
+  const room = await db.room.findUnique({ where: { id: roomId }, select: { name: true } });
+  return { title: room ? `${room.name} — WK Bet 2026` : "WK Bet 2026" };
+}
 
 export default async function GroupDetailPage({ params, searchParams }: Props) {
   const session = await auth();
@@ -111,7 +118,7 @@ export default async function GroupDetailPage({ params, searchParams }: Props) {
                 // eslint-disable-next-line @next/next/no-img-element
                 <img src={room.image} alt={room.name} className="w-12 h-12 rounded-lg object-cover border border-gray-700 shrink-0" />
               )}
-              <h1 className="text-3xl font-bold text-white truncate">{room.name}</h1>
+              <h1 className="text-3xl font-bold text-white">{room.name}</h1>
             </div>
             {isManager && (
               <GroupAdminPanel
