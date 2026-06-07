@@ -14,34 +14,37 @@ export default async function GroupsPage() {
   }
 
   const userId = session.user.id;
+  const isAdmin = session.user.role === "admin";
 
-  const memberships = await db.roomMember.findMany({
-    where: { userId },
-    include: {
-      room: {
-        include: {
-          members: {
-            include: { user: { select: { id: true, name: true, image: true } } },
-          },
-          sideBets: true,
-        },
-      },
+  const roomInclude = {
+    members: {
+      include: { user: { select: { id: true, name: true, image: true } } },
     },
-    orderBy: { room: { createdAt: "desc" } },
-  });
+    sideBets: true,
+  };
 
-  const groups = memberships.map((m) => {
-    const pot = calculatePot(m.room.entryFee, m.room.members.length);
+  const rooms = isAdmin
+    ? await db.room.findMany({ include: roomInclude, orderBy: { createdAt: "desc" } })
+    : (
+        await db.roomMember.findMany({
+          where: { userId },
+          include: { room: { include: roomInclude } },
+          orderBy: { room: { createdAt: "desc" } },
+        })
+      ).map((m) => m.room);
+
+  const groups = rooms.map((room) => {
+    const pot = calculatePot(room.entryFee, room.members.length);
     return {
-      id: m.room.id,
-      name: m.room.name,
-      inviteCode: m.room.inviteCode,
-      entryFee: m.room.entryFee,
-      status: m.room.status,
-      memberCount: m.room.members.length,
-      sideBetCount: m.room.sideBets.length,
+      id: room.id,
+      name: room.name,
+      inviteCode: room.inviteCode,
+      entryFee: room.entryFee,
+      status: room.status,
+      memberCount: room.members.length,
+      sideBetCount: room.sideBets.length,
       totalPot: pot.totalPot,
-      members: m.room.members.slice(0, 6).map((rm) => ({
+      members: room.members.slice(0, 6).map((rm) => ({
         id: rm.userId,
         name: rm.user.name,
         image: rm.user.image,
@@ -82,7 +85,12 @@ export default async function GroupsPage() {
       <Navbar />
       <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
         <div className="mb-6">
-          <h1 className="text-3xl font-bold text-white">My Betting Groups</h1>
+          <h1 className="text-3xl font-bold text-white">
+            {isAdmin ? "All Betting Groups" : "My Betting Groups"}
+          </h1>
+          {isAdmin && (
+            <p className="text-xs text-violet-400 mt-1">Viewing all groups as platform admin</p>
+          )}
           {!hasGroups && (
             <p className="text-gray-400 mt-1">Create a group or join one with an invite code.</p>
           )}

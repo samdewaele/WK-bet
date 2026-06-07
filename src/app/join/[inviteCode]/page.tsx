@@ -1,8 +1,29 @@
 import { redirect } from "next/navigation";
+import Link from "next/link";
 import { auth } from "@auth";
 import { db } from "@/lib/db";
 import { isTournamentStarted } from "@/lib/tournament-lock";
 import { emailMemberJoined } from "@/lib/email";
+import Navbar from "@/components/Navbar";
+
+function JoinErrorPage({ title, detail }: { title: string; detail: string }) {
+  return (
+    <div className="min-h-screen bg-[#0a0f1e] text-white">
+      <Navbar />
+      <div className="max-w-md mx-auto px-4 py-24 text-center">
+        <div className="text-5xl mb-6">🔒</div>
+        <h1 className="text-2xl font-bold text-white mb-3">{title}</h1>
+        <p className="text-gray-400 mb-8">{detail}</p>
+        <Link
+          href="/groups"
+          className="inline-block bg-amber-400 text-gray-900 font-semibold px-6 py-3 rounded-lg hover:bg-amber-300 transition-colors"
+        >
+          Go to my groups
+        </Link>
+      </div>
+    </div>
+  );
+}
 
 export default async function JoinPage({
   params,
@@ -24,12 +45,28 @@ export default async function JoinPage({
     },
   });
 
-  if (!room) redirect("/groups");
+  if (!room) {
+    return (
+      <JoinErrorPage
+        title="Invite link not found"
+        detail="This invite link is invalid or has expired. Ask the group admin for a fresh link."
+      />
+    );
+  }
 
   // Joining is blocked once the group is closed or the tournament has started
   const CLOSED_STATUSES = ["closed", "group_active", "ko_betting", "ko_active", "settling", "finished"];
-  if (CLOSED_STATUSES.includes(room.status) || await isTournamentStarted()) {
-    redirect("/groups?joinError=locked");
+  const tournamentStarted = await isTournamentStarted();
+  if (CLOSED_STATUSES.includes(room.status) || tournamentStarted) {
+    const detail = room.status === "setup" || room.status === "betting"
+      ? "The tournament has already kicked off and new members can no longer join mid-way."
+      : "This group is no longer accepting new members — it's already underway or has finished.";
+    return (
+      <JoinErrorPage
+        title={`Can't join "${room.name}"`}
+        detail={detail}
+      />
+    );
   }
 
   const userId = session.user.id;
