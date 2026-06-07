@@ -1,24 +1,20 @@
 import { NextResponse } from "next/server";
-import { auth } from "@auth";
 import { db } from "@/lib/db";
 import { isTournamentStarted } from "@/lib/tournament-lock";
+import { requireRoomAccess } from "@/lib/room-auth";
 
 export async function GET(
   _req: Request,
   { params }: { params: Promise<{ roomId: string; targetUserId: string }> }
 ) {
-  const session = await auth();
-  if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
   const { roomId, targetUserId } = await params;
+  const access = await requireRoomAccess(roomId);
+  if (access instanceof NextResponse) return access;
 
-  const [membership, targetMembership, started] = await Promise.all([
-    db.roomMember.findUnique({ where: { userId_roomId: { userId: session.user.id, roomId } } }),
+  const [targetMembership, started] = await Promise.all([
     db.roomMember.findUnique({ where: { userId_roomId: { userId: targetUserId, roomId } } }),
     isTournamentStarted(),
   ]);
-
-  if (!membership) return NextResponse.json({ error: "Not a member" }, { status: 403 });
   if (!targetMembership) return NextResponse.json({ error: "User not a member" }, { status: 404 });
   if (!started) return NextResponse.json({ error: "Predictions are revealed after tournament starts" }, { status: 403 });
 

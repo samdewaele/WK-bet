@@ -1,26 +1,16 @@
 import { NextResponse } from "next/server";
-import { auth } from "@auth";
 import { db } from "@/lib/db";
 import { calculatePot, prizePerSideBet } from "@/lib/pot";
+import { requireRoomAccess } from "@/lib/room-auth";
 
 export async function GET(
   _req: Request,
   { params }: { params: Promise<{ roomId: string }> }
 ) {
-  const session = await auth();
-  if (!session?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
   const { roomId } = await params;
-  const userId = session.user.id;
-
-  const membership = await db.roomMember.findUnique({
-    where: { userId_roomId: { userId, roomId } },
-  });
-  if (!membership) {
-    return NextResponse.json({ error: "Not a member" }, { status: 403 });
-  }
+  const access = await requireRoomAccess(roomId);
+  if (access instanceof NextResponse) return access;
+  const userId = access.session.user.id;
 
   const room = await db.room.findUnique({
     where: { id: roomId },

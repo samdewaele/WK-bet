@@ -30,10 +30,11 @@ export default async function GroupDetailPage({ params, searchParams }: Props) {
   // Backward compat: "leaderboard" → "standings"
   const tab = rawTab === "leaderboard" ? "standings" : rawTab;
   const userId = session.user.id;
+  const isPlatformAdmin = session.user.role === "admin";
 
-  const membership = await db.roomMember.findUnique({
-    where: { userId_roomId: { userId, roomId } },
-  });
+  const membership = isPlatformAdmin
+    ? true
+    : await db.roomMember.findUnique({ where: { userId_roomId: { userId, roomId } } });
   if (!membership) redirect("/groups");
 
   const room = await db.room.findUnique({
@@ -58,7 +59,6 @@ export default async function GroupDetailPage({ params, searchParams }: Props) {
   if (!room) redirect("/groups");
 
   const pot = calculatePot(room.entryFee, room.members.length);
-  const isPlatformAdmin = session.user.role === "admin";
   const isManager = room.creatorId === userId || isPlatformAdmin;
   const tournamentStarted = await isTournamentStarted();
   const roomStatus = room.status;
@@ -98,7 +98,7 @@ export default async function GroupDetailPage({ params, searchParams }: Props) {
 
   return (
     <div className="min-h-screen bg-[#0a0f1e] text-white">
-      <Navbar />
+      <Navbar groupName={room.name} />
       <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
         {/* Header */}
         <div className="mb-6">

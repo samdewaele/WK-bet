@@ -3,18 +3,30 @@
 import Link from "next/link";
 import { useSession, signIn, signOut } from "next-auth/react";
 
-export default function Navbar() {
+type Props = { groupName?: string };
+
+export default function Navbar({ groupName }: Props = {}) {
   const { data: session, status } = useSession();
 
   return (
     <nav className="bg-gray-900 border-b border-gray-800 sticky top-0 z-50">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-16">
-          {/* Logo */}
-          <Link href="/" className="flex items-center gap-2 text-amber-400 font-bold text-xl">
-            <span className="text-2xl">⚽</span>
-            <span>WK Bet 2026</span>
-          </Link>
+          {/* Logo + optional group breadcrumb */}
+          <div className="flex items-center gap-2 min-w-0">
+            <Link href="/" className="flex items-center gap-2 text-amber-400 font-bold text-xl shrink-0">
+              <span className="text-2xl">⚽</span>
+              <span>WK Bet 2026</span>
+            </Link>
+            {groupName && (
+              <>
+                <span className="text-gray-600 hidden sm:block">/</span>
+                <span className="text-white font-semibold text-sm truncate hidden sm:block max-w-[220px]">
+                  {groupName}
+                </span>
+              </>
+            )}
+          </div>
 
           {/* User area */}
           <div className="flex items-center gap-3">

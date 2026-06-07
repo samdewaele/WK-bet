@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
-import { auth } from "@auth";
 import { db } from "@/lib/db";
 import { computeUberPotResults } from "@/lib/uber-pot";
+import { requireRoomAccess } from "@/lib/room-auth";
 
 // Group standings become visible to everyone once the group stage starts.
 const STANDINGS_VISIBLE = ["group_active", "ko_betting", "ko_active", "settling", "finished"];
@@ -21,16 +21,11 @@ export async function GET(
   _req: Request,
   { params }: { params: Promise<{ roomId: string }> },
 ) {
-  const session = await auth();
-  if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
   const { roomId } = await params;
+  const access = await requireRoomAccess(roomId);
+  if (access instanceof NextResponse) return access;
 
-  const [membership, room] = await Promise.all([
-    db.roomMember.findUnique({ where: { userId_roomId: { userId: session.user.id, roomId } } }),
-    db.room.findUnique({ where: { id: roomId }, select: { status: true } }),
-  ]);
-  if (!membership) return NextResponse.json({ error: "Not a member" }, { status: 403 });
+  const room = await db.room.findUnique({ where: { id: roomId }, select: { status: true } });
   if (!room) return NextResponse.json({ error: "Room not found" }, { status: 404 });
 
   if (!STANDINGS_VISIBLE.includes(room.status)) {

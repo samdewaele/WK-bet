@@ -3,6 +3,7 @@ import { auth } from "@auth";
 import { db } from "@/lib/db";
 import { isTournamentStarted } from "@/lib/tournament-lock";
 import { computeUberPotResults } from "@/lib/uber-pot";
+import { requireRoomAccess } from "@/lib/room-auth";
 
 type Params = { params: Promise<{ roomId: string }> };
 
@@ -13,17 +14,11 @@ async function resolveRoom(roomId: string, userId: string, role: string) {
 }
 
 export async function GET(_req: Request, { params }: Params) {
-  const session = await auth();
-  if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
   const { roomId } = await params;
+  const access = await requireRoomAccess(roomId);
+  if (access instanceof NextResponse) return access;
+  const { session } = access;
   const userId = session.user.id;
-
-  const membership = await db.roomMember.findUnique({
-    where: { userId_roomId: { userId, roomId } },
-    select: { id: true },
-  });
-  if (!membership) return NextResponse.json({ error: "Not a member" }, { status: 403 });
 
   const ctx = await resolveRoom(roomId, userId, session.user.role ?? "");
   const [locked, uber] = await Promise.all([

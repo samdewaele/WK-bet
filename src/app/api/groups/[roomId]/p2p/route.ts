@@ -1,31 +1,23 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@auth";
 import { db } from "@/lib/db";
+import { requireRoomAccess } from "@/lib/room-auth";
 
 export async function GET(
   _req: Request,
   { params }: { params: Promise<{ roomId: string }> }
 ) {
-  const session = await auth();
-  if (!session?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
   const { roomId } = await params;
+  const access = await requireRoomAccess(roomId);
+  if (access instanceof NextResponse) return access;
+  const { session, isPlatformAdmin } = access;
   const userId = session.user.id;
 
-  const membership = await db.roomMember.findUnique({
-    where: { userId_roomId: { userId, roomId } },
-  });
-  if (!membership) {
-    return NextResponse.json({ error: "Not a member" }, { status: 403 });
-  }
-
+  // Platform admin sees all bets in the room; members see only their own + open bets
   const bets = await db.p2PSideBet.findMany({
-    where: {
-      roomId,
-      OR: [{ proposerId: userId }, { acceptorId: userId }, { acceptorId: null }],
-    },
+    where: isPlatformAdmin
+      ? { roomId }
+      : { roomId, OR: [{ proposerId: userId }, { acceptorId: userId }, { acceptorId: null }] },
     include: {
       proposer: { select: { id: true, name: true, image: true } },
       acceptor: { select: { id: true, name: true, image: true } },
