@@ -92,8 +92,12 @@ export default async function GroupDetailPage({ params, searchParams }: Props) {
       })
     : null;
 
-  // Everyone's predictions become viewable once the group stage starts.
-  const showSharedPredictions = ["group_active", "ko_betting", "ko_active", "settling", "finished"].includes(roomStatus);
+  // Predictions tab is visible once any group's first match has kicked off (per-group reveal),
+  // or when the room is in an advanced status.
+  const anyGroupStarted = Object.values(groupKickoffTimes).some((t) => new Date() >= new Date(t));
+  const showSharedPredictions =
+    ["group_active", "ko_betting", "ko_active", "settling", "finished"].includes(roomStatus) ||
+    anyGroupStarted;
   // Fall back to my-predictions if the shared tab isn't available yet.
   const activeTab = tab === "all-predictions" && !showSharedPredictions ? "predictions" : tab;
 

@@ -6,6 +6,7 @@ vi.mock("@/lib/db", () => ({
   db: {
     roomMember: { findUnique: vi.fn(), findMany: vi.fn() },
     room: { findUnique: vi.fn() },
+    match: { findMany: vi.fn() },
     groupStandingPrediction: { findMany: vi.fn() },
     kOPrediction: { findMany: vi.fn() },
     sideBet: { findMany: vi.fn() },
@@ -28,6 +29,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   mockAuth.mockResolvedValue({ user: { id: "u1" } } as never);
   mockDb.roomMember.findUnique.mockResolvedValue({ userId: "u1", roomId: "r1" });
+  // No kickoffs by default → groups only revealed via room status
+  mockDb.match.findMany.mockResolvedValue([]);
   mockDb.roomMember.findMany.mockResolvedValue([
     { userId: "u1", user: { id: "u1", name: "Alice", image: null } },
   ]);

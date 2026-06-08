@@ -47,8 +47,11 @@ type UberBet = {
   prize: number | null;
   entries: UberEntry[];
 };
+type GroupVisibility = { revealed: boolean; kickoff: string | null };
+
 type Overview = {
   revealKO: boolean;
+  groupVisibility: Record<string, GroupVisibility>;
   members: MemberOverview[];
   uberPot: { prizePerSettledBet: number; bets: UberBet[] };
 };
@@ -160,6 +163,26 @@ export default function SharedPredictions({ roomId }: { roomId: string }) {
       {view === "groups" && (
         <div className="grid gap-4 md:grid-cols-2">
           {WC_GROUPS.map((g) => {
+            const visibility = data.groupVisibility?.[g];
+
+            if (!visibility?.revealed) {
+              if (!visibility?.kickoff) return null;
+              const kickoffDate = new Date(visibility.kickoff);
+              const formatted = kickoffDate.toLocaleString(undefined, {
+                weekday: "short", month: "short", day: "numeric",
+                hour: "2-digit", minute: "2-digit",
+              });
+              return (
+                <div key={g} className="bg-gray-900 border border-gray-700 rounded-xl p-4">
+                  <h3 className="text-sm font-bold text-amber-400 mb-2">Group {g}</h3>
+                  <div className="flex items-center gap-2 text-xs text-gray-500">
+                    <span>🔒</span>
+                    <span>Predictions revealed when the first match kicks off — {formatted}</span>
+                  </div>
+                </div>
+              );
+            }
+
             const rows = data.members
               .map((m) => ({ m, s: m.standings.find((s) => s.wcGroup === g) }))
               .filter((r): r is { m: MemberOverview; s: StandingRow } => !!r.s);

@@ -3,7 +3,9 @@ import { db } from "@/lib/db";
 import { computeUberPotResults } from "@/lib/uber-pot";
 import { requireRoomAccess } from "@/lib/room-auth";
 
-// Group standings become visible to everyone once the group stage starts.
+const WC_GROUPS = ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L"];
+
+// When the room reaches these statuses ALL group predictions are revealed at once.
 const STANDINGS_VISIBLE = ["group_active", "ko_betting", "ko_active", "settling", "finished"];
 // KO predictions stay hidden until the knockout bracket locks (first KO kickoff).
 const KO_VISIBLE = ["ko_active", "settling", "finished"];
@@ -12,9 +14,10 @@ const KO_VISIBLE = ["ko_active", "settling", "finished"];
  * GET /api/groups/[roomId]/predictions-overview
  *
  * Cross-member view of everyone's predictions + winnings:
- *   - group standings: revealed from group_active onwards (with earned money once scored)
- *   - KO predictions:  revealed from ko_active onwards (with earned money once scored)
- *   - Uber Pot bets:   everyone's answers, revealed once the tournament kicks off;
+ *   - group standings: revealed per-group when that group's first match kicks off
+ *                      (or all at once if room is group_active or later)
+ *   - KO predictions:  revealed from ko_active onwards
+ *   - Uber Pot bets:   everyone's answers, revealed once any group has started;
  *                      winner + money shown once the admin settles each bet.
  */
 export async function GET(
@@ -28,17 +31,46 @@ export async function GET(
   const room = await db.room.findUnique({ where: { id: roomId }, select: { status: true } });
   if (!room) return NextResponse.json({ error: "Room not found" }, { status: 404 });
 
-  if (!STANDINGS_VISIBLE.includes(room.status)) {
+  const revealAll = STANDINGS_VISIBLE.includes(room.status);
+  const revealKO = KO_VISIBLE.includes(room.status);
+
+  // Fetch first kickoff per group to determine per-group reveal state
+  const firstKickoffs = await db.match.findMany({
+    where: { round: "Group", group: { not: null } },
+    select: { group: true, kickoff: true },
+    orderBy: { kickoff: "asc" },
+  });
+  const kickoffMap = new Map<string, Date>();
+  for (const m of firstKickoffs) {
+    if (m.group && !kickoffMap.has(m.group)) kickoffMap.set(m.group, m.kickoff);
+  }
+
+  const now = new Date();
+  const groupVisibility: Record<string, { revealed: boolean; kickoff: string | null }> = {};
+  for (const g of WC_GROUPS) {
+    const kickoff = kickoffMap.get(g) ?? null;
+    const revealed = revealAll || (kickoff ? now >= kickoff : false);
+    groupVisibility[g] = { revealed, kickoff: kickoff?.toISOString() ?? null };
+  }
+
+  const anyRevealed = Object.values(groupVisibility).some((v) => v.revealed);
+  if (!anyRevealed) {
     return NextResponse.json({ error: "Predictions are revealed once the group stage starts" }, { status: 403 });
   }
-  const revealKO = KO_VISIBLE.includes(room.status);
+
+  const revealedGroups = new Set(
+    Object.entries(groupVisibility).filter(([, v]) => v.revealed).map(([g]) => g),
+  );
 
   const [members, groupStandings, koPredictions, teams, sideBets, uber] = await Promise.all([
     db.roomMember.findMany({
       where: { roomId },
       include: { user: { select: { id: true, name: true, image: true } } },
     }),
-    db.groupStandingPrediction.findMany({ where: { roomId }, orderBy: { wcGroup: "asc" } }),
+    db.groupStandingPrediction.findMany({
+      where: { roomId, wcGroup: { in: [...revealedGroups] } },
+      orderBy: { wcGroup: "asc" },
+    }),
     revealKO
       ? db.kOPrediction.findMany({
           where: { roomId },
@@ -89,6 +121,7 @@ export async function GET(
 
   return NextResponse.json({
     revealKO,
+    groupVisibility,
     members: members.map((m) => ({
       userId: m.userId,
       name: m.user.name,
@@ -117,7 +150,6 @@ export async function GET(
           }))
         : null,
     })),
-    // Uber Pot: every member's answer per bet; winner + money once settled.
     uberPot: {
       prizePerSettledBet: uber.prizePerSettledBet,
       bets: sideBets
