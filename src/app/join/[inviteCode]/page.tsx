@@ -34,7 +34,7 @@ export default async function JoinPage({
   const session = await auth();
 
   if (!session?.user?.id) {
-    redirect(`/auth/signin?callbackUrl=/join/${inviteCode}`);
+    redirect(`/auth/signin?callbackUrl=${encodeURIComponent(`/join/${inviteCode}`)}`);
   }
 
   const room = await db.room.findUnique({

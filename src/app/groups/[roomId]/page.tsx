@@ -126,6 +126,7 @@ export default async function GroupDetailPage({ params, searchParams }: Props) {
             {isManager && (
               <GroupAdminPanel
                 roomId={roomId}
+                inviteCode={room.inviteCode}
                 initialName={room.name}
                 initialFee={room.entryFee}
                 initialStatus={room.status}
@@ -144,7 +145,8 @@ export default async function GroupDetailPage({ params, searchParams }: Props) {
             <span>{room.members.length} members</span>
             <span>Entry: €{room.entryFee.toFixed(2)}</span>
             <span className="text-amber-400 font-semibold">Total pot: €{pot.totalPot.toFixed(2)}</span>
-            {(roomStatus === "betting" || roomStatus === "setup") && !tournamentStarted && (
+            {/* Managers always see the invite button; others only in pre-tournament phases */}
+            {(isManager || ((roomStatus === "betting" || roomStatus === "setup") && !tournamentStarted)) && (
               <InviteButton inviteCode={room.inviteCode} />
             )}
           </div>

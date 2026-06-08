@@ -47,6 +47,7 @@ const STATUS_LABELS: Record<string, string> = {
 
 export default function GroupAdminPanel({
   roomId,
+  inviteCode,
   initialName,
   initialFee,
   initialStatus,
@@ -60,6 +61,7 @@ export default function GroupAdminPanel({
   initialImage,
 }: {
   roomId: string;
+  inviteCode: string;
   initialName: string;
   initialFee: number;
   initialStatus: string;
@@ -74,6 +76,15 @@ export default function GroupAdminPanel({
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
+  const [linkCopied, setLinkCopied] = useState(false);
+
+  function copyInviteLink() {
+    const url = `${window.location.origin}/join/${inviteCode}`;
+    navigator.clipboard.writeText(url).then(() => {
+      setLinkCopied(true);
+      setTimeout(() => setLinkCopied(false), 2500);
+    });
+  }
 
   // Settings
   const [settings, setSettings] = useState<Settings>({
@@ -378,6 +389,23 @@ export default function GroupAdminPanel({
 
       {open && (
         <div className="mt-4 bg-gray-900/80 border border-violet-500/30 rounded-xl p-5 space-y-5">
+          {/* Invite link — always visible to managers */}
+          <div>
+            <h3 className="text-xs font-bold text-violet-400 uppercase tracking-wide mb-2">Invite link</h3>
+            <div className="flex items-center gap-2 flex-wrap">
+              <code className="flex-1 min-w-0 text-xs bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-gray-300 truncate select-all">
+                {typeof window !== "undefined" ? `${window.location.origin}/join/${inviteCode}` : `/join/${inviteCode}`}
+              </code>
+              <button
+                onClick={copyInviteLink}
+                className="shrink-0 inline-flex items-center gap-1.5 text-xs bg-violet-600 hover:bg-violet-500 text-white font-semibold px-3 py-2 rounded-lg transition-colors"
+              >
+                {linkCopied ? <>✓ Copied!</> : <>🔗 Copy</>}
+              </button>
+            </div>
+            <p className="text-xs text-gray-500 mt-1">Share this link so friends can join — they'll be added automatically after signing in.</p>
+          </div>
+
           {/* Top row: 2 columns */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {/* Left: Settings */}

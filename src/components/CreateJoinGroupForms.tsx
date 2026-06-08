@@ -40,7 +40,10 @@ export default function CreateJoinGroupForms({ collapsed = false }: { collapsed?
     setJoinError("");
     setJoining(true);
     const fd = new FormData(e.currentTarget);
-    const inviteCode = (fd.get("inviteCode") as string).trim();
+    const raw = (fd.get("inviteCode") as string).trim();
+    // Accept full invite URLs like https://domain.com/join/CODE or just the bare code
+    const urlMatch = raw.match(/\/join\/([^/?#\s]+)/);
+    const inviteCode = urlMatch ? urlMatch[1] : raw;
     try {
       const res = await fetch("/api/groups", {
         method: "PUT",
