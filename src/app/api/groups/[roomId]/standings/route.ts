@@ -107,8 +107,28 @@ export async function POST(
     return NextResponse.json({ error: "No valid predictions", details: errors }, { status: 400 });
   }
 
+  // Per-group kickoff lock: skip groups whose first match has already started
+  const groupsInRequest = [...new Set(valid.map((p) => p.wcGroup))];
+  const firstKickoffs = await db.match.findMany({
+    where: { round: "Group", group: { in: groupsInRequest } },
+    select: { group: true, kickoff: true },
+    orderBy: { kickoff: "asc" },
+  });
+  const kickoffMap = new Map<string, Date>();
+  for (const m of firstKickoffs) {
+    if (m.group && !kickoffMap.has(m.group)) kickoffMap.set(m.group, m.kickoff);
+  }
+  const now = new Date();
+  const unlocked = valid.filter((p) => {
+    const first = kickoffMap.get(p.wcGroup);
+    return !first || now < first;
+  });
+  if (unlocked.length === 0) {
+    return NextResponse.json({ error: "Group stage predictions are locked" }, { status: 403 });
+  }
+
   const upserted = await Promise.all(
-    valid.map((pred) =>
+    unlocked.map((pred) =>
       db.groupStandingPrediction.upsert({
         where: { userId_roomId_wcGroup: { userId, roomId, wcGroup: pred.wcGroup } },
         create: {

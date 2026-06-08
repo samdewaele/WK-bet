@@ -14,7 +14,7 @@ import P2PBetsPanel from "@/components/P2PBetsPanel";
 import GroupAdminPanel from "@/components/GroupAdminPanel";
 import MemberList from "@/components/MemberList";
 import InviteButton from "@/components/InviteButton";
-import { isTournamentStarted } from "@/lib/tournament-lock";
+import { isTournamentStarted, getGroupKickoffTimes } from "@/lib/tournament-lock";
 import CountdownTimer from "@/components/CountdownTimer";
 
 type Props = {
@@ -67,7 +67,10 @@ export default async function GroupDetailPage({ params, searchParams }: Props) {
 
   const pot = calculatePot(room.entryFee, room.members.length);
   const isManager = room.creatorId === userId || isPlatformAdmin;
-  const tournamentStarted = await isTournamentStarted();
+  const [tournamentStarted, groupKickoffTimes] = await Promise.all([
+    isTournamentStarted(),
+    getGroupKickoffTimes(),
+  ]);
   const roomStatus = room.status;
   const simulationMode = room.simulationMode;
   const uberBetsLocked = room.uberBetsLocked;
@@ -240,7 +243,7 @@ export default async function GroupDetailPage({ params, searchParams }: Props) {
           <div className="space-y-8">
             <div>
               <h2 className="text-xl font-bold text-white mb-4">Group Stage Standings</h2>
-              <GroupStandingsPicker roomId={roomId} roomStatus={roomStatus} />
+              <GroupStandingsPicker roomId={roomId} roomStatus={roomStatus} groupKickoffTimes={groupKickoffTimes} />
             </div>
             <div>
               <h2 className="text-xl font-bold text-white mb-4">Knockout Predictions</h2>

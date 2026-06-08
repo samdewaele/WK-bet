@@ -42,6 +42,8 @@ type TeamStanding = {
 type Props = {
   roomId: string;
   roomStatus?: string;
+  /** group letter → ISO string of that group's first match kickoff */
+  groupKickoffTimes?: Record<string, string>;
 };
 
 type GroupState = {
@@ -96,7 +98,7 @@ function computeActualStandings(matches: MatchData[]): Map<string, TeamStanding[
   return result;
 }
 
-export default function GroupStandingsPicker({ roomId, roomStatus }: Props) {
+export default function GroupStandingsPicker({ roomId, roomStatus, groupKickoffTimes }: Props) {
   const [teams, setTeams] = useState<Team[]>([]);
   const [predictions, setPredictions] = useState<Prediction[]>([]);
   const [groupStates, setGroupStates] = useState<Record<string, GroupState>>({});
@@ -105,11 +107,38 @@ export default function GroupStandingsPicker({ roomId, roomStatus }: Props) {
   const [saving, setSaving] = useState(false);
   const [saveResult, setSaveResult] = useState<{ count: number; error?: string } | null>(null);
   const [loading, setLoading] = useState(true);
+  const [now, setNow] = useState(() => Date.now());
 
-  // All groups lock simultaneously at tournament start
+  // Tick every second so per-group countdown timers stay live
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
+
   const LOCKED_STATUSES = ["closed", "group_active", "ko_betting", "ko_active", "settling", "finished"];
   const allLocked = roomStatus ? LOCKED_STATUSES.includes(roomStatus) : false;
   const tournamentStarted = ["group_active", "ko_betting", "ko_active", "settling", "finished"].includes(roomStatus ?? "");
+
+  const isGroupLocked = (group: string) => {
+    if (allLocked) return true;
+    const kickoff = groupKickoffTimes?.[group];
+    return kickoff ? now >= new Date(kickoff).getTime() : false;
+  };
+
+  const groupCountdown = (group: string): string | null => {
+    const kickoff = groupKickoffTimes?.[group];
+    if (!kickoff) return null;
+    const diff = new Date(kickoff).getTime() - now;
+    if (diff <= 0) return null;
+    const days = Math.floor(diff / 86400000);
+    const hours = Math.floor((diff % 86400000) / 3600000);
+    const minutes = Math.floor((diff % 3600000) / 60000);
+    const seconds = Math.floor((diff % 60000) / 1000);
+    if (days > 0) return `${days}d ${hours}h`;
+    if (hours > 0) return `${hours}h ${minutes}m`;
+    if (minutes > 0) return `${minutes}m ${seconds}s`;
+    return `${seconds}s`;
+  };
 
   useEffect(() => {
     async function fetchData() {
@@ -169,7 +198,7 @@ export default function GroupStandingsPicker({ roomId, roomStatus }: Props) {
     state.position1 && state.position2 && state.position3 && state.position4;
 
   const hasUnsaved = WC_GROUPS.some((group) => {
-    if (allLocked) return false;
+    if (isGroupLocked(group)) return false;
     const cur = groupStates[group];
     const saved = savedStates[group];
     if (!cur) return false;
@@ -184,8 +213,10 @@ export default function GroupStandingsPicker({ roomId, roomStatus }: Props) {
   });
 
   const handleSaveAll = useCallback(async () => {
+    const ts = Date.now();
+    const locked = (g: string) => allLocked || (groupKickoffTimes?.[g] ? ts >= new Date(groupKickoffTimes[g]).getTime() : false);
     const toSave = WC_GROUPS.filter((group) => {
-      if (allLocked) return false;
+      if (locked(group)) return false;
       const cur = groupStates[group];
       return cur && isComplete(cur);
     });
@@ -228,12 +259,14 @@ export default function GroupStandingsPicker({ roomId, roomStatus }: Props) {
     } finally {
       setSaving(false);
     }
-  }, [roomId, groupStates, savedStates, allLocked]);
+  }, [roomId, groupStates, savedStates, allLocked, groupKickoffTimes]);
 
   const handlePickForMe = useCallback(async () => {
+    const ts = Date.now();
+    const locked = (g: string) => allLocked || (groupKickoffTimes?.[g] ? ts >= new Date(groupKickoffTimes[g]).getTime() : false);
     const newStates: Record<string, GroupState> = { ...groupStates };
     for (const group of WC_GROUPS) {
-      if (allLocked) continue;
+      if (locked(group)) continue;
       const groupTeams = teams.filter((t) => t.group === group);
       if (groupTeams.length < 4) continue;
       const shuffled = [...groupTeams].sort(() => Math.random() - 0.5);
@@ -247,7 +280,7 @@ export default function GroupStandingsPicker({ roomId, roomStatus }: Props) {
     setGroupStates(newStates);
 
     // Save immediately with the freshly computed states
-    const toSave = WC_GROUPS.filter((g) => !allLocked && newStates[g]);
+    const toSave = WC_GROUPS.filter((g) => !locked(g) && newStates[g]);
     if (toSave.length === 0) return;
     setSaving(true);
     setSaveResult(null);
@@ -275,7 +308,7 @@ export default function GroupStandingsPicker({ roomId, roomStatus }: Props) {
     } finally {
       setSaving(false);
     }
-  }, [roomId, groupStates, savedStates, allLocked, teams]);
+  }, [roomId, groupStates, savedStates, allLocked, groupKickoffTimes, teams]);
 
   if (loading) {
     return (
@@ -287,15 +320,20 @@ export default function GroupStandingsPicker({ roomId, roomStatus }: Props) {
     );
   }
 
-  const unlockedComplete = WC_GROUPS.filter((g) => !allLocked && isComplete(groupStates[g] ?? { position1: "", position2: "", position3: "", position4: "" })).length;
-  const unlockedTotal = WC_GROUPS.filter(() => !allLocked).length;
+  const unlockedComplete = WC_GROUPS.filter((g) => !isGroupLocked(g) && isComplete(groupStates[g] ?? { position1: "", position2: "", position3: "", position4: "" })).length;
+  const unlockedTotal = WC_GROUPS.filter((g) => !isGroupLocked(g)).length;
 
   return (
     <div>
-      {allLocked && (
+      {allLocked ? (
         <div className="mb-4 flex items-center gap-2 text-sm text-orange-400 bg-orange-400/10 border border-orange-400/20 rounded-xl px-4 py-3">
           <span>🔒</span>
           <span>Group stage predictions are locked — they were finalised when the tournament kicked off.</span>
+        </div>
+      ) : groupKickoffTimes && Object.keys(groupKickoffTimes).length > 0 && (
+        <div className="mb-4 flex items-center gap-2 text-sm text-blue-300 bg-blue-400/10 border border-blue-400/20 rounded-xl px-4 py-3">
+          <span>⏱</span>
+          <span>Each group locks individually when its first match kicks off — the timer in each card shows how long you have left.</span>
         </div>
       )}
 
@@ -306,29 +344,34 @@ export default function GroupStandingsPicker({ roomId, roomStatus }: Props) {
           const existingPred = predictions.find((p) => p.wcGroup === group);
           const complete = isComplete(state);
           const saved = savedStates[group];
-          const isDirty = !allLocked && complete && (!saved || Object.keys(state).some(k => state[k as keyof GroupState] !== saved[k as keyof GroupState]));
+          const locked = isGroupLocked(group);
+          const countdown = groupCountdown(group);
+          const isDirty = !locked && complete && (!saved || Object.keys(state).some(k => state[k as keyof GroupState] !== saved[k as keyof GroupState]));
           const actual = actualStandings.get(group) ?? [];
 
           return (
             <div
               key={group}
               className={`bg-gray-900 border rounded-xl p-4 ${
-                allLocked ? "border-gray-700" : isDirty ? "border-amber-400/40" : "border-gray-800"
+                locked ? "border-gray-700" : isDirty ? "border-amber-400/40" : "border-gray-800"
               }`}
             >
               <div className="flex items-center justify-between mb-3">
                 <h3 className="font-bold text-amber-400">Group {group}</h3>
                 <div className="flex items-center gap-2">
-                  {allLocked && (
+                  {locked ? (
                     <span className="text-xs bg-orange-500/20 text-orange-400 px-2 py-0.5 rounded-full">
                       Locked
                     </span>
-                  )}
-                  {!allLocked && isDirty && (
+                  ) : countdown ? (
+                    <span className="text-xs text-blue-300 tabular-nums" title="Locks when this group's first match kicks off">
+                      ⏱ {countdown}
+                    </span>
+                  ) : isDirty ? (
                     <span className="text-xs bg-amber-400/20 text-amber-400 px-2 py-0.5 rounded-full">
                       Unsaved
                     </span>
-                  )}
+                  ) : null}
                   {existingPred?.earnedAmount != null && (
                     <span className="text-xs text-green-400 font-bold">
                       +€{existingPred.earnedAmount.toFixed(2)}
@@ -337,8 +380,8 @@ export default function GroupStandingsPicker({ roomId, roomStatus }: Props) {
                 </div>
               </div>
 
-              {/* When tournament started: show prediction vs actual side by side */}
-              {tournamentStarted && actual.length > 0 ? (
+              {/* When this group has started: show prediction vs actual side by side */}
+              {(tournamentStarted || locked) && actual.length > 0 ? (
                 <div className="grid grid-cols-2 gap-2 text-xs">
                   <div>
                     <div className="text-gray-500 mb-1 font-medium">Your pick</div>
@@ -388,7 +431,7 @@ export default function GroupStandingsPicker({ roomId, roomStatus }: Props) {
                     return (
                       <div key={pos} className="flex items-center gap-2">
                         <span className="text-xs text-gray-500 w-5 text-right">{idx + 1}.</span>
-                        {allLocked ? (
+                        {locked ? (
                           <div className="flex-1 bg-gray-800 rounded-lg px-3 py-1.5 text-sm text-gray-300 flex items-center gap-2">
                             {selectedTeam ? (
                               <>

@@ -13,6 +13,9 @@ vi.mock("@/lib/db", () => ({
     team: {
       findMany: vi.fn(),
     },
+    match: {
+      findMany: vi.fn(),
+    },
     groupStandingPrediction: {
       findMany: vi.fn(),
       upsert: vi.fn(),
@@ -47,6 +50,8 @@ const validTeams = [
 beforeEach(() => {
   vi.clearAllMocks();
   mockDb.room.findUnique.mockResolvedValue({ status: "open" });
+  // No kickoff times by default → no per-group locks
+  mockDb.match.findMany.mockResolvedValue([]);
 });
 
 describe("GET /api/groups/[roomId]/standings", () => {
