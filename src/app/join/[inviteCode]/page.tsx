@@ -54,10 +54,13 @@ export default async function JoinPage({
     );
   }
 
+  // Platform admins can always join any group regardless of status or tournament state
+  const isPlatformAdmin = session.user.role === "admin";
+
   // Joining is blocked once the group is closed or the tournament has started
   const CLOSED_STATUSES = ["closed", "group_active", "ko_betting", "ko_active", "settling", "finished"];
-  const tournamentStarted = await isTournamentStarted();
-  if (CLOSED_STATUSES.includes(room.status) || tournamentStarted) {
+  const tournamentStarted = !isPlatformAdmin && await isTournamentStarted();
+  if (!isPlatformAdmin && (CLOSED_STATUSES.includes(room.status) || tournamentStarted)) {
     const detail = room.status === "setup" || room.status === "betting"
       ? "The tournament has already kicked off and new members can no longer join mid-way."
       : "This group is no longer accepting new members — it's already underway or has finished.";
