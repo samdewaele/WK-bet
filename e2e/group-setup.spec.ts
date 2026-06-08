@@ -39,7 +39,7 @@ test.describe("Create group", () => {
     await page.getByRole("button", { name: /create group/i }).click();
 
     await page.waitForURL(/\/groups\/.+/, { timeout: 15_000 });
-    await expect(page.getByText("Friday Night Bets")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Friday Night Bets" })).toBeVisible();
     await expect(page.getByText(/€15\.00/).first()).toBeVisible();
   });
 
