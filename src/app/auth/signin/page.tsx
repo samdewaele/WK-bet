@@ -1,8 +1,13 @@
 "use client";
 
 import { signIn } from "next-auth/react";
+import { useSearchParams } from "next/navigation";
+import { Suspense } from "react";
 
-export default function SignInPage() {
+function SignInForm() {
+  const searchParams = useSearchParams();
+  const callbackUrl = searchParams.get("callbackUrl") ?? "/groups";
+
   return (
     <div className="min-h-screen bg-[#0a0f1e] flex items-center justify-center px-4">
       <div className="bg-gray-900 border border-gray-800 rounded-xl p-10 w-full max-w-md text-center shadow-2xl">
@@ -21,7 +26,7 @@ export default function SignInPage() {
         </p>
 
         <button
-          onClick={() => signIn("google", { callbackUrl: "/predict" })}
+          onClick={() => signIn("google", { callbackUrl })}
           className="w-full flex items-center justify-center gap-3 bg-white hover:bg-gray-100 text-gray-900 font-semibold py-3 px-6 rounded-lg transition-colors"
         >
           <svg className="w-5 h-5" viewBox="0 0 24 24">
@@ -50,5 +55,13 @@ export default function SignInPage() {
         </p>
       </div>
     </div>
+  );
+}
+
+export default function SignInPage() {
+  return (
+    <Suspense>
+      <SignInForm />
+    </Suspense>
   );
 }
