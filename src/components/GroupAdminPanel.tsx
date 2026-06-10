@@ -32,6 +32,8 @@ type MemberStat = {
   totalKOMatches: number;
   groupStandingGroups: number;
   totalGroupStandingGroups: number;
+  uberBets: number;
+  totalUberBets: number;
 };
 
 const STATUS_LABELS: Record<string, string> = {
@@ -810,6 +812,7 @@ export default function GroupAdminPanel({
                       <th className="text-left px-3 py-2 text-gray-500 font-medium">Member</th>
                       <th className="text-center px-2 py-2 text-gray-500 font-medium">KO preds</th>
                       <th className="text-center px-2 py-2 text-gray-500 font-medium">Standings</th>
+                      <th className="text-center px-2 py-2 text-gray-500 font-medium">Uber bets</th>
                       <th className="text-center px-2 py-2 text-gray-500 font-medium">Paid</th>
                       <th className="text-right px-3 py-2 text-gray-500 font-medium">Pot</th>
                     </tr>
@@ -831,6 +834,9 @@ export default function GroupAdminPanel({
                           </td>
                           <td className={`px-2 py-2 text-center ${standingsComplete ? "text-green-400" : "text-amber-400"}`}>
                             {m.groupStandingGroups}/{m.totalGroupStandingGroups}
+                          </td>
+                          <td className={`px-2 py-2 text-center ${m.totalUberBets === 0 ? "text-gray-600" : m.uberBets >= m.totalUberBets ? "text-green-400" : "text-amber-400"}`}>
+                            {m.totalUberBets === 0 ? "–" : `${m.uberBets}/${m.totalUberBets}`}
                           </td>
                           <td className="px-2 py-2 text-center">
                             <span className={m.paid ? "text-green-400" : "text-gray-600"}>

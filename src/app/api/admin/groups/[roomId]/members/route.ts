@@ -28,6 +28,9 @@ export async function GET(_req: Request, { params }: Params) {
   const KO_ROUNDS = ["R32", "R16", "QF", "SF", "3rd", "Final"];
   const totalGroupMatches = await db.match.count({ where: { round: "Group" } });
   const totalKOMatches = await db.match.count({ where: { round: { in: KO_ROUNDS } } });
+  const totalUberBets = await db.sideBet.count({
+    where: { roomId, status: { not: "proposed" } },
+  });
 
   const stats = await Promise.all(
     members.map(async (m) => {
@@ -41,6 +44,9 @@ export async function GET(_req: Request, { params }: Params) {
       const groupStandingGroups = await db.groupStandingPrediction.count({
         where: { userId: m.userId, roomId },
       });
+      const uberBets = await db.sideBetEntry.count({
+        where: { userId: m.userId, sideBet: { roomId } },
+      });
       return {
         userId: m.userId,
         name: m.user.name,
@@ -53,6 +59,8 @@ export async function GET(_req: Request, { params }: Params) {
         totalKOMatches,
         groupStandingGroups,
         totalGroupStandingGroups: 12,
+        uberBets,
+        totalUberBets,
       };
     })
   );
