@@ -64,6 +64,10 @@ export default function SideBetsPanel({ roomId, currentUserId, isManager, tourna
   const [pendingSettle, setPendingSettle] = useState<{
     betId: string; entryId: string; entryAnswer: string; entryName: string;
   } | null>(null);
+  const [editingBetId, setEditingBetId] = useState<string | null>(null);
+  const [editTitle, setEditTitle] = useState("");
+  const [editDesc, setEditDesc] = useState("");
+  const [editSaving, setEditSaving] = useState(false);
 
   async function fetchBets() {
     const res = await fetch(`/api/groups/${roomId}/sidebets`);
@@ -109,6 +113,30 @@ export default function SideBetsPanel({ roomId, currentUserId, isManager, tourna
       if (res.ok) await fetchBets();
     } finally {
       setActing((p) => ({ ...p, [betId]: false }));
+    }
+  }
+
+  function startEdit(bet: UberBet) {
+    setEditingBetId(bet.id);
+    setEditTitle(bet.title);
+    setEditDesc(bet.description ?? "");
+  }
+
+  async function handleSaveEdit(betId: string) {
+    if (!editTitle.trim()) return;
+    setEditSaving(true);
+    try {
+      const res = await fetch(`/api/groups/${roomId}/sidebets`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sideBetId: betId, action: "edit", title: editTitle.trim(), description: editDesc.trim() }),
+      });
+      if (res.ok) {
+        await fetchBets();
+        setEditingBetId(null);
+      }
+    } finally {
+      setEditSaving(false);
     }
   }
 
@@ -191,10 +219,45 @@ export default function SideBetsPanel({ roomId, currentUserId, isManager, tourna
             {/* Title row */}
             <div className="flex items-start justify-between gap-4 mb-3">
               <div className="flex-1 min-w-0">
-                <h3 className="font-semibold text-white">{bet.title}</h3>
-                {bet.description && <p className="text-sm text-gray-400 mt-0.5">{bet.description}</p>}
-                {bet.proposedByName && (
-                  <p className="text-xs text-gray-600 mt-1">Proposed by {bet.proposedByName}</p>
+                {editingBetId === bet.id ? (
+                  <div className="space-y-2">
+                    <input
+                      value={editTitle}
+                      onChange={(e) => setEditTitle(e.target.value)}
+                      className="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:border-amber-400"
+                      placeholder="Bet title"
+                    />
+                    <textarea
+                      value={editDesc}
+                      onChange={(e) => setEditDesc(e.target.value)}
+                      rows={2}
+                      className="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-1.5 text-sm text-gray-300 focus:outline-none focus:border-amber-400 resize-none"
+                      placeholder="Description (optional)"
+                    />
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => handleSaveEdit(bet.id)}
+                        disabled={editSaving || !editTitle.trim()}
+                        className="text-xs bg-amber-400 hover:bg-amber-300 disabled:opacity-40 text-gray-900 font-semibold px-3 py-1.5 rounded-lg transition-colors"
+                      >
+                        {editSaving ? "Saving…" : "Save"}
+                      </button>
+                      <button
+                        onClick={() => setEditingBetId(null)}
+                        className="text-xs text-gray-400 hover:text-white px-3 py-1.5 rounded-lg transition-colors"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <h3 className="font-semibold text-white">{bet.title}</h3>
+                    {bet.description && <p className="text-sm text-gray-400 mt-0.5">{bet.description}</p>}
+                    {bet.proposedByName && (
+                      <p className="text-xs text-gray-600 mt-1">Proposed by {bet.proposedByName}</p>
+                    )}
+                  </>
                 )}
               </div>
               <div className="flex items-center gap-2 shrink-0">
@@ -206,6 +269,15 @@ export default function SideBetsPanel({ roomId, currentUserId, isManager, tourna
                     </span>
                   );
                 })()}
+                {!isSettled && (isManager || bet.proposedByUserId === currentUserId) && editingBetId !== bet.id && (
+                  <button
+                    onClick={() => startEdit(bet)}
+                    title="Edit title / description"
+                    className="text-xs text-gray-500 hover:text-amber-400 transition-colors"
+                  >
+                    ✏
+                  </button>
+                )}
                 {!isSettled && !uberBetsLocked && !bettingOver &&
                   (isManager || bet.proposedByUserId === currentUserId) && (
                   <button

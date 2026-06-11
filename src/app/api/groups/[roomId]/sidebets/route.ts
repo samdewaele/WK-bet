@@ -139,7 +139,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   const ctx = await resolveRoom(roomId, userId, session.user.role ?? "");
   if (!ctx) return NextResponse.json({ error: "Room not found" }, { status: 404 });
 
-  let body: { sideBetId?: string; action?: "accept" | "reject" | "cancel"; winnerEntryId?: string };
+  let body: { sideBetId?: string; action?: "accept" | "reject" | "cancel" | "edit"; winnerEntryId?: string; title?: string; description?: string };
   try { body = await req.json(); } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
@@ -179,6 +179,23 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     await db.sideBetEntry.deleteMany({ where: { sideBetId: body.sideBetId } });
     await db.sideBet.delete({ where: { id: body.sideBetId } });
     return NextResponse.json({ ok: true });
+  }
+
+  if (body.action === "edit") {
+    // Proposer or manager can edit title/description of any non-settled bet
+    const canEdit = ctx.isManager || sideBet.proposedByUserId === userId;
+    if (!canEdit) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    if (sideBet.status === "settled") return NextResponse.json({ error: "Cannot edit a settled bet" }, { status: 400 });
+    const title = body.title?.trim();
+    if (title !== undefined && !title) return NextResponse.json({ error: "Title cannot be empty" }, { status: 400 });
+    const updated = await db.sideBet.update({
+      where: { id: body.sideBetId },
+      data: {
+        ...(title ? { title } : {}),
+        description: body.description !== undefined ? (body.description.trim() || null) : undefined,
+      },
+    });
+    return NextResponse.json({ id: updated.id, title: updated.title, description: updated.description });
   }
 
   if (!ctx.isManager) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
