@@ -16,6 +16,7 @@ import MemberList from "@/components/MemberList";
 import InviteButton from "@/components/InviteButton";
 import { isTournamentStarted, getGroupKickoffTimes } from "@/lib/tournament-lock";
 import CountdownTimer from "@/components/CountdownTimer";
+import RecentResults from "@/components/RecentResults";
 
 type Props = {
   params: Promise<{ roomId: string }>;
@@ -174,6 +175,9 @@ export default async function GroupDetailPage({ params, searchParams }: Props) {
             <div className="text-xl font-bold text-white">€{pot.prizePerWCGroup.toFixed(2)}</div>
           </div>
         </div>
+
+        {/* Recent results — visible once any match has finished */}
+        {tournamentStarted && <RecentResults />}
 
         {/* Tabs */}
         <div className="flex flex-wrap gap-2 mb-8 border-b border-gray-800 pb-4">

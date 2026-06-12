@@ -22,7 +22,10 @@ type Prediction = {
 };
 
 type MatchData = {
+  id: string;
+  round: string;
   group: string | null;
+  kickoff: string;
   homeTeam: { id: string; name: string; flag: string } | null;
   awayTeam: { id: string; name: string; flag: string } | null;
   homeScore: number | null;
@@ -37,6 +40,9 @@ type TeamStanding = {
   pts: number;
   gd: number;
   gf: number;
+  w: number;
+  d: number;
+  l: number;
 };
 
 type Props = {
@@ -70,10 +76,10 @@ function computeActualStandings(matches: MatchData[]): Map<string, TeamStanding[
     const gMap = statsMap.get(m.group)!;
 
     if (!gMap.has(m.homeTeam.id)) {
-      gMap.set(m.homeTeam.id, { teamId: m.homeTeam.id, name: m.homeTeam.name, flag: m.homeTeam.flag, pts: 0, gd: 0, gf: 0 });
+      gMap.set(m.homeTeam.id, { teamId: m.homeTeam.id, name: m.homeTeam.name, flag: m.homeTeam.flag, pts: 0, gd: 0, gf: 0, w: 0, d: 0, l: 0 });
     }
     if (!gMap.has(m.awayTeam.id)) {
-      gMap.set(m.awayTeam.id, { teamId: m.awayTeam.id, name: m.awayTeam.name, flag: m.awayTeam.flag, pts: 0, gd: 0, gf: 0 });
+      gMap.set(m.awayTeam.id, { teamId: m.awayTeam.id, name: m.awayTeam.name, flag: m.awayTeam.flag, pts: 0, gd: 0, gf: 0, w: 0, d: 0, l: 0 });
     }
 
     const home = gMap.get(m.homeTeam.id)!;
@@ -83,9 +89,9 @@ function computeActualStandings(matches: MatchData[]): Map<string, TeamStanding[
     home.gd += m.homeScore - m.awayScore;
     away.gd -= m.homeScore - m.awayScore;
 
-    if (m.homeScore > m.awayScore)      { home.pts += 3; }
-    else if (m.homeScore < m.awayScore) { away.pts += 3; }
-    else                                { home.pts += 1; away.pts += 1; }
+    if (m.homeScore > m.awayScore)      { home.pts += 3; home.w++; away.l++; }
+    else if (m.homeScore < m.awayScore) { away.pts += 3; away.w++; home.l++; }
+    else                                { home.pts += 1; away.pts += 1; home.d++; away.d++; }
   }
 
   const result = new Map<string, TeamStanding[]>();
@@ -104,6 +110,7 @@ export default function GroupStandingsPicker({ roomId, roomStatus, groupKickoffT
   const [groupStates, setGroupStates] = useState<Record<string, GroupState>>({});
   const [savedStates, setSavedStates] = useState<Record<string, GroupState>>({});
   const [actualStandings, setActualStandings] = useState<Map<string, TeamStanding[]>>(new Map());
+  const [allMatches, setAllMatches] = useState<MatchData[]>([]);
   const [saving, setSaving] = useState(false);
   const [saveResult, setSaveResult] = useState<{ count: number; error?: string } | null>(null);
   const [loading, setLoading] = useState(true);
@@ -168,7 +175,7 @@ export default function GroupStandingsPicker({ roomId, roomStatus, groupKickoffT
         setGroupStates(initialStates);
         setSavedStates(initialStates);
 
-        // Compute actual standings from finished matches
+        setAllMatches(matchesData);
         const groupMatches = matchesData.filter((m) => m.group !== null);
         setActualStandings(computeActualStandings(groupMatches));
       } finally {
@@ -348,6 +355,9 @@ export default function GroupStandingsPicker({ roomId, roomStatus, groupKickoffT
           const countdown = groupCountdown(group);
           const isDirty = !locked && complete && (!saved || Object.keys(state).some(k => state[k as keyof GroupState] !== saved[k as keyof GroupState]));
           const actual = actualStandings.get(group) ?? [];
+          const groupFinishedMatches = allMatches
+            .filter((m) => m.group === group && m.status === "finished" && m.homeTeam && m.awayTeam)
+            .sort((a, b) => new Date(b.kickoff).getTime() - new Date(a.kickoff).getTime());
 
           return (
             <div
@@ -408,12 +418,13 @@ export default function GroupStandingsPicker({ roomId, roomStatus, groupKickoffT
                     {actual.map((standing, idx) => {
                       const isMatch = state[`position${idx + 1}` as keyof GroupState] === standing.teamId;
                       return (
-                        <div key={standing.teamId} className="flex items-center gap-1.5 py-0.5">
-                          <span className="text-gray-600 w-3">{idx + 1}.</span>
+                        <div key={standing.teamId} className="flex items-center gap-1 py-0.5">
+                          <span className="text-gray-600 w-3 shrink-0">{idx + 1}.</span>
                           <TeamFlag flag={standing.flag} name={standing.name} size={14} />
-                          <span className={`truncate ${isMatch ? "text-green-400" : "text-gray-300"}`}>
+                          <span className={`flex-1 truncate ${isMatch ? "text-green-400" : "text-gray-300"}`}>
                             {standing.name}
                           </span>
+                          <span className="text-gray-500 tabular-nums ml-1 shrink-0">{standing.pts}p</span>
                         </div>
                       );
                     })}
@@ -476,6 +487,27 @@ export default function GroupStandingsPicker({ roomId, roomStatus, groupKickoffT
                       </div>
                     );
                   })}
+                </div>
+              )}
+
+              {/* Finished match results for this group — always shown below */}
+              {groupFinishedMatches.length > 0 && (
+                <div className="mt-3 border-t border-gray-700/50 pt-2.5 space-y-1.5">
+                  {groupFinishedMatches.map((m) => (
+                    <div key={m.id} className="flex items-center text-xs gap-1.5">
+                      <div className="flex-1 flex items-center justify-end gap-1 min-w-0">
+                        <span className="text-gray-400 truncate">{m.homeTeam!.name}</span>
+                        <TeamFlag flag={m.homeTeam!.flag} name={m.homeTeam!.name} size={12} />
+                      </div>
+                      <span className="font-mono font-bold text-white bg-gray-800 px-1.5 py-0.5 rounded shrink-0">
+                        {m.homeScore}–{m.awayScore}
+                      </span>
+                      <div className="flex-1 flex items-center gap-1 min-w-0">
+                        <TeamFlag flag={m.awayTeam!.flag} name={m.awayTeam!.name} size={12} />
+                        <span className="text-gray-400 truncate">{m.awayTeam!.name}</span>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               )}
             </div>
