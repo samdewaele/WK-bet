@@ -37,28 +37,31 @@ export async function syncMatches(): Promise<SyncResult> {
     const koStarted = !!firstKOKickoff;
     const tournamentOver = finalFinished > 0;
 
+    // Derive the single correct status from real tournament state.
+    // This overwrites whatever the room currently holds, so a room that
+    // jumped to ko_betting while the group stage is still ongoing will be
+    // pulled back to group_active on the next sync.
+    // settling and finished are manual admin states — never auto-overridden.
+    const AUTO_MANAGED = ["betting", "closed", "group_active", "ko_betting", "ko_active"];
+    let correctStatus: string | null = null;
+    if (tournamentOver) {
+      correctStatus = "settling";
+    } else if (koStarted) {
+      correctStatus = "ko_active";
+    } else if (allGroupDone) {
+      correctStatus = "ko_betting";
+    } else if (groupStarted) {
+      correctStatus = "group_active";
+    }
+
     const rooms = await db.room.findMany({
       where: { simulationMode: false },
       select: { id: true, status: true },
     });
 
     for (const room of rooms) {
-      let newStatus: string | null = null;
-
-      if ((room.status === "betting" || room.status === "closed") && groupStarted) {
-        newStatus = "group_active";
-      } else if (room.status === "group_active" && allGroupDone) {
-        newStatus = "ko_betting";
-      } else if (room.status === "ko_betting" && koStarted) {
-        newStatus = "ko_active";
-      } else if (room.status === "ko_active" && tournamentOver) {
-        // Final whistle → settlement. Admin manually confirms "finished"
-        // once every Uber Pot bet has been settled.
-        newStatus = "settling";
-      }
-
-      if (newStatus) {
-        await db.room.update({ where: { id: room.id }, data: { status: newStatus } });
+      if (correctStatus && AUTO_MANAGED.includes(room.status) && room.status !== correctStatus) {
+        await db.room.update({ where: { id: room.id }, data: { status: correctStatus } });
       }
     }
   }

@@ -633,18 +633,19 @@ describe("6. Auto-transition: group_active → ko_betting (KEY SECTION)", () => 
     expect(call.data.status).toBe("ko_betting");
   });
 
-  it("does NOT transition a non-group_active room to ko_betting even when all GROUP_STAGE done", async () => {
+  it("transitions a betting room straight to ko_betting when all GROUP_STAGE done (skips intermediate stages)", async () => {
     const matches72 = makeGroupMatches(72, 72);
     mockFetch.mockResolvedValue(matches72 as any);
     setupMocks({
-      // A betting room should only go to group_active, not ko_betting
-      firstGroupKickoff: null, // no group kickoff in past → won't go to group_active either
+      firstGroupKickoff: null,
       rooms: [{ id: "r1", status: "betting" }],
     });
 
     await syncMatches();
 
-    expect(mockDb.room.update).not.toHaveBeenCalled();
+    // Derived status is ko_betting because allGroupDone=true.
+    // No reason to pass through group_active — real tournament state wins.
+    expect(mockDb.room.update).toHaveBeenCalledWith({ where: { id: "r1" }, data: { status: "ko_betting" } });
   });
 });
 
@@ -873,13 +874,14 @@ describe("10. R32 bracket seeding (only when updated > 0)", () => {
   });
 });
 
-describe("11. Multiple rooms, independent transitions", () => {
-  it("betting room → group_active, group_active room → ko_betting simultaneously", async () => {
+describe("11. Multiple rooms, derived status applied uniformly", () => {
+  it("all auto-managed rooms get the same derived status on each sync", async () => {
     const matches72 = makeGroupMatches(72, 72);
     const pastKickoff = new Date(Date.now() - 60 * 60 * 1000);
     mockFetch.mockResolvedValue(matches72 as any);
     setupMocks({
       firstGroupKickoff: { kickoff: pastKickoff },
+      // allGroupDone=true → correct status is ko_betting for every room
       rooms: [
         { id: "r1", status: "betting" },
         { id: "r2", status: "group_active" },
@@ -888,9 +890,54 @@ describe("11. Multiple rooms, independent transitions", () => {
 
     await syncMatches();
 
-    expect(mockDb.room.update).toHaveBeenCalledWith({ where: { id: "r1" }, data: { status: "group_active" } });
+    expect(mockDb.room.update).toHaveBeenCalledWith({ where: { id: "r1" }, data: { status: "ko_betting" } });
     expect(mockDb.room.update).toHaveBeenCalledWith({ where: { id: "r2" }, data: { status: "ko_betting" } });
     expect(mockDb.room.update).toHaveBeenCalledTimes(2);
+  });
+
+  it("auto-corrects a ko_betting room back to group_active when group stage is not done (the premature transition bug)", async () => {
+    // This is the real production bug: room jumped to ko_betting while group stage
+    // was still ongoing. With derived-status logic it self-corrects on next sync.
+    const partialMatches = makeGroupMatches(72, 20); // only 20 of 72 done
+    const pastKickoff = new Date(Date.now() - 60 * 60 * 1000);
+    mockFetch.mockResolvedValue(partialMatches as any);
+    setupMocks({
+      firstGroupKickoff: { kickoff: pastKickoff },
+      rooms: [{ id: "r1", status: "ko_betting" }],
+    });
+
+    await syncMatches();
+
+    expect(mockDb.room.update).toHaveBeenCalledWith({ where: { id: "r1" }, data: { status: "group_active" } });
+  });
+
+  it("does NOT update rooms already in the correct derived status", async () => {
+    const partialMatches = makeGroupMatches(72, 20);
+    const pastKickoff = new Date(Date.now() - 60 * 60 * 1000);
+    mockFetch.mockResolvedValue(partialMatches as any);
+    setupMocks({
+      firstGroupKickoff: { kickoff: pastKickoff },
+      rooms: [{ id: "r1", status: "group_active" }], // already correct
+    });
+
+    await syncMatches();
+
+    expect(mockDb.room.update).not.toHaveBeenCalled();
+  });
+
+  it("never auto-manages settling or finished rooms", async () => {
+    const matches72 = makeGroupMatches(72, 72);
+    mockFetch.mockResolvedValue(matches72 as any);
+    setupMocks({
+      rooms: [
+        { id: "r1", status: "settling" },
+        { id: "r2", status: "finished" },
+      ],
+    });
+
+    await syncMatches();
+
+    expect(mockDb.room.update).not.toHaveBeenCalled();
   });
 });
 
