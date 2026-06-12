@@ -2,36 +2,19 @@
 
 import { useEffect, useState } from "react";
 import TeamFlag from "@/components/TeamFlag";
-
-type Match = {
-  id: string;
-  round: string;
-  group: string | null;
-  kickoff: string;
-  homeScore: number | null;
-  awayScore: number | null;
-  status: string;
-  homeTeam: { id: string; name: string; flag: string } | null;
-  awayTeam: { id: string; name: string; flag: string } | null;
-};
+import { filterRecentResults, type RecentMatch } from "@/lib/recent-results";
 
 const ROUND_LABEL: Record<string, string> = {
   R32: "R32", R16: "R16", QF: "QF", SF: "SF", "3rd": "3rd", Final: "Final",
 };
 
 export default function RecentResults() {
-  const [recent, setRecent] = useState<Match[]>([]);
+  const [recent, setRecent] = useState<RecentMatch[]>([]);
 
   useEffect(() => {
     fetch("/api/matches")
       .then((r) => r.json())
-      .then((data: Match[]) => {
-        const finished = data
-          .filter((m) => m.status === "finished" && m.homeTeam && m.awayTeam)
-          .sort((a, b) => new Date(b.kickoff).getTime() - new Date(a.kickoff).getTime())
-          .slice(0, 5);
-        setRecent(finished);
-      })
+      .then((data: RecentMatch[]) => setRecent(filterRecentResults(data)))
       .catch(() => {});
   }, []);
 
