@@ -17,6 +17,9 @@ export type SyncResult = {
 export async function syncMatches(): Promise<SyncResult> {
   const apiMatches = await fetchWCMatches();
 
+  // Computed once, used in both the auto-transition block and the stale reset pass.
+  const hasReliableApiData = apiMatches.length > 0;
+
   // Auto-transition runs unconditionally on every sync — time-based triggers
   // like ko_betting → ko_active must fire even when no API matches are
   // live/finished (the gap between group stage completion and KO kickoff).
@@ -49,7 +52,6 @@ export async function syncMatches(): Promise<SyncResult> {
     // that is a manual admin confirmation and must never be auto-overridden.
     // We skip all updates when the API returned no data (network failure) so
     // a temporary outage can't roll back a legitimately settled room.
-    const hasReliableApiData = apiMatches.length > 0;
     const AUTO_MANAGED = ["betting", "closed", "group_active", "ko_betting", "ko_active", "settling"];
     let correctStatus: string | null = null;
     if (tournamentOver) {
@@ -84,6 +86,45 @@ export async function syncMatches(): Promise<SyncResult> {
       m.status === "FINISHED" ||
       ["IN_PLAY", "PAUSED", "HALFTIME"].includes(m.status)
   );
+
+  // ── Stale reset pass ──────────────────────────────────────────────────────
+  // The actionable filter only covers live/finished API matches, so any DB
+  // match with fake sim scores that the API shows as SCHEDULED would linger
+  // forever — polluting Recent Results, group standings, and the scoring loop.
+  // This pass corrects that on every sync cycle that has valid API data.
+  if (hasReliableApiData) {
+    const staleMatches = await db.match.findMany({
+      where: {
+        OR: [
+          { status: { not: "scheduled" } },
+          { homeScore: { not: null } },
+          { awayScore: { not: null } },
+        ],
+      },
+      include: { homeTeam: true },
+    });
+
+    for (const stale of staleMatches) {
+      const staleKickoff = new Date(stale.kickoff).getTime();
+      const apiCounterpart = apiMatches.find((api) => {
+        const kickoffDiff = Math.abs(new Date(api.utcDate).getTime() - staleKickoff);
+        if (kickoffDiff >= 10 * 60 * 1000) return false;
+        if (!stale.homeTeam) return true;
+        return (
+          stale.homeTeam.name.toLowerCase() === api.homeTeam.name.toLowerCase() ||
+          stale.homeTeam.name.toLowerCase().includes(api.homeTeam.shortName.toLowerCase())
+        );
+      });
+
+      if (apiCounterpart && ["SCHEDULED", "TIMED"].includes(apiCounterpart.status)) {
+        await db.match.update({
+          where: { id: stale.id },
+          data: { status: "scheduled", homeScore: null, awayScore: null },
+        });
+        console.log(`[sync] Reset stale match ${stale.id} (was: ${stale.status}) — API reports SCHEDULED`);
+      }
+    }
+  }
 
   const [notificationsSent, remindersSent] = await Promise.all([
     checkAndSendRoundNotifications(),
@@ -127,6 +168,10 @@ export async function syncMatches(): Promise<SyncResult> {
 
     const wasFinished = dbMatch.status === "finished";
     const nowFinished = apiStatus === "finished";
+    // Also rescore if the match was already finished but scores changed — this
+    // catches the case where sim data left a "finished" match with wrong scores
+    // that the stale reset pass didn't clear (e.g. first sync after a new sim run).
+    const scoresChanged = dbMatch.homeScore !== apiHome || dbMatch.awayScore !== apiAway;
 
     await db.match.update({
       where: { id: dbMatch.id },
@@ -138,7 +183,7 @@ export async function syncMatches(): Promise<SyncResult> {
     });
     updated++;
 
-    if (!wasFinished && nowFinished && apiHome !== null && apiAway !== null) {
+    if (nowFinished && (!wasFinished || scoresChanged) && apiHome !== null && apiAway !== null) {
       const round = dbMatch.round as Round;
       await Promise.all(
         dbMatch.predictions.map((pred) => {

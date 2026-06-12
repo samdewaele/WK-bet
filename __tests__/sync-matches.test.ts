@@ -149,7 +149,19 @@ function setupMocks(opts: SetupOptions = {}) {
     remindersSent = [],
   } = opts;
 
-  mockDb.match.findMany.mockResolvedValue(dbMatches);
+  // Differentiate the two findMany calls:
+  // 1. Stale reset pass uses { where: { OR: [...] } } — return only non-clean matches
+  // 2. Main update loop has no `where` — return the full list
+  mockDb.match.findMany.mockImplementation((args: any) => {
+    if (args?.where?.OR) {
+      return Promise.resolve(
+        dbMatches.filter((m: any) =>
+          m.status !== "scheduled" || m.homeScore !== null || m.awayScore !== null
+        )
+      );
+    }
+    return Promise.resolve(dbMatches);
+  });
   mockDb.match.update.mockResolvedValue({});
   mockDb.prediction.update.mockResolvedValue({});
   mockDb.room.update.mockResolvedValue({});
@@ -212,12 +224,17 @@ describe("1. Early return when no actionable matches", () => {
     expect(result.message).toBe("No live or finished matches yet");
   });
 
-  it("does not call db.match.findMany when returning early", async () => {
+  it("does not call the main-loop db.match.findMany when returning early (stale reset still runs)", async () => {
     mockFetch.mockResolvedValue([apiGroupMatch({ status: "SCHEDULED" })] as any);
 
     await syncMatches();
 
-    expect(mockDb.match.findMany).not.toHaveBeenCalled();
+    // Stale reset calls findMany({ where: { OR: [...] } }) — that IS expected.
+    // The main update loop calls findMany with no `where` — that should NOT happen.
+    const mainLoopCalls = mockDb.match.findMany.mock.calls.filter(
+      (c: any) => !c[0]?.where?.OR
+    );
+    expect(mainLoopCalls).toHaveLength(0);
   });
 
   it("still calls auto-transition queries even when returning early (time-based triggers must fire)", async () => {
@@ -392,11 +409,30 @@ describe("3. Prediction scoring when match finishes", () => {
     expect(result.predictionsScored).toBe(2);
   });
 
-  it("does NOT re-score predictions when DB match was already 'finished'", async () => {
-    mockDb.match.findMany.mockResolvedValue([
-      // status differs from api only by scores — but wasFinished=true so no rescoring
-      dbMatch({ kickoff, status: "finished", homeScore: 1, awayScore: 0, predictions, round: "Group" }),
-    ]);
+  it("rescores predictions when match was already 'finished' but scores changed (sim data correction)", async () => {
+    // DB has wrong sim score (1-0); real API result is 2-1.
+    // wasFinished=true but scoresChanged=true → must rescore.
+    mockDb.match.findMany.mockImplementation((args: any) => {
+      if (args?.where?.OR) return Promise.resolve([]); // stale reset: nothing stale
+      return Promise.resolve([
+        dbMatch({ kickoff, status: "finished", homeScore: 1, awayScore: 0, predictions, round: "Group" }),
+      ]);
+    });
+
+    await syncMatches();
+
+    expect(mockCalcPoints).toHaveBeenCalledTimes(2);
+    expect(mockDb.prediction.update).toHaveBeenCalledTimes(2);
+  });
+
+  it("does NOT re-score predictions when DB match was already 'finished' with the same scores (unchanged)", async () => {
+    // Exact same state in DB and API → unchanged check fires, no update at all.
+    mockDb.match.findMany.mockImplementation((args: any) => {
+      if (args?.where?.OR) return Promise.resolve([]);
+      return Promise.resolve([
+        dbMatch({ kickoff, status: "finished", homeScore: 2, awayScore: 1, predictions, round: "Group" }),
+      ]);
+    });
 
     await syncMatches();
 
@@ -1079,6 +1115,121 @@ describe("12. Result message format", () => {
     const result = await syncMatches();
 
     expect(result.message).toMatch(/scored 5 predictions$/);
+  });
+});
+
+describe("14. Stale reset pass", () => {
+  const kickoff = new Date("2026-06-12T15:00:00Z");
+
+  it("resets a DB match with sim status 'finished' when API reports SCHEDULED", async () => {
+    mockFetch.mockResolvedValue([
+      apiGroupMatch({ utcDate: kickoff.toISOString(), status: "SCHEDULED" }),
+    ] as any);
+    setupMocks({
+      rooms: [],
+      dbMatches: [dbMatch({ kickoff, status: "finished", homeScore: 2, awayScore: 1, predictions: [] })],
+    });
+
+    await syncMatches();
+
+    expect(mockDb.match.update).toHaveBeenCalledWith({
+      where: { id: "db-match-1" },
+      data: { status: "scheduled", homeScore: null, awayScore: null },
+    });
+  });
+
+  it("resets a DB match with non-null scores but scheduled status when API reports TIMED", async () => {
+    mockFetch.mockResolvedValue([
+      apiGroupMatch({ utcDate: kickoff.toISOString(), status: "TIMED" }),
+    ] as any);
+    setupMocks({
+      rooms: [],
+      dbMatches: [dbMatch({ kickoff, status: "scheduled", homeScore: 3, awayScore: 0, predictions: [] })],
+    });
+
+    await syncMatches();
+
+    expect(mockDb.match.update).toHaveBeenCalledWith({
+      where: { id: "db-match-1" },
+      data: { status: "scheduled", homeScore: null, awayScore: null },
+    });
+  });
+
+  it("does NOT reset a match the API correctly reports as FINISHED", async () => {
+    mockFetch.mockResolvedValue([
+      apiGroupMatch({ utcDate: kickoff.toISOString(), status: "FINISHED", score: { winner: "HOME_TEAM", fullTime: { home: 2, away: 1 } } }),
+    ] as any);
+    setupMocks({
+      rooms: [],
+      dbMatches: [dbMatch({ kickoff, status: "finished", homeScore: 2, awayScore: 1, predictions: [] })],
+    });
+
+    await syncMatches();
+
+    // The unchanged check triggers (same state) — no update at all
+    expect(mockDb.match.update).not.toHaveBeenCalled();
+  });
+
+  it("does NOT reset when API response is empty (hasReliableApiData guard)", async () => {
+    mockFetch.mockResolvedValue([]);
+    setupMocks({
+      rooms: [],
+      dbMatches: [dbMatch({ kickoff, status: "finished", homeScore: 2, awayScore: 1, predictions: [] })],
+    });
+
+    await syncMatches();
+
+    expect(mockDb.match.update).not.toHaveBeenCalled();
+  });
+
+  it("does NOT reset a match with clean state (status=scheduled, null scores)", async () => {
+    mockFetch.mockResolvedValue([
+      apiGroupMatch({ utcDate: kickoff.toISOString(), status: "SCHEDULED" }),
+    ] as any);
+    setupMocks({
+      rooms: [],
+      dbMatches: [dbMatch({ kickoff, status: "scheduled", homeScore: null, awayScore: null, predictions: [] })],
+    });
+
+    await syncMatches();
+
+    expect(mockDb.match.update).not.toHaveBeenCalled();
+  });
+
+  it("resets a 'live' match when the API says it is SCHEDULED (e.g. sim set it to live)", async () => {
+    mockFetch.mockResolvedValue([
+      apiGroupMatch({ utcDate: kickoff.toISOString(), status: "SCHEDULED" }),
+    ] as any);
+    setupMocks({
+      rooms: [],
+      dbMatches: [dbMatch({ kickoff, status: "live", homeScore: null, awayScore: null, predictions: [] })],
+    });
+
+    await syncMatches();
+
+    expect(mockDb.match.update).toHaveBeenCalledWith({
+      where: { id: "db-match-1" },
+      data: { status: "scheduled", homeScore: null, awayScore: null },
+    });
+  });
+
+  it("runs the stale reset even when actionable is empty (catches stale data between live matches)", async () => {
+    // All API matches are SCHEDULED — no actionable, but stale reset still fires.
+    mockFetch.mockResolvedValue([
+      apiGroupMatch({ utcDate: kickoff.toISOString(), status: "SCHEDULED" }),
+    ] as any);
+    setupMocks({
+      rooms: [],
+      dbMatches: [dbMatch({ kickoff, status: "finished", homeScore: 1, awayScore: 0, predictions: [] })],
+    });
+
+    await syncMatches();
+
+    // Stale reset fires and resets the match even though actionable is empty
+    expect(mockDb.match.update).toHaveBeenCalledWith({
+      where: { id: "db-match-1" },
+      data: { status: "scheduled", homeScore: null, awayScore: null },
+    });
   });
 });
 
