@@ -14,7 +14,7 @@ import {
   type KORound,
 } from "@/lib/pot";
 import { checkAndSendRoundNotifications, resetNotification } from "@/lib/notifications";
-import { buildStandingsFromMatches, populateR32Bracket, resetR32Bracket, populateNextRoundSlot, resetKOBracket, NEXT_ROUND_SLOT, buildPlayerBracket } from "@/lib/ko-seeding";
+import { buildStandingsFromMatches, resolveR32Bracket, selectBestThirdPlace, NEXT_ROUND_SLOT, buildPlayerBracket, type WCGroup, type TeamStats } from "@/lib/ko-seeding";
 
 export const TEST_PREFIX = "test-tournament-";
 const TEST_ROOM_INVITE = `${TEST_PREFIX}invite`;
@@ -272,6 +272,7 @@ async function _seedGroupStageRandomly(
 
   // Random results for all 48 group matches
   const results = groupMatches.map((m) => ({ matchId: m.id, home: randomGoals(), away: randomGoals() }));
+  const resultMap = new Map(results.map(r => [r.matchId, { home: r.home, away: r.away }]));
 
   // Random match predictions per user
   for (const user of users) {
@@ -285,13 +286,18 @@ async function _seedGroupStageRandomly(
     }
   }
 
-  // Apply match results
-  for (const { matchId, home, away } of results) {
-    await db.match.update({ where: { id: matchId }, data: { homeScore: home, awayScore: away, status: "finished" } });
-  }
+  // Store sim results in SimResult — real Match rows are never modified by simulation.
+  await Promise.all(
+    results.map(({ matchId, home, away }) =>
+      db.simResult.upsert({
+        where: { matchId },
+        create: { matchId, homeScore: home, awayScore: away },
+        update: { homeScore: home, awayScore: away },
+      })
+    )
+  );
 
-  // Score group match predictions for ALL room members:
-  // test users store preds with roomId, real members store with roomId: null
+  // Score group match predictions for ALL room members using in-memory results.
   const allRoomMemberIds = (await db.roomMember.findMany({
     where: { roomId },
     select: { userId: true },
@@ -303,15 +309,15 @@ async function _seedGroupStageRandomly(
       match: { round: "Group" },
       OR: [{ roomId }, { roomId: null }],
     },
-    include: { match: true },
+    select: { id: true, matchId: true, homeScore: true, awayScore: true },
   });
   await Promise.all(
-    allPreds
-      .filter((p) => p.match.homeScore !== null)
-      .map((pred) => {
-        const pts = calculatePoints("Group", pred.homeScore, pred.awayScore, pred.match.homeScore!, pred.match.awayScore!);
-        return db.prediction.update({ where: { id: pred.id }, data: { points: pts } });
-      })
+    allPreds.map((pred) => {
+      const result = resultMap.get(pred.matchId);
+      if (!result) return Promise.resolve();
+      const pts = calculatePoints("Group", pred.homeScore, pred.awayScore, result.home, result.away);
+      return db.prediction.update({ where: { id: pred.id }, data: { points: pts } });
+    })
   );
 
   // Compute actual group standings from results
@@ -324,9 +330,9 @@ async function _seedGroupStageRandomly(
   }));
   const actualStandings = _computeActualStandings(matchInputs);
 
-  // Populate R32 bracket with the seeded teams based on group standings
+  // Populate sim R32 bracket — stored in SimResult, not real Match rows
   const koStandings = buildStandingsFromMatches(matchInputs);
-  await populateR32Bracket(koStandings);
+  await populateSimR32Bracket(koStandings);
 
   // Seed KO bracket predictions for test users now (Phase 1), so the gate
   // can check that all members have submitted their full bracket before Phase 2.
@@ -437,6 +443,75 @@ function _computeActualStandings(
 }
 
 // ---------------------------------------------------------------------------
+// Sim bracket helpers — write to SimResult, never to real Match rows
+// ---------------------------------------------------------------------------
+
+async function populateSimR32Bracket(standings: Map<WCGroup, TeamStats[]>): Promise<void> {
+  const bestThird = selectBestThirdPlace(standings);
+  const bracketTeams = resolveR32Bracket(standings, bestThird);
+
+  const r32Matches = await db.match.findMany({
+    where: { round: "R32" },
+    orderBy: { matchNumber: "asc" },
+    select: { id: true },
+  });
+  if (r32Matches.length !== 16) {
+    throw new Error(`Expected 16 R32 matches in DB, found ${r32Matches.length}. Run npx prisma db seed first.`);
+  }
+
+  await Promise.all(
+    r32Matches.map((match, i) =>
+      db.simResult.upsert({
+        where: { matchId: match.id },
+        create: { matchId: match.id, homeTeamId: bracketTeams[i].homeTeamId, awayTeamId: bracketTeams[i].awayTeamId },
+        update: { homeTeamId: bracketTeams[i].homeTeamId, awayTeamId: bracketTeams[i].awayTeamId },
+      })
+    )
+  );
+}
+
+async function populateSimNextRoundSlot(matchNumber: number, winnerId: string, loserId: string | null): Promise<void> {
+  const slot = NEXT_ROUND_SLOT[matchNumber];
+  if (!slot) return;
+
+  const nextMatch = await db.match.findFirst({
+    where: { matchNumber: slot.winner.matchNumber },
+    select: { id: true },
+  });
+  if (!nextMatch) return;
+
+  await db.simResult.upsert({
+    where: { matchId: nextMatch.id },
+    create: {
+      matchId: nextMatch.id,
+      ...(slot.winner.side === "home" ? { homeTeamId: winnerId } : { awayTeamId: winnerId }),
+    },
+    update: {
+      ...(slot.winner.side === "home" ? { homeTeamId: winnerId } : { awayTeamId: winnerId }),
+    },
+  });
+
+  if (slot.loser && loserId) {
+    const loserMatch = await db.match.findFirst({
+      where: { matchNumber: slot.loser.matchNumber },
+      select: { id: true },
+    });
+    if (loserMatch) {
+      await db.simResult.upsert({
+        where: { matchId: loserMatch.id },
+        create: {
+          matchId: loserMatch.id,
+          ...(slot.loser.side === "home" ? { homeTeamId: loserId } : { awayTeamId: loserId }),
+        },
+        update: {
+          ...(slot.loser.side === "home" ? { homeTeamId: loserId } : { awayTeamId: loserId }),
+        },
+      });
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // KO rounds: random results + predictions with earnedAmount
 // ---------------------------------------------------------------------------
 
@@ -448,11 +523,22 @@ async function _seedKORoundsRandomly(
 ): Promise<void> {
   const pot = calculatePot(entryFee, memberCount);
 
-  const koMatches = await db.match.findMany({
+  const koMatchesBase = await db.match.findMany({
     where: { round: { in: [...KO_ROUNDS] } },
     orderBy: { matchNumber: "asc" },
   });
-  if (koMatches.length === 0) return;
+  if (koMatchesBase.length === 0) return;
+
+  // Overlay sim bracket team IDs (set in Phase 1 for R32, progressively for later rounds).
+  const simResultsForKO = await db.simResult.findMany({
+    where: { matchId: { in: koMatchesBase.map(m => m.id) } },
+  });
+  const simResultKOMap = new Map(simResultsForKO.map(r => [r.matchId, r]));
+  const koMatches = koMatchesBase.map(m => ({
+    ...m,
+    homeTeamId: simResultKOMap.get(m.id)?.homeTeamId ?? m.homeTeamId,
+    awayTeamId: simResultKOMap.get(m.id)?.awayTeamId ?? m.awayTeamId,
+  }));
 
   // Fetch all room KO predictions upfront for bracket simulation.
   // Includes test users (stored with roomId) and real members.
@@ -461,8 +547,7 @@ async function _seedKORoundsRandomly(
     select: { id: true, userId: true, matchId: true, homeScore: true, awayScore: true },
   });
 
-  // Build each user's predicted bracket from their R32 predictions upward.
-  // This tells us which team each player predicted to be in each KO slot.
+  // Build each user's predicted bracket from their R32 predictions upward using sim team assignments.
   const predsByUser = new Map<string, typeof allRoomPreds>();
   for (const p of allRoomPreds) {
     if (!predsByUser.has(p.userId)) predsByUser.set(p.userId, []);
@@ -473,8 +558,8 @@ async function _seedKORoundsRandomly(
     userBrackets.set(userId, buildPlayerBracket(userPreds, koMatches));
   }
 
-  // Track actual team slots in memory for bracket progression.
-  // Starts with R32 teams (set by populateR32Bracket in Phase 1).
+  // Track actual sim team slots in memory for bracket progression.
+  // Starts with R32 teams from SimResult (set by populateSimR32Bracket in Phase 1).
   const teamSlots = new Map<number, { homeTeamId: string | null; awayTeamId: string | null }>();
   for (const m of koMatches) {
     teamSlots.set(m.matchNumber, { homeTeamId: m.homeTeamId, awayTeamId: m.awayTeamId });
@@ -486,12 +571,14 @@ async function _seedKORoundsRandomly(
     const actualAway = randomGoals();
     if (actualHome === actualAway) actualHome += 1;
 
-    await db.match.update({
-      where: { id: match.id },
-      data: { homeScore: actualHome, awayScore: actualAway, status: "finished" },
+    // Store sim result — real Match rows are never modified by simulation.
+    await db.simResult.upsert({
+      where: { matchId: match.id },
+      create: { matchId: match.id, homeScore: actualHome, awayScore: actualAway },
+      update: { homeScore: actualHome, awayScore: actualAway },
     });
 
-    // Propagate actual winner to next round bracket slot (in memory + DB)
+    // Propagate actual winner to next round bracket slot (in memory + SimResult)
     const slots = teamSlots.get(match.matchNumber)!;
     const actualHomeTeamId = slots.homeTeamId;
     const actualAwayTeamId = slots.awayTeamId;
@@ -513,7 +600,7 @@ async function _seedKORoundsRandomly(
             else loserSlots.awayTeamId = loserId;
           }
         }
-        await populateNextRoundSlot(match.matchNumber, winnerId, loserId);
+        await populateSimNextRoundSlot(match.matchNumber, winnerId, loserId);
       }
     }
 
@@ -672,14 +759,11 @@ export async function cleanupTestInRoom(roomId: string): Promise<void> {
     data: { winnerEntryId: null, status: "open" },
   });
 
+  // Delete all simulation data — replaces the old match reset + bracket reset.
+  // Safe to call even when no test users remain in the DB.
+  await db.simResult.deleteMany({});
+
   if (testUsers.length === 0) return;
-
-  // Reset ALL match scores that were set during the test
-  await db.match.updateMany({ where: { status: "finished" }, data: { homeScore: null, awayScore: null, status: "scheduled" } });
-
-  // Reset bracket team assignments (R32 and all subsequent KO rounds)
-  await resetR32Bracket();
-  await resetKOBracket();
 
   // Reset round notifications so they can fire again on the next simulation
   await resetNotification("Group").catch(() => {});
@@ -714,9 +798,7 @@ export async function cleanupTestTournament(): Promise<void> {
   const room = await db.room.findUnique({ where: { inviteCode: TEST_ROOM_INVITE } });
 
   if (room) {
-    await db.match.updateMany({ where: { status: "finished" }, data: { homeScore: null, awayScore: null, status: "scheduled" } });
-    await resetR32Bracket();
-    await resetKOBracket();
+    await db.simResult.deleteMany({});
     await db.sideBetEntry.deleteMany({ where: { sideBet: { roomId: room.id } } });
     await db.sideBet.deleteMany({ where: { roomId: room.id } });
     await db.p2PSideBet.deleteMany({ where: { roomId: room.id } });

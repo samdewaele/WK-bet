@@ -121,8 +121,22 @@ model Match {
   status        String         @default("scheduled")
   predictions   Prediction[]
   koPredictions KOPrediction[]
+  simResult     SimResult?
 
   @@unique([matchNumber])
+}
+
+// Simulation-only overlay: stores fake results and bracket slots for test runs.
+// The real Match table is never modified by simulation.
+// All rows are deleted on every deploy (seed.ts) and on simulation cleanup.
+model SimResult {
+  id         String  @id @default(cuid())
+  matchId    String  @unique
+  homeScore  Int?
+  awayScore  Int?
+  homeTeamId String?
+  awayTeamId String?
+  match      Match   @relation(fields: [matchId], references: [id], onDelete: Cascade)
 }
 
 // Knockout match predictions (one per user per match per room, or globally if roomId is null)

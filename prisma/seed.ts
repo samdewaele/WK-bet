@@ -46,6 +46,10 @@ function generateGroupMatches() {
 async function main() {
   console.log("Seeding database...");
 
+  // Clean any simulation data left over from previous runs — runs on every deploy.
+  const { count: simCleared } = await db.simResult.deleteMany({});
+  if (simCleared > 0) console.log(`✓ Cleared ${simCleared} leftover simulation result(s)`);
+
   const existingMatchCount = await db.match.count();
 
   // Remove stale teams (only safe when no matches reference them yet)
