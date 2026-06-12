@@ -154,7 +154,7 @@ export default async function RulesPage({ params }: Props) {
           <section className="bg-gray-900 border border-gray-800 rounded-xl p-6">
             <h2 className="text-xl font-bold text-amber-400 mb-4">Side Bets</h2>
             <p className="text-gray-300 mb-3">
-              Admins create fun side bets (e.g. "Who will be top scorer?"). All players submit their
+              Admins create fun side bets (e.g. &ldquo;Who will be top scorer?&rdquo;). All players submit their
               answer. The admin settles by picking the winning entry.
             </p>
             <p className="text-gray-300 mb-3">

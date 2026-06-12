@@ -405,7 +405,7 @@ export default function GroupAdminPanel({
                 {linkCopied ? <>✓ Copied!</> : <>🔗 Copy</>}
               </button>
             </div>
-            <p className="text-xs text-gray-500 mt-1">Share this link so friends can join — they'll be added automatically after signing in.</p>
+            <p className="text-xs text-gray-500 mt-1">Share this link so friends can join — they&apos;ll be added automatically after signing in.</p>
           </div>
 
           {/* Top row: 2 columns */}

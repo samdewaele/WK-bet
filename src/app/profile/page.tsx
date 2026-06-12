@@ -1,5 +1,6 @@
 import { auth } from "@auth";
 import { redirect } from "next/navigation";
+import Link from "next/link";
 import Navbar from "@/components/Navbar";
 
 export default async function ProfilePage() {
@@ -36,18 +37,20 @@ export default async function ProfilePage() {
             Your profile is managed through Google. To change your name or picture, update your Google account.
           </p>
         </div>
-        <a
-          href="/api/auth/signout"
-          className="mt-6 block text-center bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-300 font-semibold px-6 py-3 rounded-xl text-sm transition-colors"
-        >
-          Sign out
-        </a>
-        <a
+        <form action="/api/auth/signout" method="post">
+          <button
+            type="submit"
+            className="mt-6 w-full block text-center bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-300 font-semibold px-6 py-3 rounded-xl text-sm transition-colors"
+          >
+            Sign out
+          </button>
+        </form>
+        <Link
           href="/groups"
           className="mt-3 block text-center text-gray-500 hover:text-gray-300 text-sm transition-colors"
         >
           ← Back to my groups
-        </a>
+        </Link>
       </div>
     </div>
   );

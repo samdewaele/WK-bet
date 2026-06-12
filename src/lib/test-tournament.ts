@@ -344,7 +344,7 @@ async function _seedGroupStageRandomly(
   for (const user of users) {
     for (const match of koMatches) {
       let home = randomGoals();
-      let away = randomGoals();
+      const away = randomGoals();
       if (home === away) home += 1; // KO picks must have a winner
       await db.kOPrediction.upsert({
         where: { userId_matchId_roomId: { userId: user.id, matchId: match.id, roomId } },

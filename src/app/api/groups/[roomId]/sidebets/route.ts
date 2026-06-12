@@ -203,8 +203,8 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   if (body.winnerEntryId) {
     if (sideBet.status === "settled") return NextResponse.json({ error: "Already settled" }, { status: 400 });
     if (sideBet.status === "proposed") return NextResponse.json({ error: "Accept the proposal first" }, { status: 400 });
-    const entry = await db.sideBetEntry.findUnique({ where: { id: body.winnerEntryId } as never });
-    if (!entry || (entry as any).sideBetId !== body.sideBetId) {
+    const entry = await db.sideBetEntry.findUnique({ where: { id: body.winnerEntryId } });
+    if (!entry || entry.sideBetId !== body.sideBetId) {
       return NextResponse.json({ error: "Winner entry not found" }, { status: 404 });
     }
     const updated = await db.sideBet.update({
