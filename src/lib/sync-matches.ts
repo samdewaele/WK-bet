@@ -117,16 +117,14 @@ export async function syncMatches(): Promise<SyncResult> {
       console.error("[sync] group scoring failed:", err)
     );
 
-    const [finishedGroupCount] = await Promise.all([
-      db.match.count({ where: { round: "Group", status: "finished" } }),
-    ]);
-
     // Once all groups are done, run the full seeding to fill the best-third
     // slots that progressive per-group fill leaves blank.
+    const apiGroupMatchesDone = apiMatches.filter((m) => m.stage === "GROUP_STAGE");
+    const allGroupMatchesDone = apiGroupMatchesDone.length >= 72 && apiGroupMatchesDone.every((m) => m.status === "FINISHED");
     const r32FullyPopulated = await db.match.count({
       where: { round: "R32", homeTeamId: { not: null }, awayTeamId: { not: null } },
     });
-    if (finishedGroupCount === 72 && r32FullyPopulated < 16) {
+    if (allGroupMatchesDone && r32FullyPopulated < 16) {
       const standings = await computeGroupStandings();
       await populateR32Bracket(standings).catch((err) =>
         console.error("[sync] R32 seeding failed:", err)
@@ -138,10 +136,8 @@ export async function syncMatches(): Promise<SyncResult> {
   // triggers (e.g. ko_betting → ko_active when KO kickoffs arrive) fire even
   // when no match scores changed in this cycle.
   {
-    const [finishedGroupCount, totalGroupCount, firstGroupKickoff, firstKOKickoff, finalFinished] =
+    const [firstGroupKickoff, firstKOKickoff, finalFinished] =
       await Promise.all([
-        db.match.count({ where: { round: "Group", status: "finished" } }),
-        db.match.count({ where: { round: "Group" } }),
         db.match.findFirst({ where: { round: "Group" }, orderBy: { kickoff: "asc" }, select: { kickoff: true } }),
         db.match.findFirst({ where: { round: { in: ["R32", "R16", "QF", "SF", "3rd", "Final"] }, kickoff: { lte: new Date() } }, orderBy: { kickoff: "asc" }, select: { kickoff: true } }),
         db.match.count({ where: { round: "Final", status: "finished" } }),
@@ -149,12 +145,10 @@ export async function syncMatches(): Promise<SyncResult> {
 
     const now = new Date();
     const groupStarted = firstGroupKickoff && now >= firstGroupKickoff.kickoff;
-    // Require all group matches in the DB to be finished, and require the DB
-    // to actually contain the expected 72 matches. Using >= instead of === on
-    // the finished count handles the (impossible-in-theory) case where somehow
-    // extra matches leaked in; comparing against totalGroupCount instead of a
-    // hardcode means a partially-reseeded DB (e.g. 73 rows) won't fire early.
-    const allGroupDone = totalGroupCount >= 72 && finishedGroupCount >= totalGroupCount;
+    // Use the live API response as the authoritative source: all GROUP_STAGE
+    // matches must be FINISHED, and there must be at least 72 of them.
+    const apiGroupMatches = apiMatches.filter((m) => m.stage === "GROUP_STAGE");
+    const allGroupDone = apiGroupMatches.length >= 72 && apiGroupMatches.every((m) => m.status === "FINISHED");
     const koStarted = !!firstKOKickoff;
     const tournamentOver = finalFinished > 0;
 

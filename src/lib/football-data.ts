@@ -15,6 +15,7 @@ export type FDMatch = {
     | "POSTPONED"
     | "CANCELLED"
     | "SUSPENDED";
+  stage: string; // e.g. "GROUP_STAGE", "LAST_16", "QUARTER_FINALS", "SEMI_FINALS", "THIRD_PLACE", "FINAL"
   homeTeam: { id: number; name: string; shortName: string; tla: string };
   awayTeam: { id: number; name: string; shortName: string; tla: string };
   score: {
