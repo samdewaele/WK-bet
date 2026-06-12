@@ -225,22 +225,24 @@ describe("1. Early return when no actionable matches", () => {
     expect(mockDb.match.findMany).not.toHaveBeenCalled();
   });
 
-  it("does not call auto-transition queries when returning early", async () => {
+  it("still calls auto-transition queries even when returning early (time-based triggers must fire)", async () => {
     mockFetch.mockResolvedValue([]);
 
     await syncMatches();
 
-    expect(mockDb.match.findFirst).not.toHaveBeenCalled();
-    expect(mockDb.room.findMany).not.toHaveBeenCalled();
+    // Auto-transition block runs unconditionally so ko_betting → ko_active fires
+    // during the gap between group stage completion and first KO kickoff.
+    expect(mockDb.match.findFirst).toHaveBeenCalled();
+    expect(mockDb.room.findMany).toHaveBeenCalled();
   });
 
-  it("does not call notification functions when returning early", async () => {
+  it("still calls notification functions even when returning early", async () => {
     mockFetch.mockResolvedValue([]);
 
     await syncMatches();
 
-    expect(mockNotifications).not.toHaveBeenCalled();
-    expect(mockReminders).not.toHaveBeenCalled();
+    expect(mockNotifications).toHaveBeenCalled();
+    expect(mockReminders).toHaveBeenCalled();
   });
 });
 
@@ -672,6 +674,38 @@ describe("7. Auto-transition: ko_betting → ko_active", () => {
     await syncMatches();
 
     expect(mockDb.room.update).not.toHaveBeenCalled();
+  });
+
+  it("transitions ko_betting → ko_active even when actionable is empty (the production bug: gap between group stage and KO kickoff)", async () => {
+    // Simulate the real-world state: all group matches are done (no live/finished
+    // KO matches yet), but the first R32 kickoff has passed.
+    // Previously this was broken because the early return fired before auto-transitions.
+    const pastKOKickoff = new Date(Date.now() - 30 * 60 * 1000); // 30min ago
+    mockFetch.mockResolvedValue([]); // no actionable matches at all
+    setupMocks({
+      firstKOKickoff: { kickoff: pastKOKickoff },
+      rooms: [{ id: "r1", status: "ko_betting" }],
+    });
+
+    await syncMatches();
+
+    expect(mockDb.room.update).toHaveBeenCalledWith({ where: { id: "r1" }, data: { status: "ko_active" } });
+  });
+
+  it("transitions ko_betting → ko_active when API returns only SCHEDULED matches (all group done, KO not started live yet)", async () => {
+    const pastKOKickoff = new Date(Date.now() - 5 * 60 * 1000); // 5min ago
+    mockFetch.mockResolvedValue([
+      apiGroupMatch({ status: "SCHEDULED" }),
+      apiGroupMatch({ id: 2, status: "TIMED" }),
+    ] as any);
+    setupMocks({
+      firstKOKickoff: { kickoff: pastKOKickoff },
+      rooms: [{ id: "r1", status: "ko_betting" }],
+    });
+
+    await syncMatches();
+
+    expect(mockDb.room.update).toHaveBeenCalledWith({ where: { id: "r1" }, data: { status: "ko_active" } });
   });
 });
 

@@ -17,14 +17,65 @@ export type SyncResult = {
 export async function syncMatches(): Promise<SyncResult> {
   const apiMatches = await fetchWCMatches();
 
+  // Auto-transition runs unconditionally on every sync — time-based triggers
+  // like ko_betting → ko_active must fire even when no API matches are
+  // live/finished (the gap between group stage completion and KO kickoff).
+  {
+    const [firstGroupKickoff, firstKOKickoff, finalFinished] =
+      await Promise.all([
+        db.match.findFirst({ where: { round: "Group" }, orderBy: { kickoff: "asc" }, select: { kickoff: true } }),
+        db.match.findFirst({ where: { round: { in: ["R32", "R16", "QF", "SF", "3rd", "Final"] }, kickoff: { lte: new Date() } }, orderBy: { kickoff: "asc" }, select: { kickoff: true } }),
+        db.match.count({ where: { round: "Final", status: "finished" } }),
+      ]);
+
+    const now = new Date();
+    const groupStarted = firstGroupKickoff && now >= firstGroupKickoff.kickoff;
+    // Use the live API response as the authoritative source: all GROUP_STAGE
+    // matches must be FINISHED, and there must be at least 72 of them.
+    const apiGroupMatches = apiMatches.filter((m) => m.stage === "GROUP_STAGE");
+    const allGroupDone = apiGroupMatches.length >= 72 && apiGroupMatches.every((m) => m.status === "FINISHED");
+    const koStarted = !!firstKOKickoff;
+    const tournamentOver = finalFinished > 0;
+
+    const rooms = await db.room.findMany({
+      where: { simulationMode: false },
+      select: { id: true, status: true },
+    });
+
+    for (const room of rooms) {
+      let newStatus: string | null = null;
+
+      if ((room.status === "betting" || room.status === "closed") && groupStarted) {
+        newStatus = "group_active";
+      } else if (room.status === "group_active" && allGroupDone) {
+        newStatus = "ko_betting";
+      } else if (room.status === "ko_betting" && koStarted) {
+        newStatus = "ko_active";
+      } else if (room.status === "ko_active" && tournamentOver) {
+        // Final whistle → settlement. Admin manually confirms "finished"
+        // once every Uber Pot bet has been settled.
+        newStatus = "settling";
+      }
+
+      if (newStatus) {
+        await db.room.update({ where: { id: room.id }, data: { status: newStatus } });
+      }
+    }
+  }
+
   const actionable = apiMatches.filter(
     (m) =>
       m.status === "FINISHED" ||
       ["IN_PLAY", "PAUSED", "HALFTIME"].includes(m.status)
   );
 
+  const [notificationsSent, remindersSent] = await Promise.all([
+    checkAndSendRoundNotifications(),
+    checkAndSendIncompleteReminders(),
+  ]);
+
   if (actionable.length === 0) {
-    return { updated: 0, predictionsScored: 0, notificationsSent: [], remindersSent: [], message: "No live or finished matches yet" };
+    return { updated: 0, predictionsScored: 0, notificationsSent, remindersSent, message: "No live or finished matches yet" };
   }
 
   const dbMatches = await db.match.findMany({
@@ -131,57 +182,6 @@ export async function syncMatches(): Promise<SyncResult> {
       );
     }
   }
-
-  // Auto-transition non-simulation rooms — runs every sync so time-based
-  // triggers (e.g. ko_betting → ko_active when KO kickoffs arrive) fire even
-  // when no match scores changed in this cycle.
-  {
-    const [firstGroupKickoff, firstKOKickoff, finalFinished] =
-      await Promise.all([
-        db.match.findFirst({ where: { round: "Group" }, orderBy: { kickoff: "asc" }, select: { kickoff: true } }),
-        db.match.findFirst({ where: { round: { in: ["R32", "R16", "QF", "SF", "3rd", "Final"] }, kickoff: { lte: new Date() } }, orderBy: { kickoff: "asc" }, select: { kickoff: true } }),
-        db.match.count({ where: { round: "Final", status: "finished" } }),
-      ]);
-
-    const now = new Date();
-    const groupStarted = firstGroupKickoff && now >= firstGroupKickoff.kickoff;
-    // Use the live API response as the authoritative source: all GROUP_STAGE
-    // matches must be FINISHED, and there must be at least 72 of them.
-    const apiGroupMatches = apiMatches.filter((m) => m.stage === "GROUP_STAGE");
-    const allGroupDone = apiGroupMatches.length >= 72 && apiGroupMatches.every((m) => m.status === "FINISHED");
-    const koStarted = !!firstKOKickoff;
-    const tournamentOver = finalFinished > 0;
-
-    const rooms = await db.room.findMany({
-      where: { simulationMode: false },
-      select: { id: true, status: true },
-    });
-
-    for (const room of rooms) {
-      let newStatus: string | null = null;
-
-      if ((room.status === "betting" || room.status === "closed") && groupStarted) {
-        newStatus = "group_active";
-      } else if (room.status === "group_active" && allGroupDone) {
-        newStatus = "ko_betting";
-      } else if (room.status === "ko_betting" && koStarted) {
-        newStatus = "ko_active";
-      } else if (room.status === "ko_active" && tournamentOver) {
-        // Final whistle → settlement. Admin manually confirms "finished"
-        // once every Uber Pot bet has been settled.
-        newStatus = "settling";
-      }
-
-      if (newStatus) {
-        await db.room.update({ where: { id: room.id }, data: { status: newStatus } });
-      }
-    }
-  }
-
-  const [notificationsSent, remindersSent] = await Promise.all([
-    checkAndSendRoundNotifications(),
-    checkAndSendIncompleteReminders(),
-  ]);
 
   return {
     updated,
