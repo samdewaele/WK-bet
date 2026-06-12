@@ -517,12 +517,21 @@ export default function GroupAdminPanel({
                       <p className="text-xs text-gray-500 italic">Transitions automatically based on match schedule.</p>
                     )}
                     {currentStatus === "ko_betting" && (
-                      <div className="w-full">
-                        <button onClick={() => handleStatusTransition("ko_active")} disabled={saving}
-                          className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-600 disabled:opacity-40 text-white transition-colors">
-                          Start KO stage →
-                        </button>
-                        <p className="text-xs text-gray-500 mt-1.5">Normally transitions automatically when the first KO match kicks off. Use this if it gets stuck.</p>
+                      <div className="w-full space-y-2">
+                        <div>
+                          <button onClick={() => handleStatusTransition("ko_active")} disabled={saving}
+                            className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-600 disabled:opacity-40 text-white transition-colors">
+                            Start KO stage →
+                          </button>
+                          <p className="text-xs text-gray-500 mt-1">Normally transitions automatically when the first KO match kicks off. Use this if it gets stuck.</p>
+                        </div>
+                        <div>
+                          <button onClick={() => handleStatusTransition("group_active")} disabled={saving}
+                            className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-gray-700 hover:bg-gray-600 disabled:opacity-40 text-gray-300 transition-colors">
+                            ← Back to group stage
+                          </button>
+                          <p className="text-xs text-gray-500 mt-1">Use if KO betting opened too early — reverts to group stage until all group matches are done.</p>
+                        </div>
                       </div>
                     )}
                     {currentStatus === "ko_active" && (

@@ -138,9 +138,10 @@ export async function syncMatches(): Promise<SyncResult> {
   // triggers (e.g. ko_betting → ko_active when KO kickoffs arrive) fire even
   // when no match scores changed in this cycle.
   {
-    const [finishedGroupCount, firstGroupKickoff, firstKOKickoff, finalFinished] =
+    const [finishedGroupCount, totalGroupCount, firstGroupKickoff, firstKOKickoff, finalFinished] =
       await Promise.all([
         db.match.count({ where: { round: "Group", status: "finished" } }),
+        db.match.count({ where: { round: "Group" } }),
         db.match.findFirst({ where: { round: "Group" }, orderBy: { kickoff: "asc" }, select: { kickoff: true } }),
         db.match.findFirst({ where: { round: { in: ["R32", "R16", "QF", "SF", "3rd", "Final"] }, kickoff: { lte: new Date() } }, orderBy: { kickoff: "asc" }, select: { kickoff: true } }),
         db.match.count({ where: { round: "Final", status: "finished" } }),
@@ -148,7 +149,12 @@ export async function syncMatches(): Promise<SyncResult> {
 
     const now = new Date();
     const groupStarted = firstGroupKickoff && now >= firstGroupKickoff.kickoff;
-    const allGroupDone = finishedGroupCount === 72;
+    // Require all group matches in the DB to be finished, and require the DB
+    // to actually contain the expected 72 matches. Using >= instead of === on
+    // the finished count handles the (impossible-in-theory) case where somehow
+    // extra matches leaked in; comparing against totalGroupCount instead of a
+    // hardcode means a partially-reseeded DB (e.g. 73 rows) won't fire early.
+    const allGroupDone = totalGroupCount >= 72 && finishedGroupCount >= totalGroupCount;
     const koStarted = !!firstKOKickoff;
     const tournamentOver = finalFinished > 0;
 
