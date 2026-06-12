@@ -124,8 +124,6 @@ interface SetupOptions {
   firstGroupKickoff?: { kickoff: Date } | null;
   /** What db.match.findFirst returns for the KO rounds query. Default: null */
   firstKOKickoff?: { kickoff: Date } | null;
-  /** What db.match.count returns for { round: "Final", status: "finished" }. Default: 0 */
-  finalFinishedCount?: number;
   /** What db.match.count returns for the R32 populated query. Default: 0 */
   r32PopulatedCount?: number;
   /** What db.room.findMany returns. Default: [] */
@@ -145,7 +143,6 @@ function setupMocks(opts: SetupOptions = {}) {
     dbMatches = [],
     firstGroupKickoff = null,
     firstKOKickoff = null,
-    finalFinishedCount = 0,
     r32PopulatedCount = 0,
     rooms = [],
     notificationsSent = [],
@@ -166,11 +163,9 @@ function setupMocks(opts: SetupOptions = {}) {
     return Promise.resolve(null);
   });
 
-  // count: distinguish by the where clause
+  // count: only the R32 populated check remains (tournamentOver now uses API data)
   mockDb.match.count.mockImplementation((args: any) => {
     const where = args?.where ?? {};
-    if (where.round === "Final") return Promise.resolve(finalFinishedCount);
-    // R32 populated check: { round: "R32", homeTeamId: { not: null }, awayTeamId: { not: null } }
     if (where.round === "R32") return Promise.resolve(r32PopulatedCount);
     return Promise.resolve(0);
   });
@@ -678,11 +673,15 @@ describe("7. Auto-transition: ko_betting → ko_active", () => {
   });
 
   it("transitions ko_betting → ko_active even when actionable is empty (the production bug: gap between group stage and KO kickoff)", async () => {
-    // Simulate the real-world state: all group matches are done (no live/finished
-    // KO matches yet), but the first R32 kickoff has passed.
-    // Previously this was broken because the early return fired before auto-transitions.
+    // Simulate the real-world state: all group matches are done, the API returns
+    // only SCHEDULED/TIMED matches (no live or finished), but the first R32 kickoff
+    // has already passed. Previously this was broken because the actionable early
+    // return fired before auto-transitions. The API has data (hasReliableApiData=true)
+    // but nothing is actionable.
     const pastKOKickoff = new Date(Date.now() - 30 * 60 * 1000); // 30min ago
-    mockFetch.mockResolvedValue([]); // no actionable matches at all
+    mockFetch.mockResolvedValue([
+      apiGroupMatch({ status: "SCHEDULED" }), // API returns data but nothing actionable
+    ] as any);
     setupMocks({
       firstKOKickoff: { kickoff: pastKOKickoff },
       rooms: [{ id: "r1", status: "ko_betting" }],
@@ -710,14 +709,13 @@ describe("7. Auto-transition: ko_betting → ko_active", () => {
   });
 });
 
-describe("8. Auto-transition: ko_active → settling", () => {
-  beforeEach(() => {
-    mockFetch.mockResolvedValue([apiGroupMatch({ status: "FINISHED" })] as any);
-  });
-
-  it("transitions ko_active → settling when Final finished count > 0", async () => {
+describe("8. Auto-transition: ko_active → settling (API-based)", () => {
+  it("transitions ko_active → settling when API reports the Final as FINISHED", async () => {
+    // tournamentOver is derived exclusively from the API response — no DB query.
+    mockFetch.mockResolvedValue([
+      apiGroupMatch({ stage: "FINAL", status: "FINISHED" }),
+    ] as any);
     setupMocks({
-      finalFinishedCount: 1,
       rooms: [{ id: "r1", status: "ko_active" }],
     });
 
@@ -726,15 +724,56 @@ describe("8. Auto-transition: ko_active → settling", () => {
     expect(mockDb.room.update).toHaveBeenCalledWith({ where: { id: "r1" }, data: { status: "settling" } });
   });
 
-  it("does NOT transition when Final finished count is 0", async () => {
+  it("does NOT transition when API has no FINAL stage matches at all", async () => {
+    const pastKOKickoff = new Date(Date.now() - 30 * 60 * 1000);
+    mockFetch.mockResolvedValue([apiGroupMatch({ status: "FINISHED" })] as any);
     setupMocks({
-      finalFinishedCount: 0,
+      firstKOKickoff: { kickoff: pastKOKickoff },
+      rooms: [{ id: "r1", status: "ko_active" }],
+    });
+
+    await syncMatches();
+
+    // koStarted=true, tournamentOver=false → correctStatus=ko_active → no update (already correct)
+    expect(mockDb.room.update).not.toHaveBeenCalled();
+  });
+
+  it("does NOT transition when FINAL match is in API but not yet FINISHED (e.g. IN_PLAY)", async () => {
+    const pastKOKickoff = new Date(Date.now() - 30 * 60 * 1000);
+    mockFetch.mockResolvedValue([
+      apiGroupMatch({ stage: "FINAL", status: "IN_PLAY" }),
+    ] as any);
+    setupMocks({
+      firstKOKickoff: { kickoff: pastKOKickoff },
       rooms: [{ id: "r1", status: "ko_active" }],
     });
 
     await syncMatches();
 
     expect(mockDb.room.update).not.toHaveBeenCalled();
+  });
+
+  it("uses API data only — old DB-based Final count cannot trigger settling", async () => {
+    // This test documents the production bug that was fixed: the DB had simulation
+    // data with Final status=finished, causing every sync to push rooms to settling.
+    // The fix reads only the API response; no db.match.count for Final is performed.
+    const pastKOKickoff = new Date(Date.now() - 30 * 60 * 1000);
+    mockFetch.mockResolvedValue([apiGroupMatch({ status: "FINISHED" })] as any); // GROUP_STAGE, not FINAL
+    setupMocks({
+      firstKOKickoff: { kickoff: pastKOKickoff },
+      rooms: [{ id: "r1", status: "ko_active" }],
+    });
+
+    await syncMatches();
+
+    // Even if the DB count mock returned 1 for Final, it is never consulted.
+    // API has no FINAL match → tournamentOver=false → room stays ko_active.
+    expect(mockDb.room.update).not.toHaveBeenCalled();
+    // Confirm that db.match.count was NOT called with round: "Final"
+    const countCallsWithFinal = mockDb.match.count.mock.calls.filter(
+      (c: any) => c[0]?.where?.round === "Final"
+    );
+    expect(countCallsWithFinal).toHaveLength(0);
   });
 });
 
@@ -925,18 +964,48 @@ describe("11. Multiple rooms, derived status applied uniformly", () => {
     expect(mockDb.room.update).not.toHaveBeenCalled();
   });
 
-  it("never auto-manages settling or finished rooms", async () => {
-    const matches72 = makeGroupMatches(72, 72);
-    mockFetch.mockResolvedValue(matches72 as any);
+  it("auto-corrects a settling room back to ko_active when KO is running but Final not done (production bug fix)", async () => {
+    // Production scenario: room was wrongly promoted to 'settling' because old
+    // simulation data had a Final match marked finished in the real DB table.
+    // After the fix, tournamentOver uses API only — no FINAL in API → self-correct.
+    const pastKOKickoff = new Date(Date.now() - 30 * 60 * 1000);
+    mockFetch.mockResolvedValue([apiGroupMatch({ status: "FINISHED" })] as any); // GROUP_STAGE only
     setupMocks({
-      rooms: [
-        { id: "r1", status: "settling" },
-        { id: "r2", status: "finished" },
-      ],
+      firstKOKickoff: { kickoff: pastKOKickoff },
+      rooms: [{ id: "r1", status: "settling" }],
     });
 
     await syncMatches();
 
+    // koStarted=true, tournamentOver=false → correctStatus=ko_active → settling self-corrects
+    expect(mockDb.room.update).toHaveBeenCalledWith({ where: { id: "r1" }, data: { status: "ko_active" } });
+  });
+
+  it("never auto-manages 'finished' rooms regardless of tournament state", async () => {
+    const matches72 = makeGroupMatches(72, 72);
+    mockFetch.mockResolvedValue(matches72 as any);
+    setupMocks({
+      rooms: [{ id: "r1", status: "finished" }],
+    });
+
+    await syncMatches();
+
+    // 'finished' is not in AUTO_MANAGED — admin confirmation is required
+    expect(mockDb.room.update).not.toHaveBeenCalled();
+  });
+
+  it("does NOT update rooms when API returns empty response (hasReliableApiData guard)", async () => {
+    // A temporary API outage should never roll back a legitimately advanced room.
+    const pastKickoff = new Date(Date.now() - 60 * 60 * 1000);
+    mockFetch.mockResolvedValue([]); // API outage
+    setupMocks({
+      firstGroupKickoff: { kickoff: pastKickoff }, // group started → would normally yield group_active
+      rooms: [{ id: "r1", status: "ko_betting" }], // room is ahead of group_active
+    });
+
+    await syncMatches();
+
+    // hasReliableApiData=false → skip all room status updates
     expect(mockDb.room.update).not.toHaveBeenCalled();
   });
 });

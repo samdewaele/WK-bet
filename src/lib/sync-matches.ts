@@ -21,28 +21,36 @@ export async function syncMatches(): Promise<SyncResult> {
   // like ko_betting → ko_active must fire even when no API matches are
   // live/finished (the gap between group stage completion and KO kickoff).
   {
-    const [firstGroupKickoff, firstKOKickoff, finalFinished] =
+    const [firstGroupKickoff, firstKOKickoff] =
       await Promise.all([
         db.match.findFirst({ where: { round: "Group" }, orderBy: { kickoff: "asc" }, select: { kickoff: true } }),
         db.match.findFirst({ where: { round: { in: ["R32", "R16", "QF", "SF", "3rd", "Final"] }, kickoff: { lte: new Date() } }, orderBy: { kickoff: "asc" }, select: { kickoff: true } }),
-        db.match.count({ where: { round: "Final", status: "finished" } }),
       ]);
 
     const now = new Date();
     const groupStarted = firstGroupKickoff && now >= firstGroupKickoff.kickoff;
-    // Use the live API response as the authoritative source: all GROUP_STAGE
-    // matches must be FINISHED, and there must be at least 72 of them.
+    // Use the live API response as the authoritative source for all stage
+    // transitions — the DB Match table can contain stale simulation scores
+    // that would otherwise produce false positives.
     const apiGroupMatches = apiMatches.filter((m) => m.stage === "GROUP_STAGE");
     const allGroupDone = apiGroupMatches.length >= 72 && apiGroupMatches.every((m) => m.status === "FINISHED");
     const koStarted = !!firstKOKickoff;
-    const tournamentOver = finalFinished > 0;
+    // Tournament over only when the API confirms the Final is FINISHED.
+    // Reading from db.match would trigger on old simulation data still in the
+    // Match table from runs before the SimResult migration.
+    const apiFinalMatches = apiMatches.filter((m) => m.stage === "FINAL");
+    const tournamentOver = apiFinalMatches.length > 0 && apiFinalMatches.every((m) => m.status === "FINISHED");
 
     // Derive the single correct status from real tournament state.
     // This overwrites whatever the room currently holds, so a room that
-    // jumped to ko_betting while the group stage is still ongoing will be
-    // pulled back to group_active on the next sync.
-    // settling and finished are manual admin states — never auto-overridden.
-    const AUTO_MANAGED = ["betting", "closed", "group_active", "ko_betting", "ko_active"];
+    // jumped to ko_betting (or even settling) by mistake will self-correct.
+    // "settling" is included so a room wrongly promoted can revert when the
+    // API doesn't confirm the tournament is over. "finished" is excluded —
+    // that is a manual admin confirmation and must never be auto-overridden.
+    // We skip all updates when the API returned no data (network failure) so
+    // a temporary outage can't roll back a legitimately settled room.
+    const hasReliableApiData = apiMatches.length > 0;
+    const AUTO_MANAGED = ["betting", "closed", "group_active", "ko_betting", "ko_active", "settling"];
     let correctStatus: string | null = null;
     if (tournamentOver) {
       correctStatus = "settling";
@@ -60,7 +68,12 @@ export async function syncMatches(): Promise<SyncResult> {
     });
 
     for (const room of rooms) {
-      if (correctStatus && AUTO_MANAGED.includes(room.status) && room.status !== correctStatus) {
+      if (
+        hasReliableApiData &&
+        correctStatus &&
+        AUTO_MANAGED.includes(room.status) &&
+        room.status !== correctStatus
+      ) {
         await db.room.update({ where: { id: room.id }, data: { status: correctStatus } });
       }
     }

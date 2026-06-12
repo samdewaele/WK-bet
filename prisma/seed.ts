@@ -50,6 +50,24 @@ async function main() {
   const { count: simCleared } = await db.simResult.deleteMany({});
   if (simCleared > 0) console.log(`✓ Cleared ${simCleared} leftover simulation result(s)`);
 
+  // Reset KO matches that carry stale simulation scores — runs on every deploy.
+  // Future-kickoff KO matches should never have scores; any that do are leftovers
+  // from simulation runs before the SimResult migration and must be wiped so the
+  // sync logic doesn't read them as real tournament results.
+  const { count: koReset } = await db.match.updateMany({
+    where: {
+      round: { in: ["R32", "R16", "QF", "SF", "3rd", "Final"] },
+      kickoff: { gt: new Date() },
+      OR: [
+        { homeScore: { not: null } },
+        { awayScore: { not: null } },
+        { status: { not: "scheduled" } },
+      ],
+    },
+    data: { homeScore: null, awayScore: null, status: "scheduled" },
+  });
+  if (koReset > 0) console.log(`✓ Reset ${koReset} KO match(es) with stale simulation scores`);
+
   const existingMatchCount = await db.match.count();
 
   // Remove stale teams (only safe when no matches reference them yet)
