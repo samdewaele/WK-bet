@@ -82,8 +82,14 @@ async function main() {
   const { matches, nextMatchNumber } = generateGroupMatches();
   let matchNumber = nextMatchNumber;
 
-  // Create group stage matches
-  const baseDate = new Date("2026-06-11T18:00:00Z");
+  // Create group stage matches.
+  // E2E seeds a fresh DB on every run — kickoffs must stay in the future or
+  // every time-based lock (tournament started, per-group locks, KO prediction
+  // window) trips and the suite 403s everywhere.
+  const isE2E = process.env.E2E_TEST === "true";
+  const baseDate = isE2E
+    ? new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
+    : new Date("2026-06-11T18:00:00Z");
   for (let i = 0; i < matches.length; i++) {
     const m = matches[i];
     const kickoff = new Date(baseDate.getTime() + i * 3 * 60 * 60 * 1000); // 3h apart
@@ -111,7 +117,10 @@ async function main() {
     { round: "Final", count: 1 },
   ];
 
-  const knockoutBase = new Date("2026-07-01T18:00:00Z");
+  // Group stage spans ~9 days (72 matches × 3h); KO must start after it ends
+  const knockoutBase = isE2E
+    ? new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
+    : new Date("2026-07-01T18:00:00Z");
   let dayOffset = 0;
 
   for (const { round, count } of knockoutRounds) {

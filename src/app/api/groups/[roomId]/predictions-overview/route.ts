@@ -28,7 +28,7 @@ export async function GET(
   const access = await requireRoomAccess(roomId);
   if (access instanceof NextResponse) return access;
 
-  const room = await db.room.findUnique({ where: { id: roomId }, select: { status: true } });
+  const room = await db.room.findUnique({ where: { id: roomId }, select: { status: true, simulationMode: true } });
   if (!room) return NextResponse.json({ error: "Room not found" }, { status: 404 });
 
   const revealAll = STANDINGS_VISIBLE.includes(room.status);
@@ -105,6 +105,40 @@ export async function GET(
   const teamMap = new Map(teams.map((t) => [t.id, t]));
   const resolve = (id: string) => teamMap.get(id) ?? { id, name: "?", flag: "" };
 
+  // Simulation rooms keep fake KO results and bracket teams in SimResult —
+  // overlay them so the shared KO picks view shows the simulated tournament.
+  const simOverlay = new Map<
+    string,
+    { homeTeamId: string | null; awayTeamId: string | null; homeScore: number | null; awayScore: number | null }
+  >();
+  if (room.simulationMode && revealKO && koPredictions.length > 0) {
+    const matchIds = [...new Set(koPredictions.map((p) => p.matchId))];
+    const sims = await db.simResult.findMany({ where: { matchId: { in: matchIds } } });
+    for (const s of sims) simOverlay.set(s.matchId, s);
+  }
+  const overlayMatch = (matchId: string, match: (typeof koPredictions)[number]["match"]) => {
+    const sim = simOverlay.get(matchId);
+    if (!sim) {
+      return {
+        kickoff: match.kickoff.toISOString(),
+        status: match.status,
+        homeTeam: match.homeTeam,
+        awayTeam: match.awayTeam,
+        homeScore: match.homeScore,
+        awayScore: match.awayScore,
+      };
+    }
+    const simFinished = sim.homeScore !== null && sim.awayScore !== null;
+    return {
+      kickoff: match.kickoff.toISOString(),
+      status: simFinished ? "finished" : match.status,
+      homeTeam: sim.homeTeamId ? resolve(sim.homeTeamId) : match.homeTeam,
+      awayTeam: sim.awayTeamId ? resolve(sim.awayTeamId) : match.awayTeam,
+      homeScore: sim.homeScore ?? match.homeScore,
+      awayScore: sim.awayScore ?? match.awayScore,
+    };
+  };
+
   const standingsByUser = new Map<string, typeof groupStandings>();
   for (const g of groupStandings) {
     const list = standingsByUser.get(g.userId) ?? [];
@@ -139,14 +173,7 @@ export async function GET(
             homeScore: p.homeScore,
             awayScore: p.awayScore,
             earnedAmount: p.earnedAmount,
-            match: {
-              kickoff: p.match.kickoff.toISOString(),
-              status: p.match.status,
-              homeTeam: p.match.homeTeam,
-              awayTeam: p.match.awayTeam,
-              homeScore: p.match.homeScore,
-              awayScore: p.match.awayScore,
-            },
+            match: overlayMatch(p.matchId, p.match),
           }))
         : null,
     })),

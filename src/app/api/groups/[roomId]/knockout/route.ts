@@ -15,7 +15,7 @@ export async function GET(
   const KO_ROUNDS = ["R32", "R16", "QF", "SF", "3rd", "Final"];
   const KO_VISIBLE_STATUSES = ["ko_betting", "ko_active", "settling", "finished"];
 
-  const room = await db.room.findUnique({ where: { id: roomId }, select: { status: true } });
+  const room = await db.room.findUnique({ where: { id: roomId }, select: { status: true, simulationMode: true } });
 
   if (!room || !KO_VISIBLE_STATUSES.includes(room.status)) {
     return NextResponse.json([]);
@@ -36,11 +36,42 @@ export async function GET(
     }),
   ]);
 
+  // Simulation rooms keep fake results and bracket teams in SimResult —
+  // overlay them so the bracket displays the simulated tournament.
+  type TeamInfo = { id: string; name: string; flag: string } | null;
+  const simOverlay = new Map<
+    string,
+    { homeTeam: TeamInfo; awayTeam: TeamInfo; homeScore: number | null; awayScore: number | null }
+  >();
+  if (room.simulationMode) {
+    const sims = await db.simResult.findMany({
+      where: { matchId: { in: koMatches.map((m) => m.id) } },
+    });
+    const teamIds = [
+      ...new Set(sims.flatMap((s) => [s.homeTeamId, s.awayTeamId]).filter((id): id is string => !!id)),
+    ];
+    const teams = await db.team.findMany({
+      where: { id: { in: teamIds } },
+      select: { id: true, name: true, flag: true },
+    });
+    const teamMap = new Map(teams.map((t) => [t.id, t]));
+    for (const s of sims) {
+      simOverlay.set(s.matchId, {
+        homeTeam: s.homeTeamId ? (teamMap.get(s.homeTeamId) ?? null) : null,
+        awayTeam: s.awayTeamId ? (teamMap.get(s.awayTeamId) ?? null) : null,
+        homeScore: s.homeScore,
+        awayScore: s.awayScore,
+      });
+    }
+  }
+
   const predMap = new Map(existingPredictions.map((p) => [p.matchId, p]));
 
   return NextResponse.json(
     koMatches.map((m) => {
       const pred = predMap.get(m.id);
+      const sim = simOverlay.get(m.id);
+      const simFinished = sim != null && sim.homeScore !== null && sim.awayScore !== null;
       return {
         id: m.id,
         matchId: m.id,
@@ -55,11 +86,11 @@ export async function GET(
           group: m.group,
           matchNumber: m.matchNumber,
           kickoff: m.kickoff.toISOString(),
-          homeScore: m.homeScore,
-          awayScore: m.awayScore,
-          status: m.status,
-          homeTeam: m.homeTeam,
-          awayTeam: m.awayTeam,
+          homeScore: sim?.homeScore ?? m.homeScore,
+          awayScore: sim?.awayScore ?? m.awayScore,
+          status: simFinished ? "finished" : m.status,
+          homeTeam: sim?.homeTeam ?? m.homeTeam,
+          awayTeam: sim?.awayTeam ?? m.awayTeam,
         },
       };
     })
