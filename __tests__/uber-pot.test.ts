@@ -3,8 +3,9 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 vi.mock("@/lib/db", () => ({
   db: {
     room: { findUnique: vi.fn() },
-    groupStandingPrediction: { aggregate: vi.fn() },
-    kOPrediction: { aggregate: vi.fn() },
+    groupStandingPrediction: { groupBy: vi.fn() },
+    kOPrediction: { groupBy: vi.fn() },
+    match: { findMany: vi.fn() },
   },
 }));
 
@@ -13,9 +14,7 @@ import { computeUberPotResults } from "@/lib/uber-pot";
 
 const mockDb = db as any;
 
-// calculatePot: groupStagePot = 70% of (fee*members), uberPot baseline is the
-// remainder after group + KO prizes are distributed. With fee=10, members=4 →
-// totalPot = 40. We drive distributed amounts via the aggregates below.
+// fee=10, members=4 → totalPot=40, groupStagePot=20, koPot=20, prizePerWCGroup≈1.667
 function room(opts: {
   fee?: number;
   members?: { userId: string; excludedFromPot?: boolean }[];
@@ -32,8 +31,10 @@ function room(opts: {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mockDb.groupStandingPrediction.aggregate.mockResolvedValue({ _sum: { earnedAmount: 0 } });
-  mockDb.kOPrediction.aggregate.mockResolvedValue({ _sum: { earnedAmount: 0 } });
+  // Default: nothing scored yet → empty groupBy results
+  mockDb.groupStandingPrediction.groupBy.mockResolvedValue([]);
+  mockDb.kOPrediction.groupBy.mockResolvedValue([]);
+  mockDb.match.findMany.mockResolvedValue([]);
 });
 
 describe("computeUberPotResults", () => {
@@ -41,6 +42,7 @@ describe("computeUberPotResults", () => {
     mockDb.room.findUnique.mockResolvedValue(null);
     const r = await computeUberPotResults("r1");
     expect(r.uberPot).toBe(0);
+    expect(r.accumulatedUberPot).toBe(0);
     expect(r.settledCount).toBe(0);
     expect(r.byBet.size).toBe(0);
     expect(r.byUser.size).toBe(0);
@@ -56,7 +58,7 @@ describe("computeUberPotResults", () => {
         ],
       }),
     );
-    // Nothing distributed in group/KO → whole pot (40) is the uber pot.
+    // Nothing distributed → whole pot (40) is the uber pot.
     const r = await computeUberPotResults("r1");
     expect(r.uberPot).toBe(40);
     expect(r.settledCount).toBe(2);
@@ -83,8 +85,14 @@ describe("computeUberPotResults", () => {
   });
 
   it("shrinks the uber pot by group + KO distributed amounts", async () => {
-    mockDb.groupStandingPrediction.aggregate.mockResolvedValue({ _sum: { earnedAmount: 10 } });
-    mockDb.kOPrediction.aggregate.mockResolvedValue({ _sum: { earnedAmount: 6 } });
+    // Simulate: Group A distributed 10 across members, KO match m1 (R32) distributed 6.
+    mockDb.groupStandingPrediction.groupBy.mockResolvedValue([
+      { wcGroup: "A", _sum: { earnedAmount: 10 } },
+    ]);
+    mockDb.kOPrediction.groupBy.mockResolvedValue([
+      { matchId: "m1", _sum: { earnedAmount: 6 } },
+    ]);
+    mockDb.match.findMany.mockResolvedValue([{ id: "m1", round: "R32" }]);
     mockDb.room.findUnique.mockResolvedValue(
       room({
         fee: 10,
@@ -110,5 +118,22 @@ describe("computeUberPotResults", () => {
     );
     const r = await computeUberPotResults("r1");
     expect(r.byUser.get("u1")).toBe(40); // both bets won by u1, 20 each
+  });
+
+  it("accumulated uber pot grows from 0 as groups finish with unclaimed prizes", async () => {
+    // prizePerWCGroup = totalPot*0.5/12 = 40*0.5/12 = 5/3 ≈ 1.667
+    // Group A scored: 1 member earned 0.8 (partial prize) → unclaimed = 1.667 - 0.8
+    // Group B scored: nobody won → unclaimed = full 1.667
+    mockDb.groupStandingPrediction.groupBy.mockResolvedValue([
+      { wcGroup: "A", _sum: { earnedAmount: 0.8 } },
+      { wcGroup: "B", _sum: { earnedAmount: 0 } },
+    ]);
+    mockDb.room.findUnique.mockResolvedValue(room({}));
+    const r = await computeUberPotResults("r1");
+    const prizePerWCGroup = (40 * 0.5) / 12;
+    const expected = Math.max(0, prizePerWCGroup - 0.8) + Math.max(0, prizePerWCGroup - 0);
+    expect(r.accumulatedUberPot).toBeCloseTo(expected, 5);
+    // accumulatedUberPot is less than uberPot (unscored groups still counted in uberPot)
+    expect(r.accumulatedUberPot).toBeLessThan(r.uberPot);
   });
 });

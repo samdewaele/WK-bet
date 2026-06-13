@@ -31,7 +31,7 @@ beforeEach(() => {
   mockDb.roomMember.findUnique.mockResolvedValue({ id: "rm1" });
   mockDb.room.findUnique.mockResolvedValue({ creatorId: "u1" });
   mockUber.mockResolvedValue({
-    uberPot: 40, prizePerSettledBet: 40, settledCount: 1,
+    uberPot: 40, accumulatedUberPot: 40, prizePerSettledBet: 40, settledCount: 1,
     byBet: new Map([["b1", { winnerEntryId: "e1", winnerUserId: "u1", prize: 40 }]]),
     byUser: new Map([["u1", 40]]),
   });
@@ -46,7 +46,7 @@ it("returns the prize amount on a settled bet", async () => {
     },
   ]);
   const body = await (await call()).json();
-  expect(body[0].prize).toBe(40);
+  expect(body.bets[0].prize).toBe(40);
 });
 
 it("leaves prize null while the bet is still open", async () => {
@@ -58,5 +58,5 @@ it("leaves prize null while the bet is still open", async () => {
     },
   ]);
   const body = await (await call()).json();
-  expect(body[0].prize).toBeNull();
+  expect(body.bets[0].prize).toBeNull();
 });

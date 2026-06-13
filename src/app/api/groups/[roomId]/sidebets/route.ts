@@ -38,8 +38,7 @@ export async function GET(_req: Request, { params }: Params) {
     orderBy: { createdAt: "asc" },
   });
 
-  return NextResponse.json(
-    sideBets.map((sb) => {
+  const bets = sideBets.map((sb) => {
       const myEntry = sb.entries.find((e) => e.userId === userId);
       // Reveal answers only after tournament starts or when settled
       const revealAll = locked || sb.status === "settled";
@@ -66,8 +65,9 @@ export async function GET(_req: Request, { params }: Params) {
           answer: e.answer,
         })),
       };
-    })
-  );
+  });
+
+  return NextResponse.json({ bets, uberPot: uber.accumulatedUberPot });
 }
 
 export async function POST(req: NextRequest, { params }: Params) {

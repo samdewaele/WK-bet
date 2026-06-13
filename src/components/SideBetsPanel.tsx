@@ -33,7 +33,6 @@ type Props = {
   uberBetsLocked?: boolean;
   /** True once the room status has moved past betting (closed / group_active …) — all betting is locked. */
   bettingClosed?: boolean;
-  totalPot: number;
 };
 
 const STATUS_BADGE: Record<string, string> = {
@@ -49,10 +48,11 @@ const STATUS_LABEL: Record<string, string> = {
   settled: "Settled",
 };
 
-export default function SideBetsPanel({ roomId, currentUserId, isManager, tournamentStarted, uberBetsLocked = false, bettingClosed = false, totalPot }: Props) {
+export default function SideBetsPanel({ roomId, currentUserId, isManager, tournamentStarted, uberBetsLocked = false, bettingClosed = false }: Props) {
   // Betting is "over" (no edits, no proposals) once the tournament starts OR the admin closes the room.
   const bettingOver = tournamentStarted || bettingClosed;
   const [bets, setBets] = useState<UberBet[]>([]);
+  const [uberPot, setUberPot] = useState<number>(0);
   const [loading, setLoading] = useState(true);
   const [answerDrafts, setAnswerDrafts] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState<Record<string, boolean>>({});
@@ -72,10 +72,11 @@ export default function SideBetsPanel({ roomId, currentUserId, isManager, tourna
   async function fetchBets() {
     const res = await fetch(`/api/groups/${roomId}/sidebets`);
     if (res.ok) {
-      const data: UberBet[] = await res.json();
-      setBets(data);
+      const data: { bets: UberBet[]; uberPot: number } = await res.json();
+      setBets(data.bets);
+      setUberPot(data.uberPot);
       const drafts: Record<string, string> = {};
-      for (const bet of data) {
+      for (const bet of data.bets) {
         const mine = bet.entries.find((e) => e.userId === currentUserId);
         if (mine) drafts[bet.id] = mine.answer;
       }
@@ -163,7 +164,6 @@ export default function SideBetsPanel({ roomId, currentUserId, isManager, tourna
   }
 
   const activeBetCount = bets.filter((b) => b.status === "open" || b.status === "settled").length;
-  const estimatedPayoutPerBet = activeBetCount > 0 ? totalPot / activeBetCount : 0;
 
   if (loading) return <div className="animate-pulse bg-gray-900 border border-gray-800 rounded-xl h-48" />;
 
@@ -175,12 +175,12 @@ export default function SideBetsPanel({ roomId, currentUserId, isManager, tourna
           <span className="text-gray-500">Active bets</span>
           <span className="ml-2 font-bold text-white">{activeBetCount}</span>
         </div>
-        <div>
-          <span className="text-gray-500">Est. prize per winning bet</span>
-          <span className="ml-2 font-bold text-amber-400">
-            {activeBetCount > 0 ? `≈ €${estimatedPayoutPerBet.toFixed(2)}` : "—"}
-          </span>
-        </div>
+        {tournamentStarted && uberPot > 0 && (
+          <div>
+            <span className="text-gray-500">Uber Pot</span>
+            <span className="ml-2 font-bold text-amber-400">€{uberPot.toFixed(2)}</span>
+          </div>
+        )}
         {bettingClosed && !tournamentStarted && (
           <span className="text-xs text-amber-400 bg-amber-400/10 border border-amber-400/20 rounded-lg px-3 py-1.5">
             🔒 Betting is closed by the admin — answers are locked
@@ -369,11 +369,8 @@ export default function SideBetsPanel({ roomId, currentUserId, isManager, tourna
             {/* Entries list — after lock or settled */}
             {(tournamentStarted || isSettled) && bet.entries.length > 0 && (
               <div>
-                <div className="text-xs text-gray-500 mb-2 flex items-center justify-between">
+                <div className="text-xs text-gray-500 mb-2">
                   <span>{bet.entries.length} {bet.entries.length === 1 ? "entry" : "entries"}</span>
-                  {isOpen && activeBetCount > 0 && (
-                    <span className="text-amber-400 font-medium">≈ €{estimatedPayoutPerBet.toFixed(2)} if you win</span>
-                  )}
                 </div>
                 {isManager && isOpen && (
                   <p className="text-xs text-blue-400/70 mb-2">

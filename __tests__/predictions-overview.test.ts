@@ -46,7 +46,7 @@ beforeEach(() => {
     { id: "t4", name: "Qatar", flag: "🇶🇦" },
   ]);
   mockUber.mockResolvedValue({
-    uberPot: 0, prizePerSettledBet: 0, settledCount: 0, byBet: new Map(), byUser: new Map(),
+    uberPot: 0, accumulatedUberPot: 0, prizePerSettledBet: 0, settledCount: 0, byBet: new Map(), byUser: new Map(),
   });
 });
 
@@ -112,7 +112,7 @@ it("includes Uber Pot bets with winner + prize once settled", async () => {
     },
   ]);
   mockUber.mockResolvedValue({
-    uberPot: 40, prizePerSettledBet: 40, settledCount: 1,
+    uberPot: 40, accumulatedUberPot: 40, prizePerSettledBet: 40, settledCount: 1,
     byBet: new Map([["b1", { winnerEntryId: "e1", winnerUserId: "u1", prize: 40 }]]),
     byUser: new Map([["u1", 40]]),
   });

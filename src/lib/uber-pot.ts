@@ -1,5 +1,5 @@
 import { db } from "@/lib/db";
-import { calculatePot, prizePerSideBet } from "@/lib/pot";
+import { calculatePot, prizePerSideBet, KO_MATCH_WEIGHT, type KORound } from "@/lib/pot";
 
 /**
  * Per-bet settlement result: which entry won and how much that entry earned.
@@ -13,6 +13,12 @@ export type BetResult = {
 export type UberPotResults = {
   /** Remaining pot that flows into the Uber Pot side bets. */
   uberPot: number;
+  /**
+   * Unclaimed prizes from COMPLETED groups and KO matches only.
+   * Starts at 0 and grows as results come in where nobody predicted correctly.
+   * This is the amount currently "in" the Uber Pot from real results.
+   */
+  accumulatedUberPot: number;
   /** Equal share each settled side bet pays its winner. */
   prizePerSettledBet: number;
   /** Number of settled side bets. */
@@ -37,6 +43,7 @@ export type UberPotResults = {
 export async function computeUberPotResults(roomId: string): Promise<UberPotResults> {
   const empty: UberPotResults = {
     uberPot: 0,
+    accumulatedUberPot: 0,
     prizePerSettledBet: 0,
     settledCount: 0,
     byBet: new Map(),
@@ -57,20 +64,46 @@ export async function computeUberPotResults(roomId: string): Promise<UberPotResu
 
   // Only non-excluded members' earnings reduce the remaining uber pot.
   const excludedIds = room.members.filter((m) => m.excludedFromPot).map((m) => m.userId);
-  const [groupAgg, koAgg] = await Promise.all([
-    db.groupStandingPrediction.aggregate({
-      where: { roomId, ...(excludedIds.length > 0 ? { userId: { notIn: excludedIds } } : {}) },
+  const excludeFilter = excludedIds.length > 0 ? { userId: { notIn: excludedIds } } : {};
+
+  // groupBy so we can compute both total-distributed and per-group unclaimed in one pass.
+  const [groupByWcGroup, koByMatch] = await Promise.all([
+    db.groupStandingPrediction.groupBy({
+      by: ["wcGroup"],
+      where: { roomId, earnedAmount: { not: null }, ...excludeFilter },
       _sum: { earnedAmount: true },
     }),
-    db.kOPrediction.aggregate({
-      where: { roomId, ...(excludedIds.length > 0 ? { userId: { notIn: excludedIds } } : {}) },
+    db.kOPrediction.groupBy({
+      by: ["matchId"],
+      where: { roomId, earnedAmount: { not: null }, ...excludeFilter },
       _sum: { earnedAmount: true },
     }),
   ]);
-  const uberPot = Math.max(
+
+  const totalGroupDistributed = groupByWcGroup.reduce((s, g) => s + (g._sum.earnedAmount ?? 0), 0);
+  const totalKODistributed = koByMatch.reduce((s, m) => s + (m._sum.earnedAmount ?? 0), 0);
+  const uberPot = Math.max(0, pot.totalPot - totalGroupDistributed - totalKODistributed);
+
+  // Accumulated uber pot: starts at 0, grows as groups/KO matches finish with unclaimed prize money.
+  const groupUnclaimed = groupByWcGroup.reduce(
+    (s, g) => s + Math.max(0, pot.prizePerWCGroup - (g._sum.earnedAmount ?? 0)),
     0,
-    pot.totalPot - (groupAgg._sum.earnedAmount ?? 0) - (koAgg._sum.earnedAmount ?? 0),
   );
+
+  let koUnclaimed = 0;
+  if (koByMatch.length > 0) {
+    const matchRoundRows = await db.match.findMany({
+      where: { id: { in: koByMatch.map((m) => m.matchId) } },
+      select: { id: true, round: true },
+    });
+    const roundByMatch = new Map(matchRoundRows.map((r) => [r.id, r.round as KORound]));
+    koUnclaimed = koByMatch.reduce((s, m) => {
+      const round = roundByMatch.get(m.matchId);
+      if (!round || !KO_MATCH_WEIGHT[round]) return s;
+      return s + Math.max(0, pot.koUnit * KO_MATCH_WEIGHT[round] - (m._sum.earnedAmount ?? 0));
+    }, 0);
+  }
+  const accumulatedUberPot = groupUnclaimed + koUnclaimed;
 
   const settled = room.sideBets.filter((sb) => sb.status === "settled");
   const prizeEach = prizePerSideBet(uberPot, settled.length);
@@ -88,5 +121,5 @@ export async function computeUberPotResults(roomId: string): Promise<UberPotResu
     }
   }
 
-  return { uberPot, prizePerSettledBet: prizeEach, settledCount: settled.length, byBet, byUser };
+  return { uberPot, accumulatedUberPot, prizePerSettledBet: prizeEach, settledCount: settled.length, byBet, byUser };
 }

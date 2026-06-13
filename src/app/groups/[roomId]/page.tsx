@@ -255,7 +255,6 @@ export default async function GroupDetailPage({ params, searchParams }: Props) {
                 tournamentStarted={tournamentStarted}
                 uberBetsLocked={uberBetsLocked}
                 bettingClosed={!["setup", "betting"].includes(roomStatus)}
-                totalPot={pot.totalPot}
               />
             </div>
           </div>
