@@ -1,0 +1,2 @@
+ALTER TABLE "Team" ADD COLUMN "fdId" INTEGER;
+CREATE UNIQUE INDEX "Team_fdId_key" ON "Team"("fdId");

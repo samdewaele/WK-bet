@@ -2,6 +2,8 @@
 // Docs: https://docs.football-data.org/general/v4/index.html
 // Free tier: 10 req/min. Set FOOTBALL_DATA_API_KEY as a Fly secret.
 
+export type FDTeam = { id: number; name: string; shortName: string; tla: string };
+
 export type FDMatch = {
   id: number;
   utcDate: string; // ISO-8601
@@ -16,8 +18,8 @@ export type FDMatch = {
     | "CANCELLED"
     | "SUSPENDED";
   stage: string; // e.g. "GROUP_STAGE", "LAST_16", "QUARTER_FINALS", "SEMI_FINALS", "THIRD_PLACE", "FINAL"
-  homeTeam: { id: number; name: string; shortName: string; tla: string };
-  awayTeam: { id: number; name: string; shortName: string; tla: string };
+  homeTeam: FDTeam;
+  awayTeam: FDTeam;
   score: {
     winner: "HOME_TEAM" | "AWAY_TEAM" | "DRAW" | null;
     fullTime: { home: number | null; away: number | null };

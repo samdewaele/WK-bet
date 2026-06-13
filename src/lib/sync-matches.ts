@@ -6,6 +6,50 @@ import { computeGroupStandings, populateR32Bracket, populateNextRoundSlot } from
 import { scoreAndAdvanceCompletedGroups, scoreKOMatchForAllRooms } from "@/lib/scoring";
 import type { KORound } from "@/lib/pot";
 
+import type { FDTeam } from "@/lib/football-data";
+
+type DbMatchCandidate = {
+  homeTeam: { fdId: number | null; name: string } | null;
+  awayTeam: { fdId: number | null; name: string } | null;
+  kickoff: Date;
+};
+
+/** Check whether a DB team name resolves to an API team.
+ *  Checks all name fields the API exposes so localisation variants
+ *  (e.g. "South Korea" ↔ shortName "South Korea", name "Korea Republic") work. */
+function teamMatches(dbName: string, api: FDTeam): boolean {
+  const db = dbName.toLowerCase();
+  return (
+    db === api.name.toLowerCase() ||
+    db === api.shortName.toLowerCase() ||
+    db === api.tla.toLowerCase() ||
+    db.includes(api.shortName.toLowerCase()) ||
+    api.name.toLowerCase().includes(db) ||
+    api.shortName.toLowerCase().includes(db)
+  );
+}
+
+/**
+ * Match a DB row to an API match.
+ * Primary:  football-data.org numeric team IDs (populated by seed on first deploy).
+ * Fallback: multi-field name matching covering localisation variants.
+ * TBD KO placeholders (no teams yet): kickoff proximity within 24 hours.
+ */
+function findDbMatch(
+  m: DbMatchCandidate,
+  apiHome: FDTeam,
+  apiAway: FDTeam,
+  apiKickoffMs: number
+): boolean {
+  if (m.homeTeam && m.awayTeam) {
+    if (m.homeTeam.fdId && m.awayTeam.fdId) {
+      return m.homeTeam.fdId === apiHome.id && m.awayTeam.fdId === apiAway.id;
+    }
+    return teamMatches(m.homeTeam.name, apiHome) && teamMatches(m.awayTeam.name, apiAway);
+  }
+  return Math.abs(m.kickoff.getTime() - apiKickoffMs) < 24 * 60 * 60 * 1000;
+}
+
 export type SyncResult = {
   updated: number;
   predictionsScored: number;
@@ -105,21 +149,7 @@ export async function syncMatches(): Promise<SyncResult> {
     });
 
     for (const stale of staleMatches) {
-      const apiCounterpart = apiMatches.find((api) => {
-        if (stale.homeTeam && stale.awayTeam) {
-          // Seed kickoffs are approximate — match by team names, which are reliable
-          const homeMatch =
-            stale.homeTeam.name.toLowerCase() === api.homeTeam.name.toLowerCase() ||
-            stale.homeTeam.name.toLowerCase().includes(api.homeTeam.shortName.toLowerCase());
-          const awayMatch =
-            stale.awayTeam.name.toLowerCase() === api.awayTeam.name.toLowerCase() ||
-            stale.awayTeam.name.toLowerCase().includes(api.awayTeam.shortName.toLowerCase());
-          return homeMatch && awayMatch;
-        }
-        // TBD KO placeholder: no teams yet, fall back to kickoff proximity
-        const diff = Math.abs(new Date(api.utcDate).getTime() - new Date(stale.kickoff).getTime());
-        return diff < 24 * 60 * 60 * 1000;
-      });
+      const apiCounterpart = apiMatches.find((api) => findDbMatch(stale, api.homeTeam, api.awayTeam, new Date(api.utcDate).getTime()));
 
       if (apiCounterpart && ["SCHEDULED", "TIMED"].includes(apiCounterpart.status)) {
         await db.match.update({
@@ -153,21 +183,7 @@ export async function syncMatches(): Promise<SyncResult> {
     const apiHome = api.score.fullTime.home;
     const apiAway = api.score.fullTime.away;
 
-    const dbMatch = dbMatches.find((m) => {
-      if (m.homeTeam && m.awayTeam) {
-        // Seed kickoffs are approximate — match by team names, which are reliable
-        const homeMatch =
-          m.homeTeam.name.toLowerCase() === api.homeTeam.name.toLowerCase() ||
-          m.homeTeam.name.toLowerCase().includes(api.homeTeam.shortName.toLowerCase());
-        const awayMatch =
-          m.awayTeam.name.toLowerCase() === api.awayTeam.name.toLowerCase() ||
-          m.awayTeam.name.toLowerCase().includes(api.awayTeam.shortName.toLowerCase());
-        return homeMatch && awayMatch;
-      }
-      // TBD KO placeholder: no teams yet, fall back to kickoff proximity
-      const kickoffDiff = Math.abs(new Date(m.kickoff).getTime() - apiKickoff);
-      return kickoffDiff < 24 * 60 * 60 * 1000;
-    });
+    const dbMatch = dbMatches.find((m) => findDbMatch(m, api.homeTeam, api.awayTeam, apiKickoff));
 
     if (!dbMatch) continue;
 

@@ -99,6 +99,7 @@ model RoomMember {
 
 model Team {
   id          String  @id @default(cuid())
+  fdId        Int?    @unique // football-data.org numeric team ID for reliable API matching
   name        String  @unique
   flag        String
   group       String

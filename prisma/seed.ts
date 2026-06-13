@@ -81,32 +81,58 @@ async function main() {
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
         const data = await resp.json();
 
-        type ApiM = { stage: string; utcDate: string; homeTeam: { name: string; shortName: string }; awayTeam: { name: string; shortName: string } };
-        const apiGroup: ApiM[] = ((data.matches ?? []) as ApiM[]).filter((m) => m.stage === "GROUP_STAGE");
+        type ApiTeam = { id: number; name: string; shortName: string; tla: string };
+        type ApiM = { stage: string; utcDate: string; homeTeam: ApiTeam; awayTeam: ApiTeam };
+
+        const allApiMatches: ApiM[] = (data.matches ?? []) as ApiM[];
+        const apiGroup = allApiMatches.filter((m) => m.stage === "GROUP_STAGE");
 
         const dbGroup = await db.match.findMany({
           where: { round: "Group" },
           include: { homeTeam: true, awayTeam: true },
         });
 
-        let fixed = 0;
+        // Use every name field the API provides so localisation variants work
+        // (e.g. "South Korea" ↔ shortName "South Korea", name "Korea Republic")
+        function apiTeamMatches(dbName: string, api: ApiTeam): boolean {
+          const db = dbName.toLowerCase();
+          return (
+            db === api.name.toLowerCase() ||
+            db === api.shortName.toLowerCase() ||
+            db === api.tla.toLowerCase() ||
+            db.includes(api.shortName.toLowerCase()) ||
+            api.name.toLowerCase().includes(db) ||
+            api.shortName.toLowerCase().includes(db)
+          );
+        }
+
+        let kickoffsFixed = 0, teamsTagged = 0;
         for (const dbm of dbGroup) {
           if (!dbm.homeTeam || !dbm.awayTeam) continue;
-          const h = dbm.homeTeam.name.toLowerCase();
-          const aw = dbm.awayTeam.name.toLowerCase();
-          const apiM = apiGroup.find((a) => {
-            const homeOk = h === a.homeTeam.name.toLowerCase() || h.includes(a.homeTeam.shortName.toLowerCase()) || a.homeTeam.name.toLowerCase().includes(h);
-            const awayOk = aw === a.awayTeam.name.toLowerCase() || aw.includes(a.awayTeam.shortName.toLowerCase()) || a.awayTeam.name.toLowerCase().includes(aw);
-            return homeOk && awayOk;
-          });
+          const apiM = apiGroup.find((a) =>
+            apiTeamMatches(dbm.homeTeam!.name, a.homeTeam) &&
+            apiTeamMatches(dbm.awayTeam!.name, a.awayTeam)
+          );
           if (!apiM) continue;
+
+          // Fix kickoff time
           const real = new Date(apiM.utcDate);
           if (dbm.kickoff.getTime() !== real.getTime()) {
             await db.match.update({ where: { id: dbm.id }, data: { kickoff: real } });
-            fixed++;
+            kickoffsFixed++;
+          }
+
+          // Store football-data.org numeric team IDs for reliable future matching
+          if (!dbm.homeTeam.fdId) {
+            await db.team.update({ where: { id: dbm.homeTeam.id }, data: { fdId: apiM.homeTeam.id } });
+            teamsTagged++;
+          }
+          if (!dbm.awayTeam.fdId) {
+            await db.team.update({ where: { id: dbm.awayTeam.id }, data: { fdId: apiM.awayTeam.id } });
+            teamsTagged++;
           }
         }
-        if (fixed > 0) console.log(`✓ Fixed kickoff times for ${fixed} group stage match(es)`);
+        console.log(`✓ API sync: ${kickoffsFixed} kickoffs fixed, ${teamsTagged} team IDs stored`);
       } catch (e) {
         console.warn(`⚠  Kickoff correction failed (non-fatal): ${e instanceof Error ? e.message : e}`);
       }
