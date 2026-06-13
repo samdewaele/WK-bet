@@ -175,7 +175,7 @@ export default function SideBetsPanel({ roomId, currentUserId, isManager, tourna
           <span className="text-gray-500">Active bets</span>
           <span className="ml-2 font-bold text-white">{activeBetCount}</span>
         </div>
-        {tournamentStarted && uberPot > 0 && (
+        {tournamentStarted && (
           <div>
             <span className="text-gray-500">Uber Pot</span>
             <span className="ml-2 font-bold text-amber-400">€{uberPot.toFixed(2)}</span>
