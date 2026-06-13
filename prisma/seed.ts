@@ -68,6 +68,59 @@ async function main() {
   });
   if (koReset > 0) console.log(`✓ Reset ${koReset} KO match(es) with stale simulation scores`);
 
+  const isE2E = process.env.E2E_TEST === "true";
+
+  // Correct group stage kickoff times from the real API — runs on every deploy.
+  // seed.ts creates matches with approximate 3h-apart kickoffs on first install;
+  // this pass overwrites them with actual fixture times so per-group prediction
+  // locks and the UI schedule are correct. Skipped in E2E (needs future kickoffs).
+  if (!isE2E) {
+    const apiKey = process.env.FOOTBALL_DATA_API_KEY;
+    if (!apiKey) {
+      console.warn("⚠  FOOTBALL_DATA_API_KEY not set — skipping kickoff correction");
+    } else {
+      try {
+        const resp = await fetch("https://api.football-data.org/v4/competitions/WC/matches", {
+          headers: { "X-Auth-Token": apiKey },
+        });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const data = await resp.json();
+        type ApiM = { stage: string; utcDate: string; homeTeam: { name: string; shortName: string }; awayTeam: { name: string; shortName: string } };
+        const apiGroupMatches: ApiM[] = ((data.matches ?? []) as ApiM[]).filter((m) => m.stage === "GROUP_STAGE");
+
+        if (apiGroupMatches.length > 0) {
+          const dbGroupMatches = await db.match.findMany({
+            where: { round: "Group" },
+            include: { homeTeam: true, awayTeam: true },
+          });
+
+          let corrected = 0;
+          for (const dbm of dbGroupMatches) {
+            if (!dbm.homeTeam || !dbm.awayTeam) continue;
+            const homeName = dbm.homeTeam.name;
+            const awayName = dbm.awayTeam.name;
+            const apiM = apiGroupMatches.find((a) => {
+              const h = homeName.toLowerCase();
+              const aw = awayName.toLowerCase();
+              const homeMatch = h === a.homeTeam.name.toLowerCase() || h.includes(a.homeTeam.shortName.toLowerCase()) || a.homeTeam.name.toLowerCase().includes(h);
+              const awayMatch = aw === a.awayTeam.name.toLowerCase() || aw.includes(a.awayTeam.shortName.toLowerCase()) || a.awayTeam.name.toLowerCase().includes(aw);
+              return homeMatch && awayMatch;
+            });
+            if (!apiM) continue;
+            const realKickoff = new Date(apiM.utcDate);
+            if (dbm.kickoff.getTime() !== realKickoff.getTime()) {
+              await db.match.update({ where: { id: dbm.id }, data: { kickoff: realKickoff } });
+              corrected++;
+            }
+          }
+          console.log(`✓ Kickoff correction: updated ${corrected} of ${dbGroupMatches.length} group stage matches`);
+        }
+      } catch (e) {
+        console.warn(`⚠  Kickoff correction failed (non-fatal): ${e instanceof Error ? e.message : e}`);
+      }
+    }
+  }
+
   const existingMatchCount = await db.match.count();
 
   // Remove stale teams (only safe when no matches reference them yet)
@@ -99,8 +152,6 @@ async function main() {
 
   const { matches, nextMatchNumber } = generateGroupMatches();
   let matchNumber = nextMatchNumber;
-
-  const isE2E = process.env.E2E_TEST === "true";
 
   // Fetch real fixture times from football-data.org (skipped for E2E and when no key)
   type ApiMatch = {
