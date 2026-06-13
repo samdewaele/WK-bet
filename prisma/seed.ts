@@ -100,17 +100,70 @@ async function main() {
   const { matches, nextMatchNumber } = generateGroupMatches();
   let matchNumber = nextMatchNumber;
 
+  const isE2E = process.env.E2E_TEST === "true";
+
+  // Fetch real fixture times from football-data.org (skipped for E2E and when no key)
+  type ApiMatch = {
+    utcDate: string;
+    stage: string;
+    homeTeam: { name: string; shortName: string };
+    awayTeam: { name: string; shortName: string };
+  };
+  let apiMatches: ApiMatch[] = [];
+  if (!isE2E) {
+    const apiKey = process.env.FOOTBALL_DATA_API_KEY;
+    if (!apiKey) {
+      console.warn("⚠  FOOTBALL_DATA_API_KEY not set — using approximate kickoff times");
+    } else {
+      try {
+        const resp = await fetch("https://api.football-data.org/v4/competitions/WC/matches", {
+          headers: { "X-Auth-Token": apiKey },
+        });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const data = await resp.json();
+        apiMatches = (data.matches ?? []) as ApiMatch[];
+        console.log(`✓ Fetched ${apiMatches.length} match schedules from football-data.org`);
+      } catch (e) {
+        console.warn(`⚠  Could not fetch real fixture times (using approximate): ${e instanceof Error ? e.message : e}`);
+      }
+    }
+  }
+
+  /** Find the real kickoff for a (home, away) team name pair using the same fuzzy
+   *  name matching that sync-matches.ts uses, so seed and sync stay consistent. */
+  function findApiKickoff(homeName: string, awayName: string, stage: string): Date | null {
+    const m = apiMatches.find((a) => {
+      if (a.stage !== stage) return false;
+      const homeMatch =
+        homeName.toLowerCase() === a.homeTeam.name.toLowerCase() ||
+        homeName.toLowerCase().includes(a.homeTeam.shortName.toLowerCase()) ||
+        a.homeTeam.name.toLowerCase().includes(homeName.toLowerCase());
+      const awayMatch =
+        awayName.toLowerCase() === a.awayTeam.name.toLowerCase() ||
+        awayName.toLowerCase().includes(a.awayTeam.shortName.toLowerCase()) ||
+        a.awayTeam.name.toLowerCase().includes(awayName.toLowerCase());
+      return homeMatch && awayMatch;
+    });
+    return m ? new Date(m.utcDate) : null;
+  }
+
   // Create group stage matches.
   // E2E seeds a fresh DB on every run — kickoffs must stay in the future or
   // every time-based lock (tournament started, per-group locks, KO prediction
   // window) trips and the suite 403s everywhere.
-  const isE2E = process.env.E2E_TEST === "true";
-  const baseDate = isE2E
-    ? new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
-    : new Date("2026-06-11T18:00:00Z");
+  const e2eGroupBase = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+  const fallbackGroupBase = new Date("2026-06-11T18:00:00Z");
+  let realKickoffCount = 0;
   for (let i = 0; i < matches.length; i++) {
     const m = matches[i];
-    const kickoff = new Date(baseDate.getTime() + i * 3 * 60 * 60 * 1000); // 3h apart
+    let kickoff: Date;
+    if (isE2E) {
+      kickoff = new Date(e2eGroupBase.getTime() + i * 3 * 60 * 60 * 1000);
+    } else {
+      const real = findApiKickoff(m.homeTeamName, m.awayTeamName, "GROUP_STAGE");
+      if (real) { kickoff = real; realKickoffCount++; }
+      else kickoff = new Date(fallbackGroupBase.getTime() + i * 3 * 60 * 60 * 1000);
+    }
     await db.match.create({
       data: {
         homeTeamId: teamMap.get(m.homeTeamName)!,
@@ -123,9 +176,25 @@ async function main() {
       },
     });
   }
-  console.log(`✓ ${matches.length} group stage matches seeded`);
+  if (!isE2E) console.log(`✓ ${matches.length} group stage matches seeded (${realKickoffCount} with real kickoff times)`);
+  else console.log(`✓ ${matches.length} group stage matches seeded (E2E future kickoffs)`);
 
   // Placeholder knockout matches (TBD teams)
+  // Bucket API matches by stage for real kickoff times where available
+  const STAGE_TO_ROUND: Record<string, string> = {
+    LAST_32: "R32", LAST_16: "R16",
+    QUARTER_FINALS: "QF", SEMI_FINALS: "SF",
+    THIRD_PLACE: "3rd", FINAL: "Final",
+  };
+  const koApiByRound = new Map<string, Date[]>();
+  for (const [stage, round] of Object.entries(STAGE_TO_ROUND)) {
+    const times = apiMatches
+      .filter((a) => a.stage === stage)
+      .map((a) => new Date(a.utcDate))
+      .sort((a, b) => a.getTime() - b.getTime());
+    if (times.length) koApiByRound.set(round, times);
+  }
+
   const knockoutRounds: { round: string; count: number }[] = [
     { round: "R32", count: 16 },
     { round: "R16", count: 8 },
@@ -135,27 +204,28 @@ async function main() {
     { round: "Final", count: 1 },
   ];
 
-  // Group stage spans ~9 days (72 matches × 3h); KO must start after it ends
-  const knockoutBase = isE2E
-    ? new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
-    : new Date("2026-07-01T18:00:00Z");
+  const e2eKoBase = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+  const fallbackKoBase = new Date("2026-07-01T18:00:00Z");
   let dayOffset = 0;
+  const koCounters = new Map<string, number>();
 
   for (const { round, count } of knockoutRounds) {
+    const realTimes = koApiByRound.get(round);
     for (let i = 0; i < count; i++) {
-      const kickoff = new Date(
-        knockoutBase.getTime() + (dayOffset + i) * 24 * 60 * 60 * 1000
-      );
+      let kickoff: Date;
+      if (isE2E) {
+        kickoff = new Date(e2eKoBase.getTime() + (dayOffset + i) * 24 * 60 * 60 * 1000);
+      } else if (realTimes && i < realTimes.length) {
+        kickoff = realTimes[i];
+      } else {
+        kickoff = new Date(fallbackKoBase.getTime() + (dayOffset + i) * 24 * 60 * 60 * 1000);
+      }
       await db.match.create({
-        data: {
-          round,
-          matchNumber,
-          kickoff,
-          status: "scheduled",
-        },
+        data: { round, matchNumber, kickoff, status: "scheduled" },
       });
       matchNumber++;
     }
+    koCounters.set(round, realTimes?.length ?? 0);
     dayOffset += count + 1;
   }
   console.log(`✓ Knockout placeholder matches seeded`);
