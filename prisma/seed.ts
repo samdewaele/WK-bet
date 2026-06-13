@@ -46,37 +46,33 @@ function generateGroupMatches() {
 async function main() {
   console.log("Seeding database...");
 
-  // Clean any simulation data left over from previous runs — runs on every deploy.
-  const { count: simCleared } = await db.simResult.deleteMany({});
-  if (simCleared > 0) console.log(`✓ Cleared ${simCleared} leftover simulation result(s)`);
+  // ── Per-deploy cleanup (runs every time) ─────────────────────────────────────
 
-  // Reset ALL match scores/status — runs on every deploy.
-  // The Match table is a pure mirror of the football API; any scores or statuses
-  // that didn't come from the API (e.g. old simulation runs) are wiped here.
-  // The sync job restores genuine results within one cycle after deploy.
-  const { count: matchReset } = await db.match.updateMany({
+  // 1. Wipe leftover simulation results.
+  const { count: simCleared } = await db.simResult.deleteMany({});
+  if (simCleared > 0) console.log(`✓ Cleared ${simCleared} simulation result(s)`);
+
+  // 2. Reset KO match scores — simulation runs write fake scores to KO slots;
+  //    the sync job restores any genuine results within one cycle after deploy.
+  const { count: koReset } = await db.match.updateMany({
     where: {
-      OR: [
-        { homeScore: { not: null } },
-        { awayScore: { not: null } },
-        { status: { not: "scheduled" } },
-      ],
+      round: { in: ["R32", "R16", "QF", "SF", "3rd", "Final"] },
+      OR: [{ homeScore: { not: null } }, { awayScore: { not: null } }, { status: { not: "scheduled" } }],
     },
     data: { homeScore: null, awayScore: null, status: "scheduled" },
   });
-  if (matchReset > 0) console.log(`✓ Reset ${matchReset} match(es) to scheduled — sync will restore API results`);
+  if (koReset > 0) console.log(`✓ Reset ${koReset} KO match(es) with stale simulation scores`);
 
   const isE2E = process.env.E2E_TEST === "true";
 
-  // Sync kickoff times + scores from the real API — runs on every deploy.
-  // Fixes the approximate 3h-apart kickoffs that seed creates on first install,
-  // and immediately restores scores for already-finished matches so there is no
-  // visible gap between deploy and the next cron sync.
-  // Skipped in E2E mode (needs future kickoffs) and when no API key is present.
+  // 3. Fix group stage kickoff times from the real API.
+  //    seed.ts initially creates matches with approximate 3h-apart kickoffs.
+  //    This corrects them so per-group prediction locks fire at the right time.
+  //    Scores are NOT touched here — the sync job owns match scores entirely.
   if (!isE2E) {
     const apiKey = process.env.FOOTBALL_DATA_API_KEY;
     if (!apiKey) {
-      console.warn("⚠  FOOTBALL_DATA_API_KEY not set — skipping kickoff/score sync");
+      console.warn("⚠  FOOTBALL_DATA_API_KEY not set — skipping kickoff correction");
     } else {
       try {
         const resp = await fetch("https://api.football-data.org/v4/competitions/WC/matches", {
@@ -85,56 +81,34 @@ async function main() {
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
         const data = await resp.json();
 
-        type ApiM = {
-          stage: string; utcDate: string; status: string;
-          homeTeam: { name: string; shortName: string };
-          awayTeam: { name: string; shortName: string };
-          score: { fullTime: { home: number | null; away: number | null } };
-        };
-        const allApiMatches: ApiM[] = (data.matches ?? []) as ApiM[];
-        const apiGroupMatches = allApiMatches.filter((m) => m.stage === "GROUP_STAGE");
+        type ApiM = { stage: string; utcDate: string; homeTeam: { name: string; shortName: string }; awayTeam: { name: string; shortName: string } };
+        const apiGroup: ApiM[] = ((data.matches ?? []) as ApiM[]).filter((m) => m.stage === "GROUP_STAGE");
 
-        const dbGroupMatches = await db.match.findMany({
+        const dbGroup = await db.match.findMany({
           where: { round: "Group" },
           include: { homeTeam: true, awayTeam: true },
         });
 
-        const mapStatus = (s: string) => {
-          if (["IN_PLAY", "PAUSED", "HALFTIME"].includes(s)) return "live";
-          if (s === "FINISHED") return "finished";
-          return "scheduled";
-        };
-
-        let kickoffsFixed = 0, scoresRestored = 0;
-        for (const dbm of dbGroupMatches) {
+        let fixed = 0;
+        for (const dbm of dbGroup) {
           if (!dbm.homeTeam || !dbm.awayTeam) continue;
           const h = dbm.homeTeam.name.toLowerCase();
           const aw = dbm.awayTeam.name.toLowerCase();
-          const apiM = apiGroupMatches.find((a) => {
-            const homeMatch = h === a.homeTeam.name.toLowerCase() || h.includes(a.homeTeam.shortName.toLowerCase()) || a.homeTeam.name.toLowerCase().includes(h);
-            const awayMatch = aw === a.awayTeam.name.toLowerCase() || aw.includes(a.awayTeam.shortName.toLowerCase()) || a.awayTeam.name.toLowerCase().includes(aw);
-            return homeMatch && awayMatch;
+          const apiM = apiGroup.find((a) => {
+            const homeOk = h === a.homeTeam.name.toLowerCase() || h.includes(a.homeTeam.shortName.toLowerCase()) || a.homeTeam.name.toLowerCase().includes(h);
+            const awayOk = aw === a.awayTeam.name.toLowerCase() || aw.includes(a.awayTeam.shortName.toLowerCase()) || a.awayTeam.name.toLowerCase().includes(aw);
+            return homeOk && awayOk;
           });
           if (!apiM) continue;
-
-          const realKickoff = new Date(apiM.utcDate);
-          const realStatus = mapStatus(apiM.status);
-          const realHome = apiM.score.fullTime.home;
-          const realAway = apiM.score.fullTime.away;
-
-          const update: Record<string, unknown> = {};
-          if (dbm.kickoff.getTime() !== realKickoff.getTime()) { update.kickoff = realKickoff; kickoffsFixed++; }
-          if (realStatus !== "scheduled") { update.status = realStatus; }
-          if (realHome !== null) { update.homeScore = realHome; scoresRestored++; }
-          if (realAway !== null) { update.awayScore = realAway; }
-
-          if (Object.keys(update).length > 0) {
-            await db.match.update({ where: { id: dbm.id }, data: update });
+          const real = new Date(apiM.utcDate);
+          if (dbm.kickoff.getTime() !== real.getTime()) {
+            await db.match.update({ where: { id: dbm.id }, data: { kickoff: real } });
+            fixed++;
           }
         }
-        console.log(`✓ Group stage sync: ${kickoffsFixed} kickoffs fixed, ${scoresRestored} scores restored from API`);
+        if (fixed > 0) console.log(`✓ Fixed kickoff times for ${fixed} group stage match(es)`);
       } catch (e) {
-        console.warn(`⚠  Group stage sync failed (non-fatal): ${e instanceof Error ? e.message : e}`);
+        console.warn(`⚠  Kickoff correction failed (non-fatal): ${e instanceof Error ? e.message : e}`);
       }
     }
   }
