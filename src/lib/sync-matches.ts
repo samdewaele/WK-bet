@@ -22,7 +22,7 @@ type DbMatchCandidate = {
 function normName(s: string): string {
   return s
     .normalize("NFD")
-    .replace(/[̀-ͯ]/g, "") // strip combining accents
+    .replace(/[̀-ͯ]/g, "") // strip combining diacritical marks
     .toLowerCase()
     .replace(/\s+and\s+/g, " ")
     .replace(/-/g, " ")
@@ -39,28 +39,35 @@ const TEAM_ALIASES = new Map<string, string[]>([
 ]);
 
 /** Check whether a DB team name resolves to an API team.
+ *  Guards against null team names returned by the API for TBD KO placeholders.
  *  Priority: direct name → normalized name → known aliases. */
 function teamMatches(dbName: string, api: FDTeam): boolean {
+  // TBD placeholder — API returns null team names for unresolved KO slots
+  if (!api.name && !api.shortName) return false;
+  const apiName = api.name ?? "";
+  const apiShort = api.shortName ?? "";
+  const apiTla = api.tla ?? "";
+
   const db = dbName.toLowerCase();
   const dbNorm = normName(dbName);
   if (
-    db === api.name.toLowerCase() ||
-    db === api.shortName.toLowerCase() ||
-    db === api.tla.toLowerCase() ||
-    db.includes(api.shortName.toLowerCase()) ||
-    api.name.toLowerCase().includes(db) ||
-    api.shortName.toLowerCase().includes(db) ||
-    dbNorm === normName(api.name) ||
-    dbNorm === normName(api.shortName)
+    db === apiName.toLowerCase() ||
+    db === apiShort.toLowerCase() ||
+    db === apiTla.toLowerCase() ||
+    db.includes(apiShort.toLowerCase()) ||
+    apiName.toLowerCase().includes(db) ||
+    apiShort.toLowerCase().includes(db) ||
+    dbNorm === normName(apiName) ||
+    dbNorm === normName(apiShort)
   ) return true;
   const aliases = TEAM_ALIASES.get(dbName) ?? [];
   return aliases.some((alias) => {
     const an = alias.toLowerCase();
     return (
-      an === api.name.toLowerCase() ||
-      an === api.shortName.toLowerCase() ||
-      normName(alias) === normName(api.name) ||
-      normName(alias) === normName(api.shortName)
+      an === apiName.toLowerCase() ||
+      an === apiShort.toLowerCase() ||
+      normName(alias) === normName(apiName) ||
+      normName(alias) === normName(apiShort)
     );
   });
 }
