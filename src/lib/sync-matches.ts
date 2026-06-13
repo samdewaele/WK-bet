@@ -149,14 +149,29 @@ export async function syncMatches(): Promise<SyncResult> {
     });
 
     for (const stale of staleMatches) {
+      // The DB query above should have excluded clean rows, but guard defensively
+      // so a test mock that bypasses the WHERE clause doesn't trigger spurious resets.
+      if (stale.status === "scheduled" && stale.homeScore === null && stale.awayScore === null) continue;
+
       const apiCounterpart = apiMatches.find((api) => findDbMatch(stale, api.homeTeam, api.awayTeam, new Date(api.utcDate).getTime()));
 
-      if (apiCounterpart && ["SCHEDULED", "TIMED"].includes(apiCounterpart.status)) {
+      const shouldReset =
+        // API says the match hasn't happened yet — clear any stale score
+        (apiCounterpart && ["SCHEDULED", "TIMED"].includes(apiCounterpart.status)) ||
+        // No API counterpart at all — score can't be a real result (old sim data
+        // for a KO slot whose real teams are still TBD, or a match that name-
+        // matching can't find; either way we cannot trust it)
+        !apiCounterpart;
+
+      if (shouldReset) {
         await db.match.update({
           where: { id: stale.id },
           data: { status: "scheduled", homeScore: null, awayScore: null },
         });
-        console.log(`[sync] Reset stale match ${stale.id} (was: ${stale.status}) — API reports SCHEDULED`);
+        console.log(
+          `[sync] Reset stale match ${stale.id} (was: ${stale.status}) — ` +
+          (apiCounterpart ? "API reports SCHEDULED" : "no API counterpart (likely old sim data)")
+        );
       }
     }
   }

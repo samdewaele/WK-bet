@@ -1395,13 +1395,19 @@ describe("15. Match table as pure API mirror", () => {
         score: { winner: "HOME_TEAM", fullTime: { home: 3, away: 0 } },
       }),
     ] as any);
-    mockDb.match.findMany.mockResolvedValue([
-      dbMatch({
-        homeTeam: { id: "ht-1", fdId: 772, name: "South Korea", shortName: "South Korea", tla: "KOR" },
-        awayTeam: { id: "at-1", fdId: 800, name: "Mexico",       shortName: "Mexico",       tla: "MEX" },
-        predictions: [],
-      }),
-    ]);
+    // Use setupMocks so the stale pass correctly sees only stale matches (this
+    // match is clean — scheduled, null scores — so it's filtered out of the
+    // stale pass and the main loop also finds no API counterpart via fdId).
+    setupMocks({
+      rooms: [],
+      dbMatches: [
+        dbMatch({
+          homeTeam: { id: "ht-1", fdId: 772, name: "South Korea", shortName: "South Korea", tla: "KOR" },
+          awayTeam: { id: "at-1", fdId: 800, name: "Mexico",       shortName: "Mexico",       tla: "MEX" },
+          predictions: [],
+        }),
+      ],
+    });
 
     await syncMatches();
 
@@ -1462,7 +1468,7 @@ describe("15. Match table as pure API mirror", () => {
     );
   });
 
-  it("does NOT match when neither fdId nor any name field resolves to the same team", async () => {
+  it("does NOT match when neither fdId nor any name field resolves to the same team (clean match stays untouched)", async () => {
     mockFetch.mockResolvedValue([
       apiGroupMatch({
         status: "FINISHED",
@@ -1471,16 +1477,60 @@ describe("15. Match table as pure API mirror", () => {
         score: { winner: "HOME_TEAM", fullTime: { home: 2, away: 0 } },
       }),
     ] as any);
-    mockDb.match.findMany.mockResolvedValue([
-      dbMatch({
-        homeTeam: { id: "ht-1", fdId: null, name: "South Korea", shortName: "South Korea", tla: "KOR" },
-        awayTeam: { id: "at-1", fdId: null, name: "Mexico",       shortName: "Mexico",       tla: "MEX" },
-        predictions: [],
-      }),
-    ]);
+    // The DB match is already clean (scheduled, null scores) — stale pass filters it
+    // out, and the main loop can't match it since "South Korea" ≠ "Argentina".
+    setupMocks({
+      rooms: [],
+      dbMatches: [
+        dbMatch({
+          homeTeam: { id: "ht-1", fdId: null, name: "South Korea", shortName: "South Korea", tla: "KOR" },
+          awayTeam: { id: "at-1", fdId: null, name: "Mexico",       shortName: "Mexico",       tla: "MEX" },
+          predictions: [],
+        }),
+      ],
+    });
 
     await syncMatches();
 
     expect(mockDb.match.update).not.toHaveBeenCalled();
+  });
+
+  it("clears a stale KO match that has no API counterpart (old sim data with TBD bracket teams)", async () => {
+    // This reproduces the bug: test-tournament (old version) wrote sim scores
+    // directly to a KO Match row with real team pairings. The real KO bracket
+    // is TBD so the API has no matching entry. Without the fix, these rows
+    // lingered in "finished" status and polluted Recent Results forever.
+    mockFetch.mockResolvedValue([
+      apiGroupMatch({
+        status: "SCHEDULED",
+        homeTeam: { id: 200, name: "Brazil", shortName: "Brazil", tla: "BRA" },
+        awayTeam: { id: 201, name: "France", shortName: "France", tla: "FRA" },
+        score: { winner: null, fullTime: { home: null, away: null } },
+      }),
+    ] as any);
+    // A KO match (R32) that old sim code wrote directly onto Match row.
+    // The API has no R32 entry for these teams because the bracket is still TBD.
+    setupMocks({
+      rooms: [],
+      dbMatches: [
+        dbMatch({
+          id: "ko-match-1",
+          round: "R32",
+          status: "finished",
+          homeScore: 3,
+          awayScore: 1,
+          homeTeam: { id: "ht-ko", fdId: null, name: "Argentina", shortName: "Argentina", tla: "ARG" },
+          awayTeam: { id: "at-ko", fdId: null, name: "Netherlands", shortName: "Netherlands", tla: "NED" },
+          predictions: [],
+        }),
+      ],
+    });
+
+    await syncMatches();
+
+    expect(mockDb.match.update).toHaveBeenCalledWith({
+      where: { id: "ko-match-1" },
+      data: { status: "scheduled", homeScore: null, awayScore: null },
+    });
   });
 });
