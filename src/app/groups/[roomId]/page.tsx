@@ -160,22 +160,6 @@ export default async function GroupDetailPage({ params, searchParams }: Props) {
           )}
         </div>
 
-        {/* Pot breakdown */}
-        <div className="bg-gray-900 border border-gray-800 rounded-xl p-5 mb-6 grid grid-cols-3 gap-4 text-center">
-          <div>
-            <div className="text-xs text-gray-500 mb-1">Group Stage (50%)</div>
-            <div className="text-xl font-bold text-amber-400">€{pot.groupStagePot.toFixed(2)}</div>
-          </div>
-          <div>
-            <div className="text-xs text-gray-500 mb-1">Knockout (50%)</div>
-            <div className="text-xl font-bold text-amber-400">€{pot.knockoutPot.toFixed(2)}</div>
-          </div>
-          <div>
-            <div className="text-xs text-gray-500 mb-1">Per WC Group</div>
-            <div className="text-xl font-bold text-white">€{pot.prizePerWCGroup.toFixed(2)}</div>
-          </div>
-        </div>
-
         {/* Recent results — visible once any match has finished */}
         {tournamentStarted && <RecentResults />}
 

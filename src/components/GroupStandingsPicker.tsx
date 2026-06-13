@@ -277,12 +277,7 @@ export default function GroupStandingsPicker({ roomId, roomStatus, groupKickoffT
 
   return (
     <div>
-      {allLocked ? (
-        <div className="mb-4 flex items-center gap-2 text-sm text-orange-400 bg-orange-400/10 border border-orange-400/20 rounded-xl px-4 py-3">
-          <span>🔒</span>
-          <span>Group stage predictions are locked — they were finalised when the tournament kicked off.</span>
-        </div>
-      ) : groupKickoffTimes && Object.keys(groupKickoffTimes).length > 0 && (
+      {!allLocked && groupKickoffTimes && Object.keys(groupKickoffTimes).length > 0 && (
         <div className="mb-4 flex items-center gap-2 text-sm text-blue-300 bg-blue-400/10 border border-blue-400/20 rounded-xl px-4 py-3">
           <span>⏱</span>
           <span>Each group locks individually when its first match kicks off — the timer in each card shows how long you have left.</span>
