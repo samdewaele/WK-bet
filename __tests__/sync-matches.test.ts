@@ -108,10 +108,10 @@ function dbMatch(overrides: Record<string, any> = {}) {
     matchNumber: overrides.matchNumber ?? null,
     homeTeam: overrides.homeTeam !== undefined
       ? overrides.homeTeam
-      : { id: "ht-1", name: "Brazil", shortName: "Brazil", tla: "BRA" },
+      : { id: "ht-1", fdId: null, name: "Brazil", shortName: "Brazil", tla: "BRA" },
     awayTeam: overrides.awayTeam !== undefined
       ? overrides.awayTeam
-      : { id: "at-1", name: "Germany", shortName: "Germany", tla: "GER" },
+      : { id: "at-1", fdId: null, name: "Germany", shortName: "Germany", tla: "GER" },
     predictions: overrides.predictions ?? [],
     ...overrides,
   };
@@ -1319,5 +1319,168 @@ describe("13. Notifications always called (when not early-returning)", () => {
 
     expect(mockNotifications).toHaveBeenCalled();
     expect(mockReminders).toHaveBeenCalled();
+  });
+});
+
+// ─── 15. Match table as pure API mirror ───────────────────────────────────────
+// These tests encode the core invariant: sim data that found its way into the
+// Match table (before the SimResult migration) must be corrected by the sync.
+// They also serve as a regression guard for team name localisation issues
+// (e.g. "South Korea" in our DB vs "Korea Republic" in the API) that caused
+// the sync to silently skip every group stage match for weeks.
+
+describe("15. Match table as pure API mirror", () => {
+  beforeEach(() => setupMocks({ rooms: [] }));
+
+  // ── fdId-based matching ───────────────────────────────────────────────────
+
+  it("overwrites sim scores with real API result when match is FINISHED (fdId match)", async () => {
+    mockFetch.mockResolvedValue([
+      apiGroupMatch({
+        status: "FINISHED",
+        homeTeam: { id: 772, name: "Korea Republic", shortName: "South Korea", tla: "KOR" },
+        awayTeam: { id: 800, name: "Mexico",         shortName: "Mexico",       tla: "MEX" },
+        score: { winner: "HOME_TEAM", fullTime: { home: 2, away: 1 } },
+      }),
+    ] as any);
+    mockDb.match.findMany.mockResolvedValue([
+      dbMatch({
+        status: "finished", homeScore: 3, awayScore: 0, // old sim score
+        homeTeam: { id: "ht-1", fdId: 772, name: "South Korea", shortName: "South Korea", tla: "KOR" },
+        awayTeam: { id: "at-1", fdId: 800, name: "Mexico",       shortName: "Mexico",       tla: "MEX" },
+        predictions: [],
+      }),
+    ]);
+
+    await syncMatches();
+
+    expect(mockDb.match.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ homeScore: 2, awayScore: 1, status: "finished" }) })
+    );
+  });
+
+  it("clears sim scores via stale-reset when API reports match is still SCHEDULED (fdId match)", async () => {
+    mockFetch.mockResolvedValue([
+      apiGroupMatch({
+        status: "SCHEDULED",
+        homeTeam: { id: 772, name: "Korea Republic", shortName: "South Korea", tla: "KOR" },
+        awayTeam: { id: 800, name: "Mexico",         shortName: "Mexico",       tla: "MEX" },
+        score: { winner: null, fullTime: { home: null, away: null } },
+      }),
+    ] as any);
+    setupMocks({
+      rooms: [],
+      dbMatches: [dbMatch({
+        status: "finished", homeScore: 2, awayScore: 0, // leftover sim score for a future game
+        homeTeam: { id: "ht-1", fdId: 772, name: "South Korea", shortName: "South Korea", tla: "KOR" },
+        awayTeam: { id: "at-1", fdId: 800, name: "Mexico",       shortName: "Mexico",       tla: "MEX" },
+        predictions: [],
+      })],
+    });
+
+    await syncMatches();
+
+    expect(mockDb.match.update).toHaveBeenCalledWith({
+      where: { id: "db-match-1" },
+      data: { status: "scheduled", homeScore: null, awayScore: null },
+    });
+  });
+
+  it("does NOT match a different team even if kickoff is identical (fdId guards against wrong match)", async () => {
+    mockFetch.mockResolvedValue([
+      apiGroupMatch({
+        status: "FINISHED",
+        homeTeam: { id: 773, name: "Argentina", shortName: "Argentina", tla: "ARG" }, // different fdId
+        awayTeam: { id: 800, name: "Mexico",    shortName: "Mexico",    tla: "MEX" },
+        score: { winner: "HOME_TEAM", fullTime: { home: 3, away: 0 } },
+      }),
+    ] as any);
+    mockDb.match.findMany.mockResolvedValue([
+      dbMatch({
+        homeTeam: { id: "ht-1", fdId: 772, name: "South Korea", shortName: "South Korea", tla: "KOR" },
+        awayTeam: { id: "at-1", fdId: 800, name: "Mexico",       shortName: "Mexico",       tla: "MEX" },
+        predictions: [],
+      }),
+    ]);
+
+    await syncMatches();
+
+    expect(mockDb.match.update).not.toHaveBeenCalled();
+  });
+
+  // ── Name-fallback matching (before fdIds are populated) ───────────────────
+
+  it("resolves 'South Korea' ↔ API shortName 'South Korea' when fdId not yet stored", async () => {
+    // Our DB name: "South Korea". API official name: "Korea Republic", shortName: "South Korea".
+    // This was the real root cause — fdId = null forces the name fallback path.
+    mockFetch.mockResolvedValue([
+      apiGroupMatch({
+        status: "FINISHED",
+        homeTeam: { id: 772, name: "Korea Republic", shortName: "South Korea", tla: "KOR" },
+        awayTeam: { id: 800, name: "Mexico",         shortName: "Mexico",       tla: "MEX" },
+        score: { winner: "HOME_TEAM", fullTime: { home: 1, away: 0 } },
+      }),
+    ] as any);
+    mockDb.match.findMany.mockResolvedValue([
+      dbMatch({
+        status: "finished", homeScore: 2, awayScore: 0,
+        homeTeam: { id: "ht-1", fdId: null, name: "South Korea", shortName: "South Korea", tla: "KOR" },
+        awayTeam: { id: "at-1", fdId: null, name: "Mexico",       shortName: "Mexico",       tla: "MEX" },
+        predictions: [],
+      }),
+    ]);
+
+    await syncMatches();
+
+    expect(mockDb.match.update).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: "db-match-1" } })
+    );
+  });
+
+  it("resolves 'Iran' ↔ API name 'IR Iran' via shortName when fdId not yet stored", async () => {
+    mockFetch.mockResolvedValue([
+      apiGroupMatch({
+        status: "FINISHED",
+        homeTeam: { id: 781, name: "IR Iran", shortName: "Iran", tla: "IRN" },
+        awayTeam: { id: 800, name: "Mexico",  shortName: "Mexico", tla: "MEX" },
+        score: { winner: "AWAY_TEAM", fullTime: { home: 0, away: 1 } },
+      }),
+    ] as any);
+    mockDb.match.findMany.mockResolvedValue([
+      dbMatch({
+        status: "finished", homeScore: 1, awayScore: 0,
+        homeTeam: { id: "ht-1", fdId: null, name: "Iran",   shortName: "Iran",   tla: "IRN" },
+        awayTeam: { id: "at-1", fdId: null, name: "Mexico", shortName: "Mexico", tla: "MEX" },
+        predictions: [],
+      }),
+    ]);
+
+    await syncMatches();
+
+    expect(mockDb.match.update).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: "db-match-1" } })
+    );
+  });
+
+  it("does NOT match when neither fdId nor any name field resolves to the same team", async () => {
+    mockFetch.mockResolvedValue([
+      apiGroupMatch({
+        status: "FINISHED",
+        homeTeam: { id: 773, name: "Argentina", shortName: "Argentina", tla: "ARG" },
+        awayTeam: { id: 800, name: "Mexico",    shortName: "Mexico",    tla: "MEX" },
+        score: { winner: "HOME_TEAM", fullTime: { home: 2, away: 0 } },
+      }),
+    ] as any);
+    mockDb.match.findMany.mockResolvedValue([
+      dbMatch({
+        homeTeam: { id: "ht-1", fdId: null, name: "South Korea", shortName: "South Korea", tla: "KOR" },
+        awayTeam: { id: "at-1", fdId: null, name: "Mexico",       shortName: "Mexico",       tla: "MEX" },
+        predictions: [],
+      }),
+    ]);
+
+    await syncMatches();
+
+    expect(mockDb.match.update).not.toHaveBeenCalled();
   });
 });
