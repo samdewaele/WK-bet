@@ -95,18 +95,27 @@ async function main() {
           include: { homeTeam: true, awayTeam: true },
         });
 
-        // Normalize compound team names: " and " and "-" are equivalent separators
-        // so "Bosnia and Herzegovina" matches "Bosnia-Herzegovina", etc.
         function normName(s: string): string {
-          return s.toLowerCase().replace(/\s+and\s+/g, " ").replace(/-/g, " ").replace(/\s+/g, " ").trim();
+          return s
+            .normalize("NFD")
+            .replace(/[̀-ͯ]/g, "")
+            .toLowerCase()
+            .replace(/\s+and\s+/g, " ")
+            .replace(/-/g, " ")
+            .replace(/[''`]/g, "")
+            .replace(/\s+/g, " ")
+            .trim();
         }
 
-        // Use every name field the API provides so localisation variants work
-        // (e.g. "South Korea" ↔ shortName "South Korea", name "Korea Republic")
+        const TEAM_ALIASES = new Map<string, string[]>([
+          ["Côte d'Ivoire", ["Ivory Coast", "Cote d Ivoire", "Cote dIvoire"]],
+          ["Congo DR",      ["DR Congo", "DRC", "Congo DRC", "Democratic Republic Congo", "Democratic Republic of Congo"]],
+        ]);
+
         function apiTeamMatches(dbName: string, api: ApiTeam): boolean {
           const db = dbName.toLowerCase();
           const dbNorm = normName(dbName);
-          return (
+          if (
             db === api.name.toLowerCase() ||
             db === api.shortName.toLowerCase() ||
             db === api.tla.toLowerCase() ||
@@ -115,7 +124,17 @@ async function main() {
             api.shortName.toLowerCase().includes(db) ||
             dbNorm === normName(api.name) ||
             dbNorm === normName(api.shortName)
-          );
+          ) return true;
+          const aliases = TEAM_ALIASES.get(dbName) ?? [];
+          return aliases.some((alias) => {
+            const an = alias.toLowerCase();
+            return (
+              an === api.name.toLowerCase() ||
+              an === api.shortName.toLowerCase() ||
+              normName(alias) === normName(api.name) ||
+              normName(alias) === normName(api.shortName)
+            );
+          });
         }
 
         let kickoffsFixed = 0, teamsTagged = 0, matchIdsStored = 0;
@@ -207,7 +226,9 @@ async function main() {
         // --- Teams ---
         // Look up our display name + flag from teams-data (normalised name match).
         // Falls back to API name / no flag if team isn't in our list.
-        const normName = (s: string) => s.toLowerCase().replace(/\s+and\s+/g, " ").replace(/-/g, " ").replace(/\s+/g, " ").trim();
+        const normName = (s: string) =>
+          s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase()
+           .replace(/\s+and\s+/g, " ").replace(/-/g, " ").replace(/[''`]/g, "").replace(/\s+/g, " ").trim();
         const ourTeamByNorm = new Map(TEAMS.map(t => [normName(t.name), t]));
         function resolveTeamMeta(api: ApiTeam): { name: string; flag: string } {
           return ourTeamByNorm.get(normName(api.name))

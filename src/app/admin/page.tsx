@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import Navbar from "@/components/Navbar";
 import AdminMatchList from "@/components/AdminMatchList";
 import SyncButton from "@/components/SyncButton";
+import RepairButton from "@/components/RepairButton";
 import TestTournamentPanel from "@/components/TestTournamentPanel";
 
 export default async function AdminPage() {
@@ -54,6 +55,7 @@ export default async function AdminPage() {
             </span>
           </div>
           <SyncButton />
+          <RepairButton />
         </div>
         <div className="mb-10">
           <TestTournamentPanel />

@@ -11,10 +11,57 @@ import { TEAMS } from "@/lib/teams-data";
  *   2. Delete stale teams (not in current TEAMS list)
  *   3. Upsert all current teams with correct names, flags, groups
  *   4. Delete and recreate all group-stage matches with correct pairings
- *   5. Leave KO placeholder matches and all user data untouched
+ *   5. Backfill fdMatchId + fdId from football-data.org API (sets real kickoffs)
+ *   6. Leave KO placeholder matches and all user data untouched
  *
  * Platform admin only.
  */
+
+type ApiTeam = { id: number; name: string; shortName: string; tla: string };
+type ApiMatch = { id: number; utcDate: string; stage: string; homeTeam: ApiTeam; awayTeam: ApiTeam };
+
+function normName(s: string): string {
+  return s
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .toLowerCase()
+    .replace(/\s+and\s+/g, " ")
+    .replace(/-/g, " ")
+    .replace(/[''`]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+const TEAM_ALIASES = new Map<string, string[]>([
+  ["Côte d'Ivoire", ["Ivory Coast", "Cote d Ivoire", "Cote dIvoire"]],
+  ["Congo DR",      ["DR Congo", "DRC", "Congo DRC", "Democratic Republic Congo", "Democratic Republic of Congo"]],
+]);
+
+function apiTeamMatches(dbName: string, api: ApiTeam): boolean {
+  const dbLower = dbName.toLowerCase();
+  const dbNorm = normName(dbName);
+  if (
+    dbLower === api.name.toLowerCase() ||
+    dbLower === api.shortName.toLowerCase() ||
+    dbLower === api.tla.toLowerCase() ||
+    dbLower.includes(api.shortName.toLowerCase()) ||
+    api.name.toLowerCase().includes(dbLower) ||
+    api.shortName.toLowerCase().includes(dbLower) ||
+    dbNorm === normName(api.name) ||
+    dbNorm === normName(api.shortName)
+  ) return true;
+  const aliases = TEAM_ALIASES.get(dbName) ?? [];
+  return aliases.some((alias) => {
+    const an = alias.toLowerCase();
+    return (
+      an === api.name.toLowerCase() ||
+      an === api.shortName.toLowerCase() ||
+      normName(alias) === normName(api.name) ||
+      normName(alias) === normName(api.shortName)
+    );
+  });
+}
+
 export async function POST() {
   const session = await auth();
   if (session?.user?.role !== "admin") {
@@ -79,10 +126,60 @@ export async function POST() {
     }
   }
 
+  // 5. Backfill fdMatchId, fdId, and real kickoffs from football-data.org API
+  let fdMatchIdsSet = 0;
+  let fdTeamIdsSet = 0;
+  let apiError: string | null = null;
+  const apiKey = process.env.FOOTBALL_DATA_API_KEY;
+
+  if (apiKey) {
+    try {
+      const resp = await fetch("https://api.football-data.org/v4/competitions/WC/matches", {
+        headers: { "X-Auth-Token": apiKey },
+      });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const data = await resp.json();
+      const apiGroup = ((data.matches ?? []) as ApiMatch[]).filter((m) => m.stage === "GROUP_STAGE");
+
+      const dbGroup = await db.match.findMany({
+        where: { round: "Group" },
+        include: { homeTeam: true, awayTeam: true },
+      });
+
+      for (const dbm of dbGroup) {
+        if (!dbm.homeTeam || !dbm.awayTeam || dbm.fdMatchId) continue;
+        const apiM = apiGroup.find(
+          (a) => apiTeamMatches(dbm.homeTeam!.name, a.homeTeam) && apiTeamMatches(dbm.awayTeam!.name, a.awayTeam)
+        );
+        if (!apiM) continue;
+
+        await db.match.update({
+          where: { id: dbm.id },
+          data: { fdMatchId: apiM.id, kickoff: new Date(apiM.utcDate) },
+        });
+        fdMatchIdsSet++;
+
+        if (!dbm.homeTeam.fdId) {
+          await db.team.update({ where: { id: dbm.homeTeam.id }, data: { fdId: apiM.homeTeam.id } });
+          fdTeamIdsSet++;
+        }
+        if (!dbm.awayTeam.fdId) {
+          await db.team.update({ where: { id: dbm.awayTeam.id }, data: { fdId: apiM.awayTeam.id } });
+          fdTeamIdsSet++;
+        }
+      }
+    } catch (e) {
+      apiError = e instanceof Error ? e.message : String(e);
+    }
+  } else {
+    apiError = "FOOTBALL_DATA_API_KEY not set — skipping API backfill";
+  }
+
   return NextResponse.json({
     ok: true,
     staleTeamsRemoved: staleIds.length,
     teamsUpserted: TEAMS.length,
     groupMatchesRebuilt: i,
+    apiBackfill: { fdMatchIdsSet, fdTeamIdsSet, error: apiError },
   });
 }

@@ -15,19 +15,35 @@ type DbMatchCandidate = {
   kickoff: Date;
 };
 
-// Normalize compound team names: " and " and "-" are equivalent separators
-// so "Bosnia and Herzegovina" matches "Bosnia-Herzegovina", etc.
+// Normalize team names for fuzzy matching:
+// - Strip unicode combining accents (ü→u, ç→c, ô→o) so "Türkiye"≡"Turkiye"
+// - " and " and "-" are equivalent separators (Bosnia fix)
+// - Strip apostrophes
 function normName(s: string): string {
-  return s.toLowerCase().replace(/\s+and\s+/g, " ").replace(/-/g, " ").replace(/\s+/g, " ").trim();
+  return s
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "") // strip combining accents
+    .toLowerCase()
+    .replace(/\s+and\s+/g, " ")
+    .replace(/-/g, " ")
+    .replace(/[''`]/g, "") // strip apostrophes
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
+// Teams whose official name in our DB differs completely from the API name.
+// Unicode normalization handles accents (Türkiye, Curaçao) but not full translations.
+const TEAM_ALIASES = new Map<string, string[]>([
+  ["Côte d'Ivoire", ["Ivory Coast", "Cote d Ivoire", "Cote dIvoire"]],
+  ["Congo DR",      ["DR Congo", "DRC", "Congo DRC", "Democratic Republic Congo", "Democratic Republic of Congo"]],
+]);
+
 /** Check whether a DB team name resolves to an API team.
- *  Checks all name fields the API exposes so localisation variants
- *  (e.g. "South Korea" ↔ shortName "South Korea", name "Korea Republic") work. */
+ *  Priority: direct name → normalized name → known aliases. */
 function teamMatches(dbName: string, api: FDTeam): boolean {
   const db = dbName.toLowerCase();
   const dbNorm = normName(dbName);
-  return (
+  if (
     db === api.name.toLowerCase() ||
     db === api.shortName.toLowerCase() ||
     db === api.tla.toLowerCase() ||
@@ -36,7 +52,17 @@ function teamMatches(dbName: string, api: FDTeam): boolean {
     api.shortName.toLowerCase().includes(db) ||
     dbNorm === normName(api.name) ||
     dbNorm === normName(api.shortName)
-  );
+  ) return true;
+  const aliases = TEAM_ALIASES.get(dbName) ?? [];
+  return aliases.some((alias) => {
+    const an = alias.toLowerCase();
+    return (
+      an === api.name.toLowerCase() ||
+      an === api.shortName.toLowerCase() ||
+      normName(alias) === normName(api.name) ||
+      normName(alias) === normName(api.shortName)
+    );
+  });
 }
 
 /**

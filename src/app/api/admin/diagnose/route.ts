@@ -73,6 +73,28 @@ export async function GET() {
   };
 
   // ── 3. Matching check: for every finished API match, can we find a DB row? ─
+  function normName(s: string): string {
+    return s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase()
+      .replace(/\s+and\s+/g, " ").replace(/-/g, " ").replace(/[''`]/g, "").replace(/\s+/g, " ").trim();
+  }
+  const TEAM_ALIASES = new Map<string, string[]>([
+    ["Côte d'Ivoire", ["Ivory Coast", "Cote d Ivoire"]],
+    ["Congo DR",      ["DR Congo", "DRC", "Congo DRC", "Democratic Republic of Congo"]],
+  ]);
+  function nameOk(dbName: string, api: { name: string; shortName: string; tla: string }): boolean {
+    const h = dbName.toLowerCase();
+    const hn = normName(dbName);
+    if (h === api.name.toLowerCase() || h === api.shortName.toLowerCase() || h === api.tla.toLowerCase() ||
+        h.includes(api.shortName.toLowerCase()) || api.name.toLowerCase().includes(h) ||
+        api.shortName.toLowerCase().includes(h) ||
+        hn === normName(api.name) || hn === normName(api.shortName)) return true;
+    return (TEAM_ALIASES.get(dbName) ?? []).some((alias) => {
+      const an = alias.toLowerCase();
+      return an === api.name.toLowerCase() || an === api.shortName.toLowerCase() ||
+        normName(alias) === normName(api.name) || normName(alias) === normName(api.shortName);
+    });
+  }
+
   const matchingCheck = apiFinished.slice(0, 15).map((api) => {
     const byMatchId = dbMatches.find((m) => m.fdMatchId === api.id);
 
@@ -85,23 +107,7 @@ export async function GET() {
     const byName = !byMatchId && !byFdId
       ? dbMatches.find((m) => {
           if (!m.homeTeam || !m.awayTeam) return false;
-          const h = m.homeTeam.name.toLowerCase();
-          const aw = m.awayTeam.name.toLowerCase();
-          const homeOk =
-            h === api.homeTeam.name.toLowerCase() ||
-            h === api.homeTeam.shortName.toLowerCase() ||
-            h === api.homeTeam.tla.toLowerCase() ||
-            h.includes(api.homeTeam.shortName.toLowerCase()) ||
-            api.homeTeam.name.toLowerCase().includes(h) ||
-            api.homeTeam.shortName.toLowerCase().includes(h);
-          const awayOk =
-            aw === api.awayTeam.name.toLowerCase() ||
-            aw === api.awayTeam.shortName.toLowerCase() ||
-            aw === api.awayTeam.tla.toLowerCase() ||
-            aw.includes(api.awayTeam.shortName.toLowerCase()) ||
-            api.awayTeam.name.toLowerCase().includes(aw) ||
-            api.awayTeam.shortName.toLowerCase().includes(aw);
-          return homeOk && awayOk;
+          return nameOk(m.homeTeam.name, api.homeTeam) && nameOk(m.awayTeam.name, api.awayTeam);
         })
       : undefined;
 
