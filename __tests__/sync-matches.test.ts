@@ -100,6 +100,7 @@ function makeGroupMatches(total: number, finishedCount: number) {
 function dbMatch(overrides: Record<string, any> = {}) {
   return {
     id: overrides.id ?? "db-match-1",
+    fdMatchId: overrides.fdMatchId ?? null,
     kickoff: overrides.kickoff ?? new Date("2026-06-12T15:00:00Z"),
     status: overrides.status ?? "scheduled",
     homeScore: overrides.homeScore ?? null,
@@ -1328,6 +1329,86 @@ describe("13. Notifications always called (when not early-returning)", () => {
 // They also serve as a regression guard for team name localisation issues
 // (e.g. "South Korea" in our DB vs "Korea Republic" in the API) that caused
 // the sync to silently skip every group stage match for weeks.
+
+describe("16. fdMatchId as primary sync key", () => {
+  beforeEach(() => setupMocks({ rooms: [] }));
+
+  it("matches by fdMatchId even when team names differ (e.g. Bosnia and Herzegovina vs Bosnia-Herzegovina)", async () => {
+    mockFetch.mockResolvedValue([
+      apiGroupMatch({
+        id: 1060,
+        status: "FINISHED",
+        homeTeam: { id: 828, name: "Canada",              shortName: "Canada",    tla: "CAN" },
+        awayTeam: { id: 999, name: "Bosnia-Herzegovina",  shortName: "Bosnia-H.", tla: "BIH" },
+        score: { winner: "HOME_TEAM", fullTime: { home: 1, away: 1 } },
+      }),
+    ] as any);
+    setupMocks({
+      rooms: [],
+      dbMatches: [
+        dbMatch({
+          fdMatchId: 1060, // set by seed — primary key
+          homeTeam: { id: "ht-1", fdId: null, name: "Canada",                 shortName: "Canada",                 tla: "CAN" },
+          awayTeam: { id: "at-1", fdId: null, name: "Bosnia and Herzegovina", shortName: "Bosnia and Herzegovina", tla: "BIH" },
+          predictions: [],
+        }),
+      ],
+    });
+
+    await syncMatches();
+
+    expect(mockDb.match.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ homeScore: 1, awayScore: 1, status: "finished" }) })
+    );
+  });
+
+  it("uses fdMatchId over team fdId when both are set (fdMatchId wins)", async () => {
+    mockFetch.mockResolvedValue([
+      apiGroupMatch({ id: 500, status: "FINISHED", score: { winner: "HOME_TEAM", fullTime: { home: 3, away: 0 } } }),
+    ] as any);
+    setupMocks({
+      rooms: [],
+      dbMatches: [
+        dbMatch({
+          fdMatchId: 500,
+          homeTeam: { id: "ht-1", fdId: 10, name: "Brazil",  shortName: "Brazil",  tla: "BRA" },
+          awayTeam: { id: "at-1", fdId: 11, name: "Germany", shortName: "Germany", tla: "GER" },
+          predictions: [],
+        }),
+      ],
+    });
+
+    await syncMatches();
+
+    expect(mockDb.match.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ homeScore: 3, awayScore: 0 }) })
+    );
+  });
+
+  it("does NOT match when fdMatchId differs even if team names match", async () => {
+    // DB has fdMatchId=999 but API match has id=500 — fdMatchId mismatch prevents false positive
+    mockFetch.mockResolvedValue([
+      apiGroupMatch({ id: 500, status: "FINISHED", score: { winner: "HOME_TEAM", fullTime: { home: 2, away: 1 } } }),
+    ] as any);
+    setupMocks({
+      rooms: [],
+      dbMatches: [
+        dbMatch({
+          fdMatchId: 999, // different ID — no match
+          homeTeam: { id: "ht-1", fdId: null, name: "Brazil",  shortName: "Brazil",  tla: "BRA" },
+          awayTeam: { id: "at-1", fdId: null, name: "Germany", shortName: "Germany", tla: "GER" },
+          predictions: [],
+        }),
+      ],
+    });
+
+    await syncMatches();
+
+    // Match is not found via fdMatchId=999 vs api.id=500.
+    // The stale reset pass also won't touch it: it's clean (scheduled, null scores).
+    expect(mockDb.match.update).not.toHaveBeenCalled();
+  });
+});
 
 describe("15. Match table as pure API mirror", () => {
   beforeEach(() => setupMocks({ rooms: [] }));

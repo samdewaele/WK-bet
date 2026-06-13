@@ -85,7 +85,7 @@ async function main() {
         const data = await resp.json();
 
         type ApiTeam = { id: number; name: string; shortName: string; tla: string };
-        type ApiM = { stage: string; utcDate: string; homeTeam: ApiTeam; awayTeam: ApiTeam };
+        type ApiM = { id: number; stage: string; utcDate: string; homeTeam: ApiTeam; awayTeam: ApiTeam };
 
         const allApiMatches: ApiM[] = (data.matches ?? []) as ApiM[];
         const apiGroup = allApiMatches.filter((m) => m.stage === "GROUP_STAGE");
@@ -109,7 +109,7 @@ async function main() {
           );
         }
 
-        let kickoffsFixed = 0, teamsTagged = 0;
+        let kickoffsFixed = 0, teamsTagged = 0, matchIdsStored = 0;
         for (const dbm of dbGroup) {
           if (!dbm.homeTeam || !dbm.awayTeam) continue;
           const apiM = apiGroup.find((a) =>
@@ -118,14 +118,19 @@ async function main() {
           );
           if (!apiM) continue;
 
+          // Store football-data.org match ID — primary key for all future syncs
+          const updates: Record<string, unknown> = {};
+          if (!dbm.fdMatchId) { updates.fdMatchId = apiM.id; matchIdsStored++; }
+
           // Fix kickoff time
           const real = new Date(apiM.utcDate);
-          if (dbm.kickoff.getTime() !== real.getTime()) {
-            await db.match.update({ where: { id: dbm.id }, data: { kickoff: real } });
-            kickoffsFixed++;
+          if (dbm.kickoff.getTime() !== real.getTime()) { updates.kickoff = real; kickoffsFixed++; }
+
+          if (Object.keys(updates).length > 0) {
+            await db.match.update({ where: { id: dbm.id }, data: updates });
           }
 
-          // Store football-data.org numeric team IDs for reliable future matching
+          // Store football-data.org numeric team IDs for fallback matching
           if (!dbm.homeTeam.fdId) {
             await db.team.update({ where: { id: dbm.homeTeam.id }, data: { fdId: apiM.homeTeam.id } });
             teamsTagged++;
@@ -135,7 +140,7 @@ async function main() {
             teamsTagged++;
           }
         }
-        console.log(`✓ API sync: ${kickoffsFixed} kickoffs fixed, ${teamsTagged} team IDs stored`);
+        console.log(`✓ API sync: ${matchIdsStored} match IDs stored, ${kickoffsFixed} kickoffs fixed, ${teamsTagged} team IDs stored`);
       } catch (e) {
         console.warn(`⚠  Kickoff correction failed (non-fatal): ${e instanceof Error ? e.message : e}`);
       }
@@ -176,6 +181,7 @@ async function main() {
 
   // Fetch real fixture times from football-data.org (skipped for E2E and when no key)
   type ApiMatch = {
+    id: number;
     utcDate: string;
     stage: string;
     homeTeam: { name: string; shortName: string };
@@ -201,10 +207,10 @@ async function main() {
     }
   }
 
-  /** Find the real kickoff for a (home, away) team name pair using the same fuzzy
-   *  name matching that sync-matches.ts uses, so seed and sync stay consistent. */
-  function findApiKickoff(homeName: string, awayName: string, stage: string): Date | null {
-    const m = apiMatches.find((a) => {
+  /** Find the API entry for a (home, away) team name pair so we can store both
+   *  the real kickoff and the API match ID as a primary key for future syncs. */
+  function findApiMatch(homeName: string, awayName: string, stage: string): ApiMatch | null {
+    return apiMatches.find((a) => {
       if (a.stage !== stage) return false;
       const homeMatch =
         homeName.toLowerCase() === a.homeTeam.name.toLowerCase() ||
@@ -215,8 +221,7 @@ async function main() {
         awayName.toLowerCase().includes(a.awayTeam.shortName.toLowerCase()) ||
         a.awayTeam.name.toLowerCase().includes(awayName.toLowerCase());
       return homeMatch && awayMatch;
-    });
-    return m ? new Date(m.utcDate) : null;
+    }) ?? null;
   }
 
   // Create group stage matches.
@@ -229,11 +234,12 @@ async function main() {
   for (let i = 0; i < matches.length; i++) {
     const m = matches[i];
     let kickoff: Date;
+    let fdMatchId: number | undefined;
     if (isE2E) {
       kickoff = new Date(e2eGroupBase.getTime() + i * 3 * 60 * 60 * 1000);
     } else {
-      const real = findApiKickoff(m.homeTeamName, m.awayTeamName, "GROUP_STAGE");
-      if (real) { kickoff = real; realKickoffCount++; }
+      const apiM = findApiMatch(m.homeTeamName, m.awayTeamName, "GROUP_STAGE");
+      if (apiM) { kickoff = new Date(apiM.utcDate); fdMatchId = apiM.id; realKickoffCount++; }
       else kickoff = new Date(fallbackGroupBase.getTime() + i * 3 * 60 * 60 * 1000);
     }
     await db.match.create({
@@ -245,10 +251,11 @@ async function main() {
         matchNumber: m.matchNumber,
         kickoff,
         status: "scheduled",
+        ...(fdMatchId !== undefined && { fdMatchId }),
       },
     });
   }
-  if (!isE2E) console.log(`✓ ${matches.length} group stage matches seeded (${realKickoffCount} with real kickoff times)`);
+  if (!isE2E) console.log(`✓ ${matches.length} group stage matches seeded (${realKickoffCount} with real kickoff times and API match IDs)`);
   else console.log(`✓ ${matches.length} group stage matches seeded (E2E future kickoffs)`);
 
   // Placeholder knockout matches (TBD teams)

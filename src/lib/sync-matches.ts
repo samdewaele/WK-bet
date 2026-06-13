@@ -9,6 +9,7 @@ import type { KORound } from "@/lib/pot";
 import type { FDTeam } from "@/lib/football-data";
 
 type DbMatchCandidate = {
+  fdMatchId: number | null;
   homeTeam: { fdId: number | null; name: string } | null;
   awayTeam: { fdId: number | null; name: string } | null;
   kickoff: Date;
@@ -31,16 +32,21 @@ function teamMatches(dbName: string, api: FDTeam): boolean {
 
 /**
  * Match a DB row to an API match.
- * Primary:  football-data.org numeric team IDs (populated by seed on first deploy).
- * Fallback: multi-field name matching covering localisation variants.
+ * Primary:   football-data.org match ID (set by seed on every deploy).
+ * Secondary: football-data.org team IDs (set by seed on every deploy).
+ * Tertiary:  multi-field name matching covering localisation variants.
  * TBD KO placeholders (no teams yet): kickoff proximity within 24 hours.
  */
 function findDbMatch(
   m: DbMatchCandidate,
+  apiMatchId: number,
   apiHome: FDTeam,
   apiAway: FDTeam,
   apiKickoffMs: number
 ): boolean {
+  if (m.fdMatchId !== null && m.fdMatchId !== undefined) {
+    return m.fdMatchId === apiMatchId;
+  }
   if (m.homeTeam && m.awayTeam) {
     if (m.homeTeam.fdId && m.awayTeam.fdId) {
       return m.homeTeam.fdId === apiHome.id && m.awayTeam.fdId === apiAway.id;
@@ -145,7 +151,11 @@ export async function syncMatches(): Promise<SyncResult> {
           { awayScore: { not: null } },
         ],
       },
-      include: { homeTeam: true, awayTeam: true },
+      select: {
+        id: true, fdMatchId: true, status: true, homeScore: true, awayScore: true, kickoff: true,
+        homeTeam: { select: { fdId: true, name: true } },
+        awayTeam: { select: { fdId: true, name: true } },
+      },
     });
 
     for (const stale of staleMatches) {
@@ -153,7 +163,7 @@ export async function syncMatches(): Promise<SyncResult> {
       // so a test mock that bypasses the WHERE clause doesn't trigger spurious resets.
       if (stale.status === "scheduled" && stale.homeScore === null && stale.awayScore === null) continue;
 
-      const apiCounterpart = apiMatches.find((api) => findDbMatch(stale, api.homeTeam, api.awayTeam, new Date(api.utcDate).getTime()));
+      const apiCounterpart = apiMatches.find((api) => findDbMatch(stale, api.id, api.homeTeam, api.awayTeam, new Date(api.utcDate).getTime()));
 
       const shouldReset =
         // API says the match hasn't happened yet — clear any stale score
@@ -186,7 +196,13 @@ export async function syncMatches(): Promise<SyncResult> {
   }
 
   const dbMatches = await db.match.findMany({
-    include: { homeTeam: true, awayTeam: true, predictions: true },
+    include: {
+      homeTeam: { select: { id: true, fdId: true, name: true } },
+      awayTeam: { select: { id: true, fdId: true, name: true } },
+      predictions: true,
+    },
+    // Also select fdMatchId on the match itself so findDbMatch can use it
+    // as the primary key before falling back to team names.
   });
 
   let updated = 0;
@@ -198,7 +214,7 @@ export async function syncMatches(): Promise<SyncResult> {
     const apiHome = api.score.fullTime.home;
     const apiAway = api.score.fullTime.away;
 
-    const dbMatch = dbMatches.find((m) => findDbMatch(m, api.homeTeam, api.awayTeam, apiKickoff));
+    const dbMatch = dbMatches.find((m) => findDbMatch(m, api.id, api.homeTeam, api.awayTeam, apiKickoff));
 
     if (!dbMatch) continue;
 

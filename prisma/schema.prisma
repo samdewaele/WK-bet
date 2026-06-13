@@ -109,6 +109,7 @@ model Team {
 
 model Match {
   id            String         @id @default(cuid())
+  fdMatchId     Int?           @unique // football-data.org numeric match ID — primary sync key
   homeTeamId    String?
   awayTeamId    String?
   homeTeam      Team?          @relation("HomeTeam", fields: [homeTeamId], references: [id])

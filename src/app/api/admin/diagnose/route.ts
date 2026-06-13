@@ -27,6 +27,7 @@ export async function GET() {
     withScores: dbMatches.filter((m) => m.homeScore !== null).length,
     finished: dbMatches.filter((m) => m.status === "finished").length,
     scheduled: dbMatches.filter((m) => m.status === "scheduled").length,
+    withFdMatchId: dbMatches.filter((m) => m.fdMatchId !== null).length,
     teamsWithFdId: await db.team.count({ where: { fdId: { not: null } } }),
     teamsTotal: await db.team.count(),
     sampleMatches: dbMatches.slice(0, 5).map((m) => ({
@@ -34,6 +35,7 @@ export async function GET() {
       homeFdId: m.homeTeam?.fdId ?? null,
       away: m.awayTeam?.name ?? "TBD",
       awayFdId: m.awayTeam?.fdId ?? null,
+      fdMatchId: m.fdMatchId ?? null,
       kickoff: m.kickoff.toISOString(),
       status: m.status,
       score: m.homeScore !== null ? `${m.homeScore}-${m.awayScore}` : null,
@@ -72,11 +74,15 @@ export async function GET() {
 
   // ── 3. Matching check: for every finished API match, can we find a DB row? ─
   const matchingCheck = apiFinished.slice(0, 15).map((api) => {
-    const byFdId = dbMatches.find(
-      (m) => m.homeTeam?.fdId === api.homeTeam.id && m.awayTeam?.fdId === api.awayTeam.id
-    );
+    const byMatchId = dbMatches.find((m) => m.fdMatchId === api.id);
 
-    const byName = !byFdId
+    const byFdId = !byMatchId
+      ? dbMatches.find(
+          (m) => m.homeTeam?.fdId === api.homeTeam.id && m.awayTeam?.fdId === api.awayTeam.id
+        )
+      : undefined;
+
+    const byName = !byMatchId && !byFdId
       ? dbMatches.find((m) => {
           if (!m.homeTeam || !m.awayTeam) return false;
           const h = m.homeTeam.name.toLowerCase();
@@ -99,11 +105,11 @@ export async function GET() {
         })
       : undefined;
 
-    const matched = byFdId ?? byName;
+    const matched = byMatchId ?? byFdId ?? byName;
     return {
-      apiMatch: `${api.homeTeam.name} (${api.homeTeam.id}) vs ${api.awayTeam.name} (${api.awayTeam.id})`,
+      apiMatch: `${api.homeTeam.name} (id:${api.id}) vs ${api.awayTeam.name}`,
       realScore: `${api.score.fullTime.home}-${api.score.fullTime.away}`,
-      matchedBy: byFdId ? "fdId" : byName ? "name" : "NONE — will be skipped by sync",
+      matchedBy: byMatchId ? "fdMatchId" : byFdId ? "teamFdId" : byName ? "name" : "NONE — will be skipped by sync",
       dbScore: matched
         ? (matched.homeScore !== null ? `${matched.homeScore}-${matched.awayScore}` : "null/null (scheduled)")
         : "—",
