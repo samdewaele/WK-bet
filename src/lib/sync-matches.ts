@@ -15,18 +15,27 @@ type DbMatchCandidate = {
   kickoff: Date;
 };
 
+// Normalize compound team names: " and " and "-" are equivalent separators
+// so "Bosnia and Herzegovina" matches "Bosnia-Herzegovina", etc.
+function normName(s: string): string {
+  return s.toLowerCase().replace(/\s+and\s+/g, " ").replace(/-/g, " ").replace(/\s+/g, " ").trim();
+}
+
 /** Check whether a DB team name resolves to an API team.
  *  Checks all name fields the API exposes so localisation variants
  *  (e.g. "South Korea" ↔ shortName "South Korea", name "Korea Republic") work. */
 function teamMatches(dbName: string, api: FDTeam): boolean {
   const db = dbName.toLowerCase();
+  const dbNorm = normName(dbName);
   return (
     db === api.name.toLowerCase() ||
     db === api.shortName.toLowerCase() ||
     db === api.tla.toLowerCase() ||
     db.includes(api.shortName.toLowerCase()) ||
     api.name.toLowerCase().includes(db) ||
-    api.shortName.toLowerCase().includes(db)
+    api.shortName.toLowerCase().includes(db) ||
+    dbNorm === normName(api.name) ||
+    dbNorm === normName(api.shortName)
   );
 }
 

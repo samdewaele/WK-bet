@@ -1408,6 +1408,37 @@ describe("16. fdMatchId as primary sync key", () => {
     // The stale reset pass also won't touch it: it's clean (scheduled, null scores).
     expect(mockDb.match.update).not.toHaveBeenCalled();
   });
+
+  it("matches 'Bosnia and Herzegovina' to API 'Bosnia-Herzegovina' via name normalization when fdMatchId not yet set", async () => {
+    // Bootstrapping case: fdMatchId not yet stored (null), so name matching is used.
+    // "Bosnia and Herzegovina" (" and " → " ") must normalize to match "Bosnia-Herzegovina" ("-" → " ").
+    mockFetch.mockResolvedValue([
+      apiGroupMatch({
+        id: 9999,
+        status: "FINISHED",
+        homeTeam: { id: 828,  name: "Canada",              shortName: "Canada",    tla: "CAN" },
+        awayTeam: { id: 1060, name: "Bosnia-Herzegovina",  shortName: "Bosnia-H.", tla: "BIH" },
+        score: { winner: "DRAW", fullTime: { home: 1, away: 1 } },
+      }),
+    ] as any);
+    setupMocks({
+      rooms: [],
+      dbMatches: [
+        dbMatch({
+          fdMatchId: null, // not yet stored — triggers name-matching fallback
+          homeTeam: { id: "ht-1", fdId: null, name: "Canada",                 shortName: "Canada",                 tla: "CAN" },
+          awayTeam: { id: "at-1", fdId: null, name: "Bosnia and Herzegovina", shortName: "Bosnia and Herzegovina", tla: "BIH" },
+          predictions: [],
+        }),
+      ],
+    });
+
+    await syncMatches();
+
+    expect(mockDb.match.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ homeScore: 1, awayScore: 1, status: "finished" }) })
+    );
+  });
 });
 
 describe("15. Match table as pure API mirror", () => {
