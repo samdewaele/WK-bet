@@ -6,7 +6,7 @@ import { useEffect } from "react";
 import Navbar from "@/components/Navbar";
 
 export default function HomePage() {
-  const { data: session, status } = useSession();
+  const { status } = useSession();
   const router = useRouter();
 
   useEffect(() => {

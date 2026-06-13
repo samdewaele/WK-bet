@@ -1,6 +1,6 @@
 import Link from "next/link";
 import Navbar from "@/components/Navbar";
-import { calculatePot, KO_ROUNDS, KO_MATCH_WEIGHT } from "@/lib/pot";
+import { calculatePot, KO_ROUNDS } from "@/lib/pot";
 
 type Props = {
   params: Promise<{ roomId: string }>;

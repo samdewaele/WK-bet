@@ -10,8 +10,6 @@ export async function GET(
   const { roomId } = await params;
   const access = await requireRoomAccess(roomId);
   if (access instanceof NextResponse) return access;
-  const userId = access.session.user.id;
-
   const room = await db.room.findUnique({
     where: { id: roomId },
     include: {

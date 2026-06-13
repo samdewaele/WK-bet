@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { it, expect, vi, beforeEach } from "vitest";
 
 vi.mock("@auth", () => ({ auth: vi.fn() }));
 vi.mock("@/lib/uber-pot", () => ({ computeUberPotResults: vi.fn() }));

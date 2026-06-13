@@ -7,7 +7,7 @@
  * This spec also covers the admin lock feature (step 10 requirement).
  */
 import { test, expect } from "@playwright/test";
-import { signInAs, createGroup, createSideBet, E2E_ADMIN_EMAIL, E2E_USER_EMAIL } from "./helpers";
+import { signInAs, createGroup, createSideBet, E2E_ADMIN_EMAIL } from "./helpers";
 
 const MEMBER_EMAIL = "e2e-uber-member@test.local";
 

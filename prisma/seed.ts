@@ -199,13 +199,6 @@ async function main() {
   // E2E mode skips the API entirely and falls back to the hardcoded TEAMS list
   // with future kickoffs so time-based locks don't fire during the test suite.
 
-  const STAGE_TO_ROUND: Record<string, string> = {
-    GROUP_STAGE: "Group",
-    LAST_32: "R32", LAST_16: "R16",
-    QUARTER_FINALS: "QF", SEMI_FINALS: "SF",
-    THIRD_PLACE: "3rd", FINAL: "Final",
-  };
-
   if (!isE2E) {
     const apiKey = process.env.FOOTBALL_DATA_API_KEY;
     if (!apiKey) {

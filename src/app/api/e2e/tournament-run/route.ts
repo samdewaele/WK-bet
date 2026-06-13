@@ -42,7 +42,7 @@ function gate() {
  * GET: return expected group standings (team IDs) given preset home-wins-all results.
  * Response: { groups: { [A-L]: { expectedStandings: string[] } }, totalGoals: number }
  */
-export async function GET(_req: Request) {
+export async function GET() {
   const g = gate(); if (g) return g;
 
   const groupMatches = await db.match.findMany({

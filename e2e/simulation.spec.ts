@@ -76,9 +76,6 @@ test.describe("Simulation flow", () => {
     // Penalty winner selector must appear
     await expect(page.getByText(/penalty winner/i)).toBeVisible({ timeout: 3_000 });
     // Two team buttons available
-    const penaltyBtns = page.locator('[class*="penalty"], button:near(:text("Penalty winner"))');
-    // Just verify both penalty buttons are rendered by checking "Penalty winner" text exists
-    // and that clicking one removes the highlight state (not already selected)
     const firstPenBtn = page.locator('div:has(> span:text-matches("Penalty winner", "i")) button').first();
     await firstPenBtn.click();
     await expect(firstPenBtn).toHaveClass(/bg-amber-400/, { timeout: 2_000 });

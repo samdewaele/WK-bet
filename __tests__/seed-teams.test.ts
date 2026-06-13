@@ -22,7 +22,6 @@ describe("TEAMS seed data", () => {
 
   it("has no duplicate team names", () => {
     const names = TEAMS.map((t) => t.name);
-    const unique = new Set(names);
     const dupes = names.filter((n, i) => names.indexOf(n) !== i);
     expect(dupes, `Duplicate team names: ${dupes.join(", ")}`).toHaveLength(0);
   });
