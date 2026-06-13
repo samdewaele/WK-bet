@@ -48,22 +48,25 @@ async function main() {
 
   // ── Per-deploy cleanup (runs every time) ─────────────────────────────────────
 
+  const isE2E = process.env.E2E_TEST === "true";
+
   // 1. Wipe leftover simulation results.
   const { count: simCleared } = await db.simResult.deleteMany({});
   if (simCleared > 0) console.log(`✓ Cleared ${simCleared} simulation result(s)`);
 
-  // 2. Reset KO match scores — simulation runs write fake scores to KO slots;
-  //    the sync job restores any genuine results within one cycle after deploy.
-  const { count: koReset } = await db.match.updateMany({
-    where: {
-      round: { in: ["R32", "R16", "QF", "SF", "3rd", "Final"] },
-      OR: [{ homeScore: { not: null } }, { awayScore: { not: null } }, { status: { not: "scheduled" } }],
-    },
-    data: { homeScore: null, awayScore: null, status: "scheduled" },
-  });
-  if (koReset > 0) console.log(`✓ Reset ${koReset} KO match(es) with stale simulation scores`);
-
-  const isE2E = process.env.E2E_TEST === "true";
+  // 2. Reset ALL match scores — any scores not written by the sync job are stale
+  //    (old sim runs wrote directly to Match before the SimResult migration).
+  //    The sync job restores genuine results within one cycle after deploy.
+  //    E2E skipped: it relies on seeded future kickoffs, not real API data.
+  if (!isE2E) {
+    const { count: matchReset } = await db.match.updateMany({
+      where: {
+        OR: [{ homeScore: { not: null } }, { awayScore: { not: null } }, { status: { not: "scheduled" } }],
+      },
+      data: { homeScore: null, awayScore: null, status: "scheduled" },
+    });
+    if (matchReset > 0) console.log(`✓ Reset ${matchReset} match(es) — sync will restore real API results`);
+  }
 
   // 3. Fix group stage kickoff times from the real API.
   //    seed.ts initially creates matches with approximate 3h-apart kickoffs.
