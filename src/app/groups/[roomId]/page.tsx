@@ -17,6 +17,7 @@ import InviteButton from "@/components/InviteButton";
 import { isTournamentStarted, getGroupKickoffTimes } from "@/lib/tournament-lock";
 import CountdownTimer from "@/components/CountdownTimer";
 import RecentResults from "@/components/RecentResults";
+import { computeUberPotResults } from "@/lib/uber-pot";
 
 type Props = {
   params: Promise<{ roomId: string }>;
@@ -68,9 +69,10 @@ export default async function GroupDetailPage({ params, searchParams }: Props) {
 
   const pot = calculatePot(room.entryFee, room.members.length);
   const isManager = room.creatorId === userId || isPlatformAdmin;
-  const [tournamentStarted, groupKickoffTimes] = await Promise.all([
+  const [tournamentStarted, groupKickoffTimes, uberPotResults] = await Promise.all([
     isTournamentStarted(),
     getGroupKickoffTimes(),
+    computeUberPotResults(roomId),
   ]);
   const roomStatus = room.status;
   const simulationMode = room.simulationMode;
@@ -150,6 +152,9 @@ export default async function GroupDetailPage({ params, searchParams }: Props) {
             <span>{room.members.length} members</span>
             <span>Entry: €{room.entryFee.toFixed(2)}</span>
             <span className="text-amber-400 font-semibold">Total pot: €{pot.totalPot.toFixed(2)}</span>
+            {tournamentStarted && (
+              <span className="text-amber-400 font-semibold">Uber Pot: €{uberPotResults.accumulatedUberPot.toFixed(2)}</span>
+            )}
             {/* Managers always see the invite button; others only in pre-tournament phases */}
             {(isManager || ((roomStatus === "betting" || roomStatus === "setup") && !tournamentStarted)) && (
               <InviteButton inviteCode={room.inviteCode} />
