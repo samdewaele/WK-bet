@@ -1441,6 +1441,236 @@ describe("16. fdMatchId as primary sync key", () => {
   });
 });
 
+// ─── 17. teamMatches edge cases (unit-level) ─────────────────────────────────
+// These tests exercise teamMatches directly via syncMatches to catch regressions
+// on the exact inputs that the real football-data.org API sends.
+//
+// Why here and not in a dedicated file? teamMatches is not exported — we drive
+// it through syncMatches so the mock infrastructure is already in place.
+
+describe("17. TBD/null API team names (KO placeholder crash regression)", () => {
+  // The real API returns { id: null, name: null, shortName: null, tla: null }
+  // for KO bracket slots whose teams are not yet determined.
+  // The stale reset pass calls findDbMatch for ALL API matches including these,
+  // so teamMatches must never crash on null inputs.
+
+  function apiKOPlaceholder(overrides: Record<string, any> = {}) {
+    return {
+      id: overrides.id ?? 2000,
+      utcDate: overrides.utcDate ?? "2026-07-10T18:00:00Z",
+      status: overrides.status ?? "SCHEDULED",
+      stage: overrides.stage ?? "LAST_32",
+      homeTeam: overrides.homeTeam ?? { id: null, name: null, shortName: null, tla: null },
+      awayTeam: overrides.awayTeam ?? { id: null, name: null, shortName: null, tla: null },
+      score: { winner: null, fullTime: { home: null, away: null } },
+    };
+  }
+
+  it("does NOT crash when API contains KO placeholder matches with null team names", async () => {
+    // This is the exact crash that happened in production: the stale reset pass
+    // iterated over all API matches and called teamMatches on a TBD KO slot
+    // whose homeTeam.name was null → TypeError: Cannot read properties of null.
+    setupMocks({
+      rooms: [],
+      dbMatches: [
+        dbMatch({ status: "finished", homeScore: 2, awayScore: 1, predictions: [] }),
+      ],
+    });
+    mockFetch.mockResolvedValue([
+      apiGroupMatch({ status: "SCHEDULED" }), // the group match (stale reset candidate)
+      apiKOPlaceholder({ id: 2001 }),           // KO placeholder — null team names
+      apiKOPlaceholder({ id: 2002 }),           // another one
+    ] as any);
+
+    // Must not throw; stale reset should reset the stale group match
+    await expect(syncMatches()).resolves.not.toThrow();
+  });
+
+  it("resets the stale group match even when API also contains null-team KO placeholders", async () => {
+    setupMocks({
+      rooms: [],
+      dbMatches: [
+        dbMatch({ status: "finished", homeScore: 2, awayScore: 1, predictions: [] }),
+      ],
+    });
+    mockFetch.mockResolvedValue([
+      apiGroupMatch({ status: "SCHEDULED" }),
+      apiKOPlaceholder({ id: 2001 }),
+    ] as any);
+
+    await syncMatches();
+
+    expect(mockDb.match.update).toHaveBeenCalledWith({
+      where: { id: "db-match-1" },
+      data: { status: "scheduled", homeScore: null, awayScore: null },
+    });
+  });
+
+  it("does NOT match a DB group match to a KO placeholder with null team names (no false positives)", async () => {
+    // Only the KO placeholder is in the API — the group match in DB has no counterpart.
+    // The stale reset must NOT clear the group match because it found no SCHEDULED/TIMED
+    // API counterpart for it, and the KO placeholder should not count as a match.
+    setupMocks({
+      rooms: [],
+      dbMatches: [
+        // Clean group match — should not be touched
+        dbMatch({ status: "scheduled", homeScore: null, awayScore: null, predictions: [] }),
+      ],
+    });
+    mockFetch.mockResolvedValue([
+      apiKOPlaceholder({ id: 2001 }), // only KO placeholder — different teams (null)
+    ] as any);
+
+    await syncMatches();
+
+    // No stale data → no update
+    expect(mockDb.match.update).not.toHaveBeenCalled();
+  });
+});
+
+describe("18. Unicode and alias team name matching", () => {
+  // Real API names for teams with special characters or completely different
+  // English names. These must resolve even when fdMatchId/fdId are not yet set.
+
+  beforeEach(() => setupMocks({ rooms: [] }));
+
+  it("matches 'Türkiye' via name normalization (ü→u) when API uses 'Türkiye'", async () => {
+    mockFetch.mockResolvedValue([
+      apiGroupMatch({
+        status: "FINISHED",
+        homeTeam: { id: 769, name: "Türkiye", shortName: "Türkiye", tla: "TUR" },
+        awayTeam: { id: 800, name: "Mexico",  shortName: "Mexico",  tla: "MEX" },
+        score: { winner: "HOME_TEAM", fullTime: { home: 2, away: 0 } },
+      }),
+    ] as any);
+    setupMocks({
+      rooms: [],
+      dbMatches: [
+        dbMatch({
+          fdMatchId: null,
+          homeTeam: { id: "ht-1", fdId: null, name: "Türkiye", shortName: "Türkiye", tla: "TUR" },
+          awayTeam: { id: "at-1", fdId: null, name: "Mexico",   shortName: "Mexico",  tla: "MEX" },
+          predictions: [],
+        }),
+      ],
+    });
+
+    await syncMatches();
+
+    expect(mockDb.match.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ homeScore: 2, awayScore: 0 }) })
+    );
+  });
+
+  it("matches 'Curaçao' via accent stripping (ç→c) when API uses 'Curacao'", async () => {
+    mockFetch.mockResolvedValue([
+      apiGroupMatch({
+        status: "FINISHED",
+        homeTeam: { id: 888, name: "Curacao",  shortName: "Curacao", tla: "CUW" },
+        awayTeam: { id: 800, name: "Mexico",   shortName: "Mexico",  tla: "MEX" },
+        score: { winner: "AWAY_TEAM", fullTime: { home: 0, away: 1 } },
+      }),
+    ] as any);
+    setupMocks({
+      rooms: [],
+      dbMatches: [
+        dbMatch({
+          fdMatchId: null,
+          homeTeam: { id: "ht-1", fdId: null, name: "Curaçao", shortName: "Curaçao", tla: "CUW" },
+          awayTeam: { id: "at-1", fdId: null, name: "Mexico",   shortName: "Mexico",  tla: "MEX" },
+          predictions: [],
+        }),
+      ],
+    });
+
+    await syncMatches();
+
+    expect(mockDb.match.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ homeScore: 0, awayScore: 1 }) })
+    );
+  });
+
+  it("matches 'Côte d'Ivoire' to API 'Ivory Coast' via alias map", async () => {
+    mockFetch.mockResolvedValue([
+      apiGroupMatch({
+        status: "FINISHED",
+        homeTeam: { id: 892, name: "Ivory Coast", shortName: "Ivory Coast", tla: "CIV" },
+        awayTeam: { id: 800, name: "Mexico",      shortName: "Mexico",      tla: "MEX" },
+        score: { winner: "HOME_TEAM", fullTime: { home: 3, away: 1 } },
+      }),
+    ] as any);
+    setupMocks({
+      rooms: [],
+      dbMatches: [
+        dbMatch({
+          fdMatchId: null,
+          homeTeam: { id: "ht-1", fdId: null, name: "Côte d'Ivoire", shortName: "Côte d'Ivoire", tla: "CIV" },
+          awayTeam: { id: "at-1", fdId: null, name: "Mexico",         shortName: "Mexico",         tla: "MEX" },
+          predictions: [],
+        }),
+      ],
+    });
+
+    await syncMatches();
+
+    expect(mockDb.match.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ homeScore: 3, awayScore: 1 }) })
+    );
+  });
+
+  it("matches 'Congo DR' to API 'DR Congo' via alias map", async () => {
+    mockFetch.mockResolvedValue([
+      apiGroupMatch({
+        status: "FINISHED",
+        homeTeam: { id: 901, name: "DR Congo", shortName: "DR Congo", tla: "COD" },
+        awayTeam: { id: 800, name: "Mexico",   shortName: "Mexico",   tla: "MEX" },
+        score: { winner: "DRAW", fullTime: { home: 1, away: 1 } },
+      }),
+    ] as any);
+    setupMocks({
+      rooms: [],
+      dbMatches: [
+        dbMatch({
+          fdMatchId: null,
+          homeTeam: { id: "ht-1", fdId: null, name: "Congo DR", shortName: "Congo DR", tla: "COD" },
+          awayTeam: { id: "at-1", fdId: null, name: "Mexico",    shortName: "Mexico",   tla: "MEX" },
+          predictions: [],
+        }),
+      ],
+    });
+
+    await syncMatches();
+
+    expect(mockDb.match.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ homeScore: 1, awayScore: 1 }) })
+    );
+  });
+
+  it("does NOT crash when normName is called with an empty string (empty API shortName)", async () => {
+    mockFetch.mockResolvedValue([
+      apiGroupMatch({
+        status: "FINISHED",
+        homeTeam: { id: 999, name: "Some Team", shortName: "", tla: "SMT" },
+        awayTeam: { id: 800, name: "Mexico",    shortName: "Mexico", tla: "MEX" },
+        score: { winner: "HOME_TEAM", fullTime: { home: 1, away: 0 } },
+      }),
+    ] as any);
+    setupMocks({
+      rooms: [],
+      dbMatches: [
+        dbMatch({
+          fdMatchId: null,
+          homeTeam: { id: "ht-1", fdId: null, name: "Some Team", shortName: "Some Team", tla: "SMT" },
+          awayTeam: { id: "at-1", fdId: null, name: "Mexico",    shortName: "Mexico",    tla: "MEX" },
+          predictions: [],
+        }),
+      ],
+    });
+
+    await expect(syncMatches()).resolves.not.toThrow();
+  });
+});
+
 describe("15. Match table as pure API mirror", () => {
   beforeEach(() => setupMocks({ rooms: [] }));
 
