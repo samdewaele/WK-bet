@@ -275,9 +275,10 @@ describe("2. Match update logic", () => {
 
     await syncMatches();
 
+    // kickoff is also synced from the API so the per-group lock uses the real time
     expect(mockDb.match.update).toHaveBeenCalledWith({
       where: { id: "db-match-1" },
-      data: { status: "finished", homeScore: 2, awayScore: 1 },
+      data: expect.objectContaining({ status: "finished", homeScore: 2, awayScore: 1 }),
     });
   });
 
@@ -291,10 +292,10 @@ describe("2. Match update logic", () => {
     expect(mockDb.match.update).not.toHaveBeenCalled();
   });
 
-  it("skips a match when kickoff differs by >= 10 minutes from all DB matches", async () => {
-    const farKickoff = new Date(kickoff.getTime() + 11 * 60 * 1000); // 11 min later
+  it("skips a match when no DB match has the same home+away team pair", async () => {
     mockDb.match.findMany.mockResolvedValue([
-      dbMatch({ kickoff: farKickoff, status: "scheduled" }),
+      // API has Brazil vs Germany; DB only has France vs Germany — home team differs
+      dbMatch({ kickoff, status: "scheduled", homeTeam: { id: "ht-x", name: "France", shortName: "France", tla: "FRA" } }),
     ]);
 
     await syncMatches();
@@ -302,10 +303,11 @@ describe("2. Match update logic", () => {
     expect(mockDb.match.update).not.toHaveBeenCalled();
   });
 
-  it("matches a DB match when kickoff differs by < 10 minutes", async () => {
-    const closeKickoff = new Date(kickoff.getTime() + 9 * 60 * 1000); // 9 min later
+  it("matches a DB match by team names regardless of kickoff proximity", async () => {
+    // DB kickoff is 2 hours after the API kickoff — old seed data vs real schedule
+    const seedKickoff = new Date(kickoff.getTime() + 2 * 60 * 60 * 1000);
     mockDb.match.findMany.mockResolvedValue([
-      dbMatch({ kickoff: closeKickoff, status: "scheduled" }),
+      dbMatch({ kickoff: seedKickoff, status: "scheduled" }),
     ]);
 
     await syncMatches();
@@ -1072,9 +1074,9 @@ describe("12. Result message format", () => {
     const k2 = new Date("2026-06-12T18:00:00Z");
     const k3 = new Date("2026-06-12T21:00:00Z");
     mockFetch.mockResolvedValue([
-      apiGroupMatch({ id: 1, utcDate: k1.toISOString(), status: "FINISHED", homeTeam: { id: 1, name: "Team1", shortName: "T1", tla: "T1" }, score: { winner: "HOME_TEAM", fullTime: { home: 1, away: 0 } } }),
-      apiGroupMatch({ id: 2, utcDate: k2.toISOString(), status: "FINISHED", homeTeam: { id: 2, name: "Team2", shortName: "T2", tla: "T2" }, score: { winner: "HOME_TEAM", fullTime: { home: 2, away: 0 } } }),
-      apiGroupMatch({ id: 3, utcDate: k3.toISOString(), status: "FINISHED", homeTeam: { id: 3, name: "Team3", shortName: "T3", tla: "T3" }, score: { winner: "HOME_TEAM", fullTime: { home: 3, away: 0 } } }),
+      apiGroupMatch({ id: 1, utcDate: k1.toISOString(), status: "FINISHED", homeTeam: { id: 1, name: "Team1", shortName: "T1", tla: "T1" }, awayTeam: { id: 2, name: "Away1", shortName: "Away1", tla: "A1" }, score: { winner: "HOME_TEAM", fullTime: { home: 1, away: 0 } } }),
+      apiGroupMatch({ id: 2, utcDate: k2.toISOString(), status: "FINISHED", homeTeam: { id: 3, name: "Team2", shortName: "T2", tla: "T2" }, awayTeam: { id: 4, name: "Away2", shortName: "Away2", tla: "A2" }, score: { winner: "HOME_TEAM", fullTime: { home: 2, away: 0 } } }),
+      apiGroupMatch({ id: 3, utcDate: k3.toISOString(), status: "FINISHED", homeTeam: { id: 5, name: "Team3", shortName: "T3", tla: "T3" }, awayTeam: { id: 6, name: "Away3", shortName: "Away3", tla: "A3" }, score: { winner: "HOME_TEAM", fullTime: { home: 3, away: 0 } } }),
     ] as any);
     mockDb.match.findMany.mockResolvedValue([
       dbMatch({ id: "db-1", kickoff: k1, status: "scheduled", homeTeam: { id: "h1", name: "Team1", shortName: "T1", tla: "T1" }, awayTeam: { id: "a1", name: "Away1", shortName: "A1", tla: "A1" }, predictions: [] }),
@@ -1230,6 +1232,46 @@ describe("14. Stale reset pass", () => {
       where: { id: "db-match-1" },
       data: { status: "scheduled", homeScore: null, awayScore: null },
     });
+  });
+
+  it("resets stale group match even when seed kickoff differs by hours from API kickoff", async () => {
+    // Regression: seed.ts uses fake kickoffs (3h apart from June 11); real API has actual
+    // match times. The old 10-min kickoff guard caused stale data to never be found.
+    const realApiKickoff = "2026-06-14T21:00:00Z";
+    const seedKickoff = new Date("2026-06-12T03:00:00Z"); // completely different seed time
+    mockFetch.mockResolvedValue([
+      apiGroupMatch({ utcDate: realApiKickoff, status: "SCHEDULED" }),
+    ] as any);
+    setupMocks({
+      rooms: [],
+      dbMatches: [dbMatch({ kickoff: seedKickoff, status: "finished", homeScore: 2, awayScore: 0, predictions: [] })],
+    });
+
+    await syncMatches();
+
+    expect(mockDb.match.update).toHaveBeenCalledWith({
+      where: { id: "db-match-1" },
+      data: { status: "scheduled", homeScore: null, awayScore: null },
+    });
+  });
+
+  it("updates group match with real API scores even when seed kickoff differs by hours", async () => {
+    // Same regression — main sync loop must also match by team names, not kickoff
+    const realApiKickoff = "2026-06-14T21:00:00Z";
+    const seedKickoff = new Date("2026-06-12T03:00:00Z");
+    mockFetch.mockResolvedValue([
+      apiGroupMatch({ utcDate: realApiKickoff, status: "FINISHED", score: { winner: "HOME_TEAM", fullTime: { home: 1, away: 0 } } }),
+    ] as any);
+    setupMocks({
+      rooms: [],
+      dbMatches: [dbMatch({ kickoff: seedKickoff, status: "finished", homeScore: 2, awayScore: 0, predictions: [] })],
+    });
+
+    await syncMatches();
+
+    expect(mockDb.match.update).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: "db-match-1" } })
+    );
   });
 });
 

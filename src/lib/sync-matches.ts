@@ -101,19 +101,24 @@ export async function syncMatches(): Promise<SyncResult> {
           { awayScore: { not: null } },
         ],
       },
-      include: { homeTeam: true },
+      include: { homeTeam: true, awayTeam: true },
     });
 
     for (const stale of staleMatches) {
-      const staleKickoff = new Date(stale.kickoff).getTime();
       const apiCounterpart = apiMatches.find((api) => {
-        const kickoffDiff = Math.abs(new Date(api.utcDate).getTime() - staleKickoff);
-        if (kickoffDiff >= 10 * 60 * 1000) return false;
-        if (!stale.homeTeam) return true;
-        return (
-          stale.homeTeam.name.toLowerCase() === api.homeTeam.name.toLowerCase() ||
-          stale.homeTeam.name.toLowerCase().includes(api.homeTeam.shortName.toLowerCase())
-        );
+        if (stale.homeTeam && stale.awayTeam) {
+          // Seed kickoffs are approximate — match by team names, which are reliable
+          const homeMatch =
+            stale.homeTeam.name.toLowerCase() === api.homeTeam.name.toLowerCase() ||
+            stale.homeTeam.name.toLowerCase().includes(api.homeTeam.shortName.toLowerCase());
+          const awayMatch =
+            stale.awayTeam.name.toLowerCase() === api.awayTeam.name.toLowerCase() ||
+            stale.awayTeam.name.toLowerCase().includes(api.awayTeam.shortName.toLowerCase());
+          return homeMatch && awayMatch;
+        }
+        // TBD KO placeholder: no teams yet, fall back to kickoff proximity
+        const diff = Math.abs(new Date(api.utcDate).getTime() - new Date(stale.kickoff).getTime());
+        return diff < 24 * 60 * 60 * 1000;
       });
 
       if (apiCounterpart && ["SCHEDULED", "TIMED"].includes(apiCounterpart.status)) {
@@ -149,13 +154,19 @@ export async function syncMatches(): Promise<SyncResult> {
     const apiAway = api.score.fullTime.away;
 
     const dbMatch = dbMatches.find((m) => {
+      if (m.homeTeam && m.awayTeam) {
+        // Seed kickoffs are approximate — match by team names, which are reliable
+        const homeMatch =
+          m.homeTeam.name.toLowerCase() === api.homeTeam.name.toLowerCase() ||
+          m.homeTeam.name.toLowerCase().includes(api.homeTeam.shortName.toLowerCase());
+        const awayMatch =
+          m.awayTeam.name.toLowerCase() === api.awayTeam.name.toLowerCase() ||
+          m.awayTeam.name.toLowerCase().includes(api.awayTeam.shortName.toLowerCase());
+        return homeMatch && awayMatch;
+      }
+      // TBD KO placeholder: no teams yet, fall back to kickoff proximity
       const kickoffDiff = Math.abs(new Date(m.kickoff).getTime() - apiKickoff);
-      if (kickoffDiff >= 10 * 60 * 1000) return false;
-      if (!m.homeTeam) return true; // KO slot with TBD teams — match on kickoff alone
-      return (
-        m.homeTeam.name.toLowerCase() === api.homeTeam.name.toLowerCase() ||
-        m.homeTeam.name.toLowerCase().includes(api.homeTeam.shortName.toLowerCase())
-      );
+      return kickoffDiff < 24 * 60 * 60 * 1000;
     });
 
     if (!dbMatch) continue;
@@ -177,6 +188,7 @@ export async function syncMatches(): Promise<SyncResult> {
       where: { id: dbMatch.id },
       data: {
         status: apiStatus,
+        kickoff: new Date(api.utcDate), // sync real kickoff so per-group locks use correct times
         ...(apiHome !== null && { homeScore: apiHome }),
         ...(apiAway !== null && { awayScore: apiAway }),
       },
