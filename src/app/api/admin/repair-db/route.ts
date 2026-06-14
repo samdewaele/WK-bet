@@ -99,10 +99,17 @@ export async function POST() {
   for (const dbm of dbGroup) {
     if (!dbm.homeTeam || !dbm.awayTeam) continue;
 
-    // Try to find the API counterpart
-    const apiM = apiGroup.find(
+    // Try to find the API counterpart — check both orientations because the
+    // DB seed may have assigned home/away in the opposite order from the API.
+    const apiMNormal = apiGroup.find(
       (a) => apiTeamMatches(dbm.homeTeam!.name, a.homeTeam) && apiTeamMatches(dbm.awayTeam!.name, a.awayTeam)
     );
+    const apiMReversed = !apiMNormal
+      ? apiGroup.find(
+          (a) => apiTeamMatches(dbm.homeTeam!.name, a.awayTeam) && apiTeamMatches(dbm.awayTeam!.name, a.homeTeam)
+        )
+      : undefined;
+    const apiM = apiMNormal ?? apiMReversed;
 
     if (!apiM) {
       unmatched++;
@@ -114,16 +121,26 @@ export async function POST() {
     const realKickoff = new Date(apiM.utcDate);
     if (dbm.kickoff.getTime() !== realKickoff.getTime()) { updates.kickoff = realKickoff; kickoffsFixed++; }
 
+    // If found via reversed orientation, swap homeTeamId ↔ awayTeamId so the
+    // DB matches the API's slot assignment and future score syncs are correct.
+    if (apiMReversed) {
+      updates.homeTeamId = dbm.awayTeam.id;
+      updates.awayTeamId = dbm.homeTeam.id;
+    }
+
     if (Object.keys(updates).length > 0) {
       await db.match.update({ where: { id: dbm.id }, data: updates });
     }
 
-    if (!dbm.homeTeam.fdId) {
-      await db.team.update({ where: { id: dbm.homeTeam.id }, data: { fdId: apiM.homeTeam.id } });
+    // Set team fdIds based on which slot each team ends up in after any swap.
+    const finalHomeTeam = apiMReversed ? dbm.awayTeam : dbm.homeTeam;
+    const finalAwayTeam = apiMReversed ? dbm.homeTeam : dbm.awayTeam;
+    if (!finalHomeTeam.fdId) {
+      await db.team.update({ where: { id: finalHomeTeam.id }, data: { fdId: apiM.homeTeam.id } });
       teamIdsSet++;
     }
-    if (!dbm.awayTeam.fdId) {
-      await db.team.update({ where: { id: dbm.awayTeam.id }, data: { fdId: apiM.awayTeam.id } });
+    if (!finalAwayTeam.fdId) {
+      await db.team.update({ where: { id: finalAwayTeam.id }, data: { fdId: apiM.awayTeam.id } });
       teamIdsSet++;
     }
   }
@@ -134,6 +151,6 @@ export async function POST() {
     kickoffsFixed,
     teamIdsSet,
     unmatched,
-    message: `Set ${matchIdsSet} match IDs, fixed ${kickoffsFixed} kickoffs, set ${teamIdsSet} team IDs. ${unmatched} group matches could not be matched to API (check team names in diagnose).`,
+    message: `Set ${matchIdsSet} match IDs, fixed ${kickoffsFixed} kickoffs, set ${teamIdsSet} team IDs. ${unmatched} group matches could not be matched to API (check team names in diagnose). Home/away was corrected where DB order differed from API.`,
   });
 }

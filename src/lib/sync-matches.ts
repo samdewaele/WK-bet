@@ -79,23 +79,33 @@ function teamMatches(dbName: string, api: FDTeam): boolean {
  * Tertiary:  multi-field name matching covering localisation variants.
  * TBD KO placeholders (no teams yet): kickoff proximity within 24 hours.
  */
+/**
+ * Returns "normal" if the DB match corresponds to the API match with teams in
+ * the same slot order, "reversed" if home/away are swapped in the DB vs the API,
+ * or null if no correspondence was found.
+ * Callers must swap homeScore/awayScore when the result is "reversed".
+ */
 function findDbMatch(
   m: DbMatchCandidate,
   apiMatchId: number,
   apiHome: FDTeam,
   apiAway: FDTeam,
   apiKickoffMs: number
-): boolean {
+): "normal" | "reversed" | null {
   if (m.fdMatchId !== null && m.fdMatchId !== undefined) {
-    return m.fdMatchId === apiMatchId;
+    return m.fdMatchId === apiMatchId ? "normal" : null;
   }
   if (m.homeTeam && m.awayTeam) {
     if (m.homeTeam.fdId && m.awayTeam.fdId) {
-      return m.homeTeam.fdId === apiHome.id && m.awayTeam.fdId === apiAway.id;
+      if (m.homeTeam.fdId === apiHome.id && m.awayTeam.fdId === apiAway.id) return "normal";
+      if (m.homeTeam.fdId === apiAway.id && m.awayTeam.fdId === apiHome.id) return "reversed";
+      return null;
     }
-    return teamMatches(m.homeTeam.name, apiHome) && teamMatches(m.awayTeam.name, apiAway);
+    if (teamMatches(m.homeTeam.name, apiHome) && teamMatches(m.awayTeam.name, apiAway)) return "normal";
+    if (teamMatches(m.homeTeam.name, apiAway) && teamMatches(m.awayTeam.name, apiHome)) return "reversed";
+    return null;
   }
-  return Math.abs(m.kickoff.getTime() - apiKickoffMs) < 24 * 60 * 60 * 1000;
+  return Math.abs(m.kickoff.getTime() - apiKickoffMs) < 24 * 60 * 60 * 1000 ? "normal" : null;
 }
 
 export type SyncResult = {
@@ -205,7 +215,7 @@ export async function syncMatches(): Promise<SyncResult> {
       // so a test mock that bypasses the WHERE clause doesn't trigger spurious resets.
       if (stale.status === "scheduled" && stale.homeScore === null && stale.awayScore === null) continue;
 
-      const apiCounterpart = apiMatches.find((api) => findDbMatch(stale, api.id, api.homeTeam, api.awayTeam, new Date(api.utcDate).getTime()));
+      const apiCounterpart = apiMatches.find((api) => findDbMatch(stale, api.id, api.homeTeam, api.awayTeam, new Date(api.utcDate).getTime()) !== null);
 
       const shouldReset =
         // API says the match hasn't happened yet — clear any stale score
@@ -256,14 +266,23 @@ export async function syncMatches(): Promise<SyncResult> {
     const apiHome = api.score.fullTime.home;
     const apiAway = api.score.fullTime.away;
 
-    const dbMatch = dbMatches.find((m) => findDbMatch(m, api.id, api.homeTeam, api.awayTeam, apiKickoff));
+    let matchOrientation: "normal" | "reversed" | null = null;
+    const dbMatch = dbMatches.find((m) => {
+      matchOrientation = findDbMatch(m, api.id, api.homeTeam, api.awayTeam, apiKickoff);
+      return matchOrientation !== null;
+    });
 
     if (!dbMatch) continue;
 
+    // When DB has teams in the opposite slot order from the API, swap the scores
+    // so homeScore always corresponds to the DB's homeTeam.
+    const storeHome = matchOrientation === "reversed" ? apiAway : apiHome;
+    const storeAway = matchOrientation === "reversed" ? apiHome : apiAway;
+
     const unchanged =
       dbMatch.status === apiStatus &&
-      dbMatch.homeScore === apiHome &&
-      dbMatch.awayScore === apiAway;
+      dbMatch.homeScore === storeHome &&
+      dbMatch.awayScore === storeAway;
     if (unchanged) continue;
 
     const wasFinished = dbMatch.status === "finished";
@@ -271,20 +290,20 @@ export async function syncMatches(): Promise<SyncResult> {
     // Also rescore if the match was already finished but scores changed — this
     // catches the case where sim data left a "finished" match with wrong scores
     // that the stale reset pass didn't clear (e.g. first sync after a new sim run).
-    const scoresChanged = dbMatch.homeScore !== apiHome || dbMatch.awayScore !== apiAway;
+    const scoresChanged = dbMatch.homeScore !== storeHome || dbMatch.awayScore !== storeAway;
 
     await db.match.update({
       where: { id: dbMatch.id },
       data: {
         status: apiStatus,
         kickoff: new Date(api.utcDate), // sync real kickoff so per-group locks use correct times
-        ...(apiHome !== null && { homeScore: apiHome }),
-        ...(apiAway !== null && { awayScore: apiAway }),
+        ...(storeHome !== null && { homeScore: storeHome }),
+        ...(storeAway !== null && { awayScore: storeAway }),
       },
     });
     updated++;
 
-    if (nowFinished && (!wasFinished || scoresChanged) && apiHome !== null && apiAway !== null) {
+    if (nowFinished && (!wasFinished || scoresChanged) && storeHome !== null && storeAway !== null) {
       const round = dbMatch.round as Round;
       await Promise.all(
         dbMatch.predictions.map((pred) => {
@@ -292,8 +311,8 @@ export async function syncMatches(): Promise<SyncResult> {
             round,
             pred.homeScore,
             pred.awayScore,
-            apiHome,
-            apiAway
+            storeHome,
+            storeAway
           );
           return db.prediction.update({ where: { id: pred.id }, data: { points } });
         })
@@ -303,10 +322,10 @@ export async function syncMatches(): Promise<SyncResult> {
       // Propagate KO bracket: populate the next round's team slots
       const KO_ROUND_NAMES = ["R32", "R16", "QF", "SF", "3rd", "Final"];
       if (KO_ROUND_NAMES.includes(dbMatch.round) && dbMatch.matchNumber) {
-        const winnerId = apiHome > apiAway
+        const winnerId = storeHome > storeAway
           ? (dbMatch.homeTeam?.id ?? null)
           : (dbMatch.awayTeam?.id ?? null);
-        const loserId = apiHome > apiAway
+        const loserId = storeHome > storeAway
           ? (dbMatch.awayTeam?.id ?? null)
           : (dbMatch.homeTeam?.id ?? null);
         if (winnerId) {
@@ -316,7 +335,7 @@ export async function syncMatches(): Promise<SyncResult> {
         }
 
         // Score every room's KO predictions for this finished match (live money).
-        await scoreKOMatchForAllRooms(dbMatch.id, dbMatch.round as KORound, apiHome, apiAway).catch(
+        await scoreKOMatchForAllRooms(dbMatch.id, dbMatch.round as KORound, storeHome, storeAway).catch(
           (err) => console.error("[sync] KO scoring failed:", err)
         );
       }
