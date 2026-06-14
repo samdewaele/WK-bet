@@ -65,12 +65,21 @@ export async function POST() {
       (m) => m.homeTeam.id === fdId || m.awayTeam.id === fdId
     )?.group?.replace(/^GROUP_/, "") ?? "?";
 
-    const upserted = await db.team.upsert({
-      where: { fdId },
-      create: { fdId, name, flag, group },
-      update: { flag, group },   // preserve any admin name edits on subsequent reseeds
-    });
-    teamIdByFdId.set(fdId, upserted.id);
+    // Find an existing row by fdId first, then by resolved name.
+    // Legacy rows were seeded from the TEAMS array with fdId = null, so
+    // a plain upsert({ where: { fdId } }) would try to INSERT and hit the
+    // unique-name constraint. We find-then-update instead.
+    const existing =
+      await db.team.findUnique({ where: { fdId } }) ??
+      await db.team.findUnique({ where: { name } });
+
+    if (existing) {
+      await db.team.update({ where: { id: existing.id }, data: { fdId, name, flag, group } });
+      teamIdByFdId.set(fdId, existing.id);
+    } else {
+      const created = await db.team.create({ data: { fdId, name, flag, group } });
+      teamIdByFdId.set(fdId, created.id);
+    }
     teamsUpserted++;
   }
 
