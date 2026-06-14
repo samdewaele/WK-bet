@@ -2,14 +2,18 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // ─── Mocks (must precede imports of the mocked modules) ──────────────────────
 
-vi.mock("@/lib/football-data", () => ({
-  fetchWCMatches: vi.fn(),
-  mapStatus: vi.fn((s: string) => {
-    if (["IN_PLAY", "PAUSED", "HALFTIME"].includes(s)) return "live";
-    if (s === "FINISHED") return "finished";
-    return "scheduled";
-  }),
-}));
+vi.mock("@/lib/football-data", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/football-data")>();
+  return {
+    ...actual,
+    fetchWCMatches: vi.fn(),
+    mapStatus: vi.fn((s: string) => {
+      if (["IN_PLAY", "PAUSED", "HALFTIME"].includes(s)) return "live";
+      if (s === "FINISHED") return "finished";
+      return "scheduled";
+    }),
+  };
+});
 
 vi.mock("@/lib/db", () => ({
   db: {

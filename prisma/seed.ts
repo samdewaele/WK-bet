@@ -2,6 +2,7 @@ import { PrismaBetterSqlite3 } from "@prisma/adapter-better-sqlite3";
 import { PrismaClient } from "../src/generated/prisma/client";
 import path from "path";
 import { TEAMS } from "../src/lib/teams-data";
+import { fetchWCMatches, teamNameMatches, normName } from "../src/lib/football-data";
 
 export { TEAMS };
 
@@ -73,21 +74,11 @@ async function main() {
   //    This corrects them so per-group prediction locks fire at the right time.
   //    Scores are NOT touched here — the sync job owns match scores entirely.
   if (!isE2E) {
-    const apiKey = process.env.FOOTBALL_DATA_API_KEY;
-    if (!apiKey) {
+    if (!process.env.FOOTBALL_DATA_API_KEY) {
       console.warn("⚠  FOOTBALL_DATA_API_KEY not set — skipping kickoff correction");
     } else {
       try {
-        const resp = await fetch("https://api.football-data.org/v4/competitions/WC/matches", {
-          headers: { "X-Auth-Token": apiKey },
-        });
-        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-        const data = await resp.json();
-
-        type ApiTeam = { id: number; name: string; shortName: string; tla: string };
-        type ApiM = { id: number; stage: string; utcDate: string; homeTeam: ApiTeam; awayTeam: ApiTeam };
-
-        const allApiMatches: ApiM[] = (data.matches ?? []) as ApiM[];
+        const allApiMatches = await fetchWCMatches();
         const apiGroup = allApiMatches.filter((m) => m.stage === "GROUP_STAGE");
 
         const dbGroup = await db.match.findMany({
@@ -95,62 +86,18 @@ async function main() {
           include: { homeTeam: true, awayTeam: true },
         });
 
-        function normName(s: string): string {
-          return s
-            .normalize("NFD")
-            .replace(/[̀-ͯ]/g, "")
-            .toLowerCase()
-            .replace(/\s+and\s+/g, " ")
-            .replace(/-/g, " ")
-            .replace(/[''`]/g, "")
-            .replace(/\s+/g, " ")
-            .trim();
-        }
-
-        const TEAM_ALIASES = new Map<string, string[]>([
-          ["Côte d'Ivoire", ["Ivory Coast", "Cote d Ivoire", "Cote dIvoire"]],
-          ["Congo DR",      ["DR Congo", "DRC", "Congo DRC", "Democratic Republic Congo", "Democratic Republic of Congo"]],
-        ]);
-
-        function apiTeamMatches(dbName: string, api: ApiTeam): boolean {
-          const db = dbName.toLowerCase();
-          const dbNorm = normName(dbName);
-          if (
-            db === api.name.toLowerCase() ||
-            db === api.shortName.toLowerCase() ||
-            db === api.tla.toLowerCase() ||
-            db.includes(api.shortName.toLowerCase()) ||
-            api.name.toLowerCase().includes(db) ||
-            api.shortName.toLowerCase().includes(db) ||
-            dbNorm === normName(api.name) ||
-            dbNorm === normName(api.shortName)
-          ) return true;
-          const aliases = TEAM_ALIASES.get(dbName) ?? [];
-          return aliases.some((alias) => {
-            const an = alias.toLowerCase();
-            return (
-              an === api.name.toLowerCase() ||
-              an === api.shortName.toLowerCase() ||
-              normName(alias) === normName(api.name) ||
-              normName(alias) === normName(api.shortName)
-            );
-          });
-        }
-
         let kickoffsFixed = 0, teamsTagged = 0, matchIdsStored = 0;
         for (const dbm of dbGroup) {
           if (!dbm.homeTeam || !dbm.awayTeam) continue;
           const apiM = apiGroup.find((a) =>
-            apiTeamMatches(dbm.homeTeam!.name, a.homeTeam) &&
-            apiTeamMatches(dbm.awayTeam!.name, a.awayTeam)
+            teamNameMatches(dbm.homeTeam!.name, a.homeTeam) &&
+            teamNameMatches(dbm.awayTeam!.name, a.awayTeam)
           );
           if (!apiM) continue;
 
-          // Store football-data.org match ID — primary key for all future syncs
           const updates: Record<string, unknown> = {};
           if (!dbm.fdMatchId) { updates.fdMatchId = apiM.id; matchIdsStored++; }
 
-          // Fix kickoff time
           const real = new Date(apiM.utcDate);
           if (dbm.kickoff.getTime() !== real.getTime()) { updates.kickoff = real; kickoffsFixed++; }
 
@@ -158,7 +105,6 @@ async function main() {
             await db.match.update({ where: { id: dbm.id }, data: updates });
           }
 
-          // Store football-data.org numeric team IDs for fallback matching
           if (!dbm.homeTeam.fdId) {
             await db.team.update({ where: { id: dbm.homeTeam.id }, data: { fdId: apiM.homeTeam.id } });
             teamsTagged++;
@@ -200,37 +146,25 @@ async function main() {
   // with future kickoffs so time-based locks don't fire during the test suite.
 
   if (!isE2E) {
-    const apiKey = process.env.FOOTBALL_DATA_API_KEY;
-    if (!apiKey) {
+    if (!process.env.FOOTBALL_DATA_API_KEY) {
       console.warn("⚠  FOOTBALL_DATA_API_KEY not set — falling back to hardcoded seed");
     } else {
       try {
-        const resp = await fetch("https://api.football-data.org/v4/competitions/WC/matches", {
-          headers: { "X-Auth-Token": apiKey },
-        });
-        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-        const data = await resp.json();
-
-        type ApiTeam = { id: number; name: string; shortName: string; tla: string };
-        type ApiM = { id: number; utcDate: string; stage: string; group: string | null; homeTeam: ApiTeam; awayTeam: ApiTeam };
-        const allApiMatches: ApiM[] = (data.matches ?? []) as ApiM[];
+        const allApiMatches = await fetchWCMatches();
         console.log(`✓ Fetched ${allApiMatches.length} matches from football-data.org`);
 
         // --- Teams ---
         // Look up our display name + flag from teams-data (normalised name match).
         // Falls back to API name / no flag if team isn't in our list.
-        const normName = (s: string) =>
-          s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase()
-           .replace(/\s+and\s+/g, " ").replace(/-/g, " ").replace(/[''`]/g, "").replace(/\s+/g, " ").trim();
         const ourTeamByNorm = new Map(TEAMS.map(t => [normName(t.name), t]));
-        function resolveTeamMeta(api: ApiTeam): { name: string; flag: string } {
+        function resolveTeamMeta(api: { id: number; name: string; shortName: string; tla: string }): { name: string; flag: string } {
           return ourTeamByNorm.get(normName(api.name))
             ?? ourTeamByNorm.get(normName(api.shortName))
             ?? { name: api.name, flag: "🏳️" };
         }
 
         const groupApiMatches = allApiMatches.filter(m => m.stage === "GROUP_STAGE");
-        const apiTeamMap = new Map<number, ApiTeam & { group: string }>();
+        const apiTeamMap = new Map<number, { id: number; name: string; shortName: string; tla: string; group: string }>();
         for (const m of groupApiMatches) {
           const grpLetter = m.group?.match(/[A-Z]$/)?.[0] ?? "?";
           if (m.homeTeam.id) apiTeamMap.set(m.homeTeam.id, { ...m.homeTeam, group: grpLetter });

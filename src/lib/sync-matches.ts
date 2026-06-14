@@ -1,5 +1,5 @@
 import { db } from "@/lib/db";
-import { fetchWCMatches, mapStatus } from "@/lib/football-data";
+import { fetchWCMatches, mapStatus, teamNameMatches } from "@/lib/football-data";
 import { calculatePoints, type Round } from "@/lib/points";
 import { checkAndSendRoundNotifications, checkAndSendIncompleteReminders } from "@/lib/notifications";
 import { computeGroupStandings, populateR32Bracket, populateNextRoundSlot } from "@/lib/ko-seeding";
@@ -15,61 +15,8 @@ type DbMatchCandidate = {
   kickoff: Date;
 };
 
-// Normalize team names for fuzzy matching:
-// - Strip unicode combining accents (ü→u, ç→c, ô→o) so "Türkiye"≡"Turkiye"
-// - " and " and "-" are equivalent separators (Bosnia fix)
-// - Strip apostrophes
-function normName(s: string): string {
-  return s
-    .normalize("NFD")
-    .replace(/[̀-ͯ]/g, "") // strip combining diacritical marks
-    .toLowerCase()
-    .replace(/\s+and\s+/g, " ")
-    .replace(/-/g, " ")
-    .replace(/[''`]/g, "") // strip apostrophes
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-// Teams whose official name in our DB differs completely from the API name.
-// Unicode normalization handles accents (Türkiye, Curaçao) but not full translations.
-const TEAM_ALIASES = new Map<string, string[]>([
-  ["Côte d'Ivoire", ["Ivory Coast", "Cote d Ivoire", "Cote dIvoire"]],
-  ["Congo DR",      ["DR Congo", "DRC", "Congo DRC", "Democratic Republic Congo", "Democratic Republic of Congo"]],
-]);
-
-/** Check whether a DB team name resolves to an API team.
- *  Guards against null team names returned by the API for TBD KO placeholders.
- *  Priority: direct name → normalized name → known aliases. */
 function teamMatches(dbName: string, api: FDTeam): boolean {
-  // TBD placeholder — API returns null team names for unresolved KO slots
-  if (!api.name && !api.shortName) return false;
-  const apiName = api.name ?? "";
-  const apiShort = api.shortName ?? "";
-  const apiTla = api.tla ?? "";
-
-  const db = dbName.toLowerCase();
-  const dbNorm = normName(dbName);
-  if (
-    db === apiName.toLowerCase() ||
-    db === apiShort.toLowerCase() ||
-    db === apiTla.toLowerCase() ||
-    db.includes(apiShort.toLowerCase()) ||
-    apiName.toLowerCase().includes(db) ||
-    apiShort.toLowerCase().includes(db) ||
-    dbNorm === normName(apiName) ||
-    dbNorm === normName(apiShort)
-  ) return true;
-  const aliases = TEAM_ALIASES.get(dbName) ?? [];
-  return aliases.some((alias) => {
-    const an = alias.toLowerCase();
-    return (
-      an === apiName.toLowerCase() ||
-      an === apiShort.toLowerCase() ||
-      normName(alias) === normName(apiName) ||
-      normName(alias) === normName(apiShort)
-    );
-  });
+  return teamNameMatches(dbName, api);
 }
 
 /**

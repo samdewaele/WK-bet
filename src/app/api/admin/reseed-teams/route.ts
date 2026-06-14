@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { auth } from "@auth";
 import { db } from "@/lib/db";
 import { TEAMS } from "@/lib/teams-data";
+import { fetchWCMatches, teamNameMatches } from "@/lib/football-data";
+import type { FDTeam } from "@/lib/football-data";
 
 /**
  * POST /api/admin/reseed-teams
@@ -17,65 +19,20 @@ import { TEAMS } from "@/lib/teams-data";
  * Platform admin only.
  */
 
-type ApiTeam = { id: number; name: string; shortName: string; tla: string };
-type ApiMatch = {
-  id: number;
-  utcDate: string;
-  stage: string;
-  group: string | null;
-  homeTeam: ApiTeam;
-  awayTeam: ApiTeam;
-};
-
-function normName(s: string): string {
-  return s
-    .normalize("NFD")
-    .replace(/[̀-ͯ]/g, "")
-    .toLowerCase()
-    .replace(/\s+and\s+/g, " ")
-    .replace(/-/g, " ")
-    .replace(/[''`]/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-const TEAM_ALIASES = new Map<string, string[]>([
-  ["Côte d'Ivoire", ["Ivory Coast", "Cote d Ivoire", "Cote dIvoire"]],
-  ["Congo DR",      ["DR Congo", "DRC", "Congo DRC", "Democratic Republic Congo", "Democratic Republic of Congo"]],
-]);
-
-/** Find the TEAMS entry whose name matches an API team (by norm or alias). */
-function findLocalTeam(api: ApiTeam) {
-  const apiNorm = normName(api.name);
-  const apiShortNorm = normName(api.shortName);
-  return TEAMS.find((t) => {
-    if (normName(t.name) === apiNorm || normName(t.name) === apiShortNorm) return true;
-    const aliases = TEAM_ALIASES.get(t.name) ?? [];
-    return aliases.some((a) => normName(a) === apiNorm || normName(a) === apiShortNorm);
-  });
-}
-
 export async function POST() {
   const session = await auth();
   if (session?.user?.role !== "admin") {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  const apiKey = process.env.FOOTBALL_DATA_API_KEY;
-  if (!apiKey) {
-    return NextResponse.json({ error: "FOOTBALL_DATA_API_KEY is not set — cannot seed from API" }, { status: 502 });
-  }
-
   // ── 1. Fetch group-stage matches from football-data.org ──────────────────
-  const resp = await fetch("https://api.football-data.org/v4/competitions/WC/matches", {
-    headers: { "X-Auth-Token": apiKey },
-    cache: "no-store",
-  });
-  if (!resp.ok) {
-    return NextResponse.json({ error: `football-data.org returned ${resp.status}` }, { status: 502 });
+  let allApiMatches;
+  try {
+    allApiMatches = await fetchWCMatches();
+  } catch (e) {
+    return NextResponse.json({ error: e instanceof Error ? e.message : String(e) }, { status: 502 });
   }
-  const data = await resp.json();
-  const apiGroupMatches = ((data.matches ?? []) as ApiMatch[])
+  const apiGroupMatches = allApiMatches
     .filter((m) => m.stage === "GROUP_STAGE")
     .sort((a, b) => new Date(a.utcDate).getTime() - new Date(b.utcDate).getTime());
 
@@ -85,7 +42,7 @@ export async function POST() {
 
   // ── 2. Upsert teams ───────────────────────────────────────────────────────
   // Build set of unique API teams from the group matches.
-  const apiTeamsById = new Map<number, ApiTeam>();
+  const apiTeamsById = new Map<number, FDTeam>();
   for (const m of apiGroupMatches) {
     apiTeamsById.set(m.homeTeam.id, m.homeTeam);
     apiTeamsById.set(m.awayTeam.id, m.awayTeam);
@@ -96,7 +53,7 @@ export async function POST() {
   const teamIdByFdId = new Map<number, string>(); // fdId → DB team.id
 
   for (const [fdId, apiTeam] of apiTeamsById) {
-    const local = findLocalTeam(apiTeam);
+    const local = TEAMS.find((t) => teamNameMatches(t.name, apiTeam));
     if (!local) {
       teamsUnmatched++;
       continue;
@@ -110,15 +67,9 @@ export async function POST() {
     teamsUpserted++;
   }
 
-  // ── 3. Remove stale teams (in DB but not referenced by any API group match) ──
-  const currentApiNames: Set<string> = new Set(
-    [...apiTeamsById.values()].flatMap((t) => {
-      const local = findLocalTeam(t);
-      return local ? [local.name] : [];
-    })
-  );
+  // ── 3. Remove teams that are not in the TEAMS local array ────────────────
   const allDbTeams = await db.team.findMany({ select: { id: true, name: true } });
-  const staleIds = allDbTeams.filter((t) => !currentApiNames.has(t.name)).map((t) => t.id);
+  const staleIds = allDbTeams.filter((t) => !TEAMS.some((local) => local.name === t.name)).map((t) => t.id);
   if (staleIds.length > 0) {
     await db.match.updateMany({ where: { round: "Group", homeTeamId: { in: staleIds } }, data: { homeTeamId: null } });
     await db.match.updateMany({ where: { round: "Group", awayTeamId: { in: staleIds } }, data: { awayTeamId: null } });

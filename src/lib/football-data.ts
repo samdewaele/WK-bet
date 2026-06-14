@@ -49,3 +49,50 @@ export function mapStatus(apiStatus: FDMatch["status"]): "scheduled" | "live" | 
   if (apiStatus === "FINISHED") return "finished";
   return "scheduled";
 }
+
+export function normName(s: string): string {
+  return s
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .toLowerCase()
+    .replace(/\s+and\s+/g, " ")
+    .replace(/-/g, " ")
+    .replace(/[''`]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+export const TEAM_ALIASES = new Map<string, string[]>([
+  ["Côte d'Ivoire", ["Ivory Coast", "Cote d Ivoire", "Cote dIvoire"]],
+  ["Congo DR",      ["DR Congo", "DRC", "Congo DRC", "Democratic Republic Congo", "Democratic Republic of Congo"]],
+  ["Türkiye",       ["Turkey", "Turkiye"]],
+]);
+
+export function teamNameMatches(dbName: string, api: FDTeam): boolean {
+  if (!api.name && !api.shortName) return false;
+  const apiName  = api.name      ?? "";
+  const apiShort = api.shortName ?? "";
+  const dbLower  = dbName.toLowerCase();
+  const dbNorm   = normName(dbName);
+  if (
+    dbLower === apiName.toLowerCase()  ||
+    dbLower === apiShort.toLowerCase() ||
+    dbLower === (api.tla ?? "").toLowerCase() ||
+    dbLower.includes(apiShort.toLowerCase()) ||
+    apiName.toLowerCase().includes(dbLower) ||
+    apiShort.toLowerCase().includes(dbLower) ||
+    dbNorm === normName(apiName) ||
+    dbNorm === normName(apiShort)
+  ) return true;
+  const aliases = TEAM_ALIASES.get(dbName) ?? [];
+  return aliases.some((alias) => {
+    const an = alias.toLowerCase();
+    return (
+      an === apiName.toLowerCase()  ||
+      an === apiShort.toLowerCase() ||
+      normName(alias) === normName(apiName) ||
+      normName(alias) === normName(apiShort)
+    );
+  });
+}
+
