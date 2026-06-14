@@ -127,7 +127,7 @@ export async function POST() {
     staleTeamsRemoved: staleIds.length,
     teamsUpserted,
     teamsUnmatched,
-    groupMatchesCreated,
+    groupMatchesRebuilt: groupMatchesCreated,
     message: `Created ${groupMatchesCreated} group matches from API with fdMatchId set. ${teamsUnmatched > 0 ? `${teamsUnmatched} team(s) had no local name/flag match and used the API name with placeholder flag 🏳️.` : "All teams matched local display names."}`,
   });
 }
