@@ -111,6 +111,8 @@ export default function GroupAdminPanel({
   // Reseed teams (platform admin)
   const [reseeding, setReseeding] = useState(false);
   const [reseedResult, setReseedResult] = useState<string | null>(null);
+  const [repairing, setRepairing] = useState(false);
+  const [repairResult, setRepairResult] = useState<string | null>(null);
 
   // Group image
   const [image, setImage] = useState<string | null>(initialImage ?? null);
@@ -251,6 +253,24 @@ export default function GroupAdminPanel({
       setReseedResult("✗ Network error");
     } finally {
       setReseeding(false);
+    }
+  }
+
+  async function handleRepairPredictions() {
+    setRepairing(true);
+    setRepairResult(null);
+    try {
+      const res = await fetch("/api/admin/repair-predictions", { method: "POST" });
+      const data = await res.json();
+      if (res.ok) {
+        setRepairResult(`✓ ${data.message}`);
+      } else {
+        setRepairResult(`✗ ${data.error ?? "Failed"}`);
+      }
+    } catch {
+      setRepairResult("✗ Network error");
+    } finally {
+      setRepairing(false);
     }
   }
 
@@ -926,13 +946,27 @@ export default function GroupAdminPanel({
                   {reseedResult}
                 </p>
               )}
-              <button
-                onClick={handleReseedTeams}
-                disabled={reseeding}
-                className="bg-violet-700 hover:bg-violet-600 disabled:opacity-40 text-white text-xs font-semibold px-3 py-2 rounded-lg transition-colors"
-              >
-                {reseeding ? "Rebuilding…" : "🔄 Rebuild Group Matches"}
-              </button>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  onClick={handleReseedTeams}
+                  disabled={reseeding}
+                  className="bg-violet-700 hover:bg-violet-600 disabled:opacity-40 text-white text-xs font-semibold px-3 py-2 rounded-lg transition-colors"
+                >
+                  {reseeding ? "Rebuilding…" : "🔄 Rebuild Group Matches"}
+                </button>
+                <button
+                  onClick={handleRepairPredictions}
+                  disabled={repairing}
+                  className="bg-violet-900 hover:bg-violet-800 disabled:opacity-40 text-white text-xs font-semibold px-3 py-2 rounded-lg transition-colors"
+                >
+                  {repairing ? "Repairing…" : "🔧 Repair Predictions"}
+                </button>
+              </div>
+              {repairResult && (
+                <p className={`text-xs mt-2 ${repairResult.startsWith("✓") ? "text-green-400" : "text-red-400"}`}>
+                  {repairResult}
+                </p>
+              )}
             </div>
           )}
 
