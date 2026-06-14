@@ -53,15 +53,22 @@ export async function POST() {
   const teamIdByFdId = new Map<number, string>(); // fdId → DB team.id
 
   for (const [fdId, apiTeam] of apiTeamsById) {
+    // Try to find a local entry for display name + flag.
+    // If matching fails we fall back to the API name and a placeholder flag —
+    // a team with an ugly flag is far better than a team that silently disappears.
     const local = TEAMS.find((t) => teamNameMatches(t.name, apiTeam));
-    if (!local) {
-      teamsUnmatched++;
-      continue;
-    }
+    if (!local) teamsUnmatched++;
+    const name  = local?.name  ?? apiTeam.name;
+    const flag  = local?.flag  ?? "🏳️";
+    // Group letter comes from the match data, not the local list.
+    const group = apiGroupMatches.find(
+      (m) => m.homeTeam.id === fdId || m.awayTeam.id === fdId
+    )?.group?.replace(/^GROUP_/, "") ?? "?";
+
     const upserted = await db.team.upsert({
-      where: { name: local.name },
-      create: { name: local.name, flag: local.flag, group: local.group, fdId },
-      update: { flag: local.flag, group: local.group, fdId },
+      where: { fdId },
+      create: { fdId, name, flag, group },
+      update: { flag, group },   // preserve any admin name edits on subsequent reseeds
     });
     teamIdByFdId.set(fdId, upserted.id);
     teamsUpserted++;
@@ -112,6 +119,6 @@ export async function POST() {
     teamsUpserted,
     teamsUnmatched,
     groupMatchesCreated,
-    message: `Created ${groupMatchesCreated} group matches directly from API with fdMatchId set. ${teamsUnmatched > 0 ? `${teamsUnmatched} API teams had no local match (check TEAM_ALIASES).` : "All teams matched."}`,
+    message: `Created ${groupMatchesCreated} group matches from API with fdMatchId set. ${teamsUnmatched > 0 ? `${teamsUnmatched} team(s) had no local name/flag match and used the API name with placeholder flag 🏳️.` : "All teams matched local display names."}`,
   });
 }

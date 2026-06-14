@@ -66,6 +66,7 @@ export const TEAM_ALIASES = new Map<string, string[]>([
   ["Côte d'Ivoire", ["Ivory Coast", "Cote d Ivoire", "Cote dIvoire"]],
   ["Congo DR",      ["DR Congo", "DRC", "Congo DRC", "Democratic Republic Congo", "Democratic Republic of Congo"]],
   ["Türkiye",       ["Turkey", "Turkiye"]],
+  ["Cabo Verde",    ["Cape Verde"]],
 ]);
 
 export function teamNameMatches(dbName: string, api: FDTeam): boolean {
