@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import TeamFlag from "@/components/TeamFlag";
 import { filterRecentResults, type RecentMatch } from "@/lib/recent-results";
+import { formatDate } from "@/lib/format-date";
 
 const ROUND_LABEL: Record<string, string> = {
   R32: "R32", R16: "R16", QF: "QF", SF: "SF", "3rd": "3rd", Final: "Final",
@@ -28,7 +29,10 @@ export default function RecentResults() {
           const label = m.round === "Group" ? `Group ${m.group}` : (ROUND_LABEL[m.round] ?? m.round);
           return (
             <div key={m.id} className="flex items-center gap-2 text-sm">
-              <span className="text-xs text-gray-600 w-14 shrink-0">{label}</span>
+              <div className="shrink-0 w-16">
+                <div className="text-xs text-gray-600">{label}</div>
+                <div className="text-xs text-gray-700">{formatDate(m.kickoff)}</div>
+              </div>
               <div className="flex-1 flex items-center justify-end gap-1.5 min-w-0">
                 <span className="text-gray-300 truncate text-right">{m.homeTeam!.name}</span>
                 <TeamFlag flag={m.homeTeam!.flag} name={m.homeTeam!.name} size={14} />

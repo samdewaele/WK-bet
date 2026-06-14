@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import TeamFlag from "@/components/TeamFlag";
 import { computeActualStandings, type TeamStanding } from "@/lib/group-standings";
+import { formatDate, formatDateTime } from "@/lib/format-date";
 
 const WC_GROUPS = ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L"];
 
@@ -295,9 +296,9 @@ export default function GroupStandingsPicker({ roomId, roomStatus, groupKickoffT
           const countdown = groupCountdown(group);
           const isDirty = !locked && complete && (!saved || Object.keys(state).some(k => state[k as keyof GroupState] !== saved[k as keyof GroupState]));
           const actual = actualStandings.get(group) ?? [];
-          const groupFinishedMatches = allMatches
-            .filter((m) => m.group === group && m.status === "finished" && m.homeTeam && m.awayTeam)
-            .sort((a, b) => new Date(b.kickoff).getTime() - new Date(a.kickoff).getTime());
+          const groupMatches = allMatches
+            .filter((m) => m.group === group && m.homeTeam && m.awayTeam)
+            .sort((a, b) => new Date(a.kickoff).getTime() - new Date(b.kickoff).getTime());
 
           return (
             <div
@@ -430,24 +431,48 @@ export default function GroupStandingsPicker({ roomId, roomStatus, groupKickoffT
                 </div>
               )}
 
-              {/* Finished match results for this group — always shown below */}
-              {groupFinishedMatches.length > 0 && (
+              {/* Match schedule for this group (upcoming + results) */}
+              {groupMatches.length > 0 && (
                 <div className="mt-3 border-t border-gray-700/50 pt-2.5 space-y-1.5">
-                  {groupFinishedMatches.map((m) => (
-                    <div key={m.id} className="flex items-center text-xs gap-1.5">
-                      <div className="flex-1 flex items-center justify-end gap-1 min-w-0">
-                        <span className="text-gray-400 truncate">{m.homeTeam!.name}</span>
-                        <TeamFlag flag={m.homeTeam!.flag} name={m.homeTeam!.name} size={12} />
+                  {groupMatches.map((m) => {
+                    const isFinished = m.status === "finished";
+                    const isLive = m.status === "live";
+                    return (
+                      <div key={m.id} className="flex items-center text-xs gap-1.5">
+                        {isFinished ? (
+                          <>
+                            <div className="flex-1 flex items-center justify-end gap-1 min-w-0">
+                              <span className="text-gray-400 truncate">{m.homeTeam!.name}</span>
+                              <TeamFlag flag={m.homeTeam!.flag} name={m.homeTeam!.name} size={12} />
+                            </div>
+                            <span className="font-mono font-bold text-white bg-gray-800 px-1.5 py-0.5 rounded shrink-0">
+                              {m.homeScore}–{m.awayScore}
+                            </span>
+                            <div className="flex-1 flex items-center gap-1 min-w-0">
+                              <TeamFlag flag={m.awayTeam!.flag} name={m.awayTeam!.name} size={12} />
+                              <span className="text-gray-400 truncate">{m.awayTeam!.name}</span>
+                            </div>
+                            <span className="text-gray-600 shrink-0 tabular-nums">{formatDate(m.kickoff)}</span>
+                          </>
+                        ) : (
+                          <>
+                            <div className="flex-1 flex items-center justify-end gap-1 min-w-0">
+                              <span className="text-gray-500 truncate">{m.homeTeam!.name}</span>
+                              <TeamFlag flag={m.homeTeam!.flag} name={m.homeTeam!.name} size={12} />
+                            </div>
+                            <span className={`px-1.5 py-0.5 rounded shrink-0 tabular-nums ${isLive ? "bg-red-500/20 text-red-400 font-bold" : "text-gray-600"}`}>
+                              {isLive ? "LIVE" : "vs"}
+                            </span>
+                            <div className="flex-1 flex items-center gap-1 min-w-0">
+                              <TeamFlag flag={m.awayTeam!.flag} name={m.awayTeam!.name} size={12} />
+                              <span className="text-gray-500 truncate">{m.awayTeam!.name}</span>
+                            </div>
+                            <span className="text-gray-600 shrink-0 tabular-nums text-right">{formatDateTime(m.kickoff)}</span>
+                          </>
+                        )}
                       </div>
-                      <span className="font-mono font-bold text-white bg-gray-800 px-1.5 py-0.5 rounded shrink-0">
-                        {m.homeScore}–{m.awayScore}
-                      </span>
-                      <div className="flex-1 flex items-center gap-1 min-w-0">
-                        <TeamFlag flag={m.awayTeam!.flag} name={m.awayTeam!.name} size={12} />
-                        <span className="text-gray-400 truncate">{m.awayTeam!.name}</span>
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>
