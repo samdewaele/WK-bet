@@ -42,16 +42,11 @@ async function main() {
   console.log("Seeding database...");
 
   // ── Per-deploy cleanup ─────────────────────────────────────────────────────
+  // Clear simulation results (test artifacts). Real match scores are NOT reset
+  // here — they come from the API and must survive deploys. The stale-reset
+  // pass in the sync loop already clears any sim scores for future matches.
   const { count: simCleared } = await db.simResult.deleteMany({});
   if (simCleared > 0) console.log(`✓ Cleared ${simCleared} simulation result(s)`);
-
-  if (!isE2E) {
-    const { count: matchReset } = await db.match.updateMany({
-      where: { OR: [{ homeScore: { not: null } }, { awayScore: { not: null } }, { status: { not: "scheduled" } }] },
-      data: { homeScore: null, awayScore: null, status: "scheduled" },
-    });
-    if (matchReset > 0) console.log(`✓ Reset ${matchReset} match(es) — sync will restore real results`);
-  }
 
   // On re-runs (matches already exist) just ensure teams are present and exit.
   if (await db.match.count() > 0) {
