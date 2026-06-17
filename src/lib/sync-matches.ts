@@ -219,7 +219,10 @@ export async function syncMatches(): Promise<SyncResult> {
       return matchOrientation !== null;
     });
 
-    if (!dbMatch) continue;
+    if (!dbMatch) {
+      console.warn(`[sync] No DB match found for API match id=${api.id} (${api.homeTeam.name} vs ${api.awayTeam.name}, status=${api.status}) — skipped`);
+      continue;
+    }
 
     // When DB has teams in the opposite slot order from the API, swap the scores
     // so homeScore always corresponds to the DB's homeTeam.

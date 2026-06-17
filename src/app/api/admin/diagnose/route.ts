@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { auth } from "@auth";
 import { db } from "@/lib/db";
-import { fetchWCMatches } from "@/lib/football-data";
+import { fetchWCMatches, teamNameMatches } from "@/lib/football-data";
 
 /**
  * GET /api/admin/diagnose
@@ -73,29 +73,8 @@ export async function GET() {
   };
 
   // ── 3. Matching check: for every finished API match, can we find a DB row? ─
-  function normName(s: string): string {
-    return s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase()
-      .replace(/\s+and\s+/g, " ").replace(/-/g, " ").replace(/[''`]/g, "").replace(/\s+/g, " ").trim();
-  }
-  const TEAM_ALIASES = new Map<string, string[]>([
-    ["Côte d'Ivoire", ["Ivory Coast", "Cote d Ivoire"]],
-    ["Congo DR",      ["DR Congo", "DRC", "Congo DRC", "Democratic Republic of Congo"]],
-  ]);
-  function nameOk(dbName: string, api: { name: string; shortName: string; tla: string }): boolean {
-    const h = dbName.toLowerCase();
-    const hn = normName(dbName);
-    if (h === api.name.toLowerCase() || h === api.shortName.toLowerCase() || h === api.tla.toLowerCase() ||
-        h.includes(api.shortName.toLowerCase()) || api.name.toLowerCase().includes(h) ||
-        api.shortName.toLowerCase().includes(h) ||
-        hn === normName(api.name) || hn === normName(api.shortName)) return true;
-    return (TEAM_ALIASES.get(dbName) ?? []).some((alias) => {
-      const an = alias.toLowerCase();
-      return an === api.name.toLowerCase() || an === api.shortName.toLowerCase() ||
-        normName(alias) === normName(api.name) || normName(alias) === normName(api.shortName);
-    });
-  }
-
-  const matchingCheck = apiFinished.slice(0, 15).map((api) => {
+  // Uses the same teamNameMatches from football-data.ts that the real sync uses.
+  const matchingCheck = apiFinished.map((api) => {
     const byMatchId = dbMatches.find((m) => m.fdMatchId === api.id);
 
     const byFdId = !byMatchId
@@ -107,7 +86,7 @@ export async function GET() {
     const byName = !byMatchId && !byFdId
       ? dbMatches.find((m) => {
           if (!m.homeTeam || !m.awayTeam) return false;
-          return nameOk(m.homeTeam.name, api.homeTeam) && nameOk(m.awayTeam.name, api.awayTeam);
+          return teamNameMatches(m.homeTeam.name, api.homeTeam) && teamNameMatches(m.awayTeam.name, api.awayTeam);
         })
       : undefined;
 
