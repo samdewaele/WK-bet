@@ -113,6 +113,8 @@ export default function GroupAdminPanel({
   const [reseedResult, setReseedResult] = useState<string | null>(null);
   const [repairing, setRepairing] = useState(false);
   const [repairResult, setRepairResult] = useState<string | null>(null);
+  const [fixingGroups, setFixingGroups] = useState(false);
+  const [fixGroupsResult, setFixGroupsResult] = useState<string | null>(null);
 
   // Group image
   const [image, setImage] = useState<string | null>(initialImage ?? null);
@@ -271,6 +273,24 @@ export default function GroupAdminPanel({
       setRepairResult("✗ Network error");
     } finally {
       setRepairing(false);
+    }
+  }
+
+  async function handleFixGroups() {
+    setFixingGroups(true);
+    setFixGroupsResult(null);
+    try {
+      const res = await fetch("/api/admin/repair-groups", { method: "POST" });
+      const data = await res.json();
+      if (res.ok) {
+        setFixGroupsResult(`✓ ${data.message}${data.details?.length ? " " + data.details.join(", ") : ""}`);
+      } else {
+        setFixGroupsResult(`✗ ${data.error ?? "Failed"}`);
+      }
+    } catch {
+      setFixGroupsResult("✗ Network error");
+    } finally {
+      setFixingGroups(false);
     }
   }
 
@@ -961,10 +981,22 @@ export default function GroupAdminPanel({
                 >
                   {repairing ? "Repairing…" : "🔧 Repair Predictions"}
                 </button>
+                <button
+                  onClick={handleFixGroups}
+                  disabled={fixingGroups}
+                  className="bg-violet-900 hover:bg-violet-800 disabled:opacity-40 text-white text-xs font-semibold px-3 py-2 rounded-lg transition-colors"
+                >
+                  {fixingGroups ? "Fixing…" : "🗂 Fix Group Labels"}
+                </button>
               </div>
               {repairResult && (
                 <p className={`text-xs mt-2 ${repairResult.startsWith("✓") ? "text-green-400" : "text-red-400"}`}>
                   {repairResult}
+                </p>
+              )}
+              {fixGroupsResult && (
+                <p className={`text-xs mt-2 ${fixGroupsResult.startsWith("✓") ? "text-green-400" : "text-red-400"}`}>
+                  {fixGroupsResult}
                 </p>
               )}
             </div>
