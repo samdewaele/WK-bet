@@ -93,12 +93,16 @@ export async function GET() {
     const matched = byMatchId ?? byFdId ?? byName;
     return {
       apiMatch: `${api.homeTeam.name} (id:${api.id}) vs ${api.awayTeam.name}`,
+      apiGroup: api.group,
       realScore: `${api.score.fullTime.home}-${api.score.fullTime.away}`,
       matchedBy: byMatchId ? "fdMatchId" : byFdId ? "teamFdId" : byName ? "name" : "NONE — will be skipped by sync",
       dbScore: matched
         ? (matched.homeScore !== null ? `${matched.homeScore}-${matched.awayScore}` : "null/null (scheduled)")
         : "—",
       dbStatus: matched?.status ?? "—",
+      dbGroup: matched?.group ?? "—",
+      dbHomeTeam: matched?.homeTeam?.name ?? "null",
+      dbAwayTeam: matched?.awayTeam?.name ?? "null",
     };
   });
 

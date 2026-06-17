@@ -247,6 +247,8 @@ export async function syncMatches(): Promise<SyncResult> {
       data: {
         status: apiStatus,
         kickoff: new Date(api.utcDate), // sync real kickoff so per-group locks use correct times
+        // Sync group letter from API in case it was null or wrong in the DB
+        ...(api.group && { group: api.group.replace(/^GROUP_/, "") }),
         ...(storeHome !== null && { homeScore: storeHome }),
         ...(storeAway !== null && { awayScore: storeAway }),
       },
