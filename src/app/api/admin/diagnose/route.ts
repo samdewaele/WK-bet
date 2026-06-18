@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { auth } from "@auth";
 import { db } from "@/lib/db";
-import { fetchWCMatches, teamNameMatches } from "@/lib/football-data";
+import { fetchWCMatches, teamNameMatches, mapStatus } from "@/lib/football-data";
 
 /**
  * GET /api/admin/diagnose
@@ -106,5 +106,69 @@ export async function GET() {
     };
   });
 
-  return NextResponse.json({ db: dbSummary, api: apiSummary, matchingCheck });
+  // ── 4. Live match check ────────────────────────────────────────────────────
+  const LIVE_STATUSES = ["IN_PLAY", "PAUSED", "HALFTIME"] as const;
+  const apiLive = apiMatches.filter((m) => (LIVE_STATUSES as readonly string[]).includes(m.status));
+
+  const dbLive = await db.match.findMany({
+    where: { status: "live" },
+    include: { homeTeam: true, awayTeam: true },
+    orderBy: { kickoff: "asc" },
+  });
+
+  // All DB matches (all rounds) needed to check if a live API match maps to a DB row.
+  const allDbMatches = await db.match.findMany({
+    include: {
+      homeTeam: { select: { id: true, fdId: true, name: true } },
+      awayTeam: { select: { id: true, fdId: true, name: true } },
+    },
+  });
+
+  const liveMatchCheck = apiLive.map((api) => {
+    const byMatchId = allDbMatches.find((m) => m.fdMatchId === api.id);
+    const byName = !byMatchId
+      ? allDbMatches.find((m) => {
+          if (!m.homeTeam || !m.awayTeam) return false;
+          return (
+            teamNameMatches(m.homeTeam.name, api.homeTeam) &&
+            teamNameMatches(m.awayTeam.name, api.awayTeam)
+          );
+        })
+      : undefined;
+    const matched = byMatchId ?? byName;
+    const liveScore = api.score.fullTime;
+    return {
+      apiMatch: `${api.homeTeam.name} vs ${api.awayTeam.name}`,
+      apiId: api.id,
+      apiStatus: api.status,
+      apiMappedStatus: mapStatus(api.status),
+      apiScore: liveScore.home !== null ? `${liveScore.home}-${liveScore.away}` : "in progress (null)",
+      apiKickoff: api.utcDate,
+      matchedBy: byMatchId ? "fdMatchId" : byName ? "name" : "NONE — will be skipped by sync",
+      dbStatus: matched?.status ?? "—",
+      dbScore: matched
+        ? matched.homeScore !== null
+          ? `${matched.homeScore}-${matched.awayScore}`
+          : "null/null"
+        : "—",
+      dbRound: matched?.round ?? "—",
+      dbId: matched?.id ?? "—",
+    };
+  });
+
+  const liveSummary = {
+    apiLiveCount: apiLive.length,
+    dbLiveCount: dbLive.length,
+    dbLiveMatches: dbLive.map((m) => ({
+      id: m.id,
+      home: m.homeTeam?.name ?? "TBD",
+      away: m.awayTeam?.name ?? "TBD",
+      score: m.homeScore !== null ? `${m.homeScore}-${m.awayScore}` : "null/null",
+      kickoff: m.kickoff.toISOString(),
+      round: m.round,
+    })),
+    liveMatchCheck,
+  };
+
+  return NextResponse.json({ db: dbSummary, api: apiSummary, matchingCheck, live: liveSummary });
 }
