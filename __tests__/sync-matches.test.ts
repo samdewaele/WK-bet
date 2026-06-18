@@ -1880,3 +1880,64 @@ describe("15. Match table as pure API mirror", () => {
     });
   });
 });
+
+describe("16. hasLiveMatches flag in SyncResult", () => {
+  const kickoff = new Date("2026-06-12T15:00:00Z");
+
+  beforeEach(() => setupMocks({ rooms: [] }));
+
+  it("is false when all API matches are SCHEDULED", async () => {
+    mockFetch.mockResolvedValue([
+      apiGroupMatch({ status: "SCHEDULED", score: { winner: null, fullTime: { home: null, away: null } } }),
+    ] as any);
+    const result = await syncMatches();
+    expect(result.hasLiveMatches).toBe(false);
+  });
+
+  it("is false when all API matches are FINISHED", async () => {
+    mockFetch.mockResolvedValue([
+      apiGroupMatch({ status: "FINISHED" }),
+    ] as any);
+    const result = await syncMatches();
+    expect(result.hasLiveMatches).toBe(false);
+  });
+
+  it("is false when API returns no matches", async () => {
+    mockFetch.mockResolvedValue([] as any);
+    const result = await syncMatches();
+    expect(result.hasLiveMatches).toBe(false);
+  });
+
+  it("is true when any match is IN_PLAY", async () => {
+    mockFetch.mockResolvedValue([
+      apiGroupMatch({ status: "SCHEDULED", score: { winner: null, fullTime: { home: null, away: null } } }),
+      apiGroupMatch({ id: 2, utcDate: kickoff.toISOString(), status: "IN_PLAY", score: { winner: null, fullTime: { home: 1, away: 0 } } }),
+    ] as any);
+    const result = await syncMatches();
+    expect(result.hasLiveMatches).toBe(true);
+  });
+
+  it("is true when any match is PAUSED", async () => {
+    mockFetch.mockResolvedValue([
+      apiGroupMatch({ utcDate: kickoff.toISOString(), status: "PAUSED", score: { winner: null, fullTime: { home: 2, away: 1 } } }),
+    ] as any);
+    const result = await syncMatches();
+    expect(result.hasLiveMatches).toBe(true);
+  });
+
+  it("is true when any match is HALFTIME", async () => {
+    mockFetch.mockResolvedValue([
+      apiGroupMatch({ utcDate: kickoff.toISOString(), status: "HALFTIME", score: { winner: null, fullTime: { home: 0, away: 0 } } }),
+    ] as any);
+    const result = await syncMatches();
+    expect(result.hasLiveMatches).toBe(true);
+  });
+
+  it("is true even when the live match is in a KO stage", async () => {
+    mockFetch.mockResolvedValue([
+      apiGroupMatch({ stage: "LAST_16", utcDate: kickoff.toISOString(), status: "IN_PLAY", score: { winner: null, fullTime: { home: 1, away: 1 } } }),
+    ] as any);
+    const result = await syncMatches();
+    expect(result.hasLiveMatches).toBe(true);
+  });
+});

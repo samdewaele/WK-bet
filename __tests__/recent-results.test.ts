@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { filterRecentResults, type RecentMatch } from "@/lib/recent-results";
+import { filterRecentResults, filterLiveMatches, type RecentMatch } from "@/lib/recent-results";
 
 const TEAM_A = { id: "ta", name: "Brazil", flag: "🇧🇷" };
 const TEAM_B = { id: "tb", name: "Germany", flag: "🇩🇪" };
@@ -100,5 +100,78 @@ describe("filterRecentResults", () => {
       match({ id: "grp", round: "Group", group: "A", kickoff: "2026-06-15T18:00:00Z" }),
     ]);
     expect(result.map((m) => m.id)).toEqual(["ko", "grp"]);
+  });
+});
+
+describe("filterLiveMatches", () => {
+  it("returns empty array when given no matches", () => {
+    expect(filterLiveMatches([])).toEqual([]);
+  });
+
+  it("returns empty array when no matches are live", () => {
+    expect(filterLiveMatches([
+      match({ id: "fin", status: "finished" }),
+      match({ id: "sched", status: "scheduled" }),
+    ])).toEqual([]);
+  });
+
+  it("returns only live matches, ignoring finished and scheduled", () => {
+    const result = filterLiveMatches([
+      match({ id: "fin", status: "finished" }),
+      match({ id: "live", status: "live" }),
+      match({ id: "sched", status: "scheduled" }),
+    ]);
+    expect(result).toHaveLength(1);
+    expect(result[0].id).toBe("live");
+  });
+
+  it("filters out live matches where homeTeam is null", () => {
+    expect(filterLiveMatches([
+      match({ id: "live", status: "live", homeTeam: null }),
+    ])).toEqual([]);
+  });
+
+  it("filters out live matches where awayTeam is null", () => {
+    expect(filterLiveMatches([
+      match({ id: "live", status: "live", awayTeam: null }),
+    ])).toEqual([]);
+  });
+
+  it("sorts by kickoff ascending (earliest first, for multi-match days)", () => {
+    const result = filterLiveMatches([
+      match({ id: "later",   status: "live", kickoff: "2026-06-15T21:00:00Z" }),
+      match({ id: "earlier", status: "live", kickoff: "2026-06-15T15:00:00Z" }),
+      match({ id: "mid",     status: "live", kickoff: "2026-06-15T18:00:00Z" }),
+    ]);
+    expect(result.map((m) => m.id)).toEqual(["earlier", "mid", "later"]);
+  });
+
+  it("returns all live matches without a limit", () => {
+    const matches = Array.from({ length: 8 }, (_, i) =>
+      match({ id: `m${i}`, status: "live", kickoff: `2026-06-${10 + i}T18:00:00Z` })
+    );
+    expect(filterLiveMatches(matches)).toHaveLength(8);
+  });
+
+  it("handles live matches with null scores (0-0 in progress)", () => {
+    // Build manually — the match() helper uses ?? so it can't express null scores
+    const liveMatch: RecentMatch = {
+      id: "live", round: "Group", group: "A",
+      kickoff: "2026-06-15T15:00:00Z",
+      homeScore: null, awayScore: null,
+      status: "live", homeTeam: TEAM_A, awayTeam: TEAM_B,
+    };
+    const result = filterLiveMatches([liveMatch]);
+    expect(result).toHaveLength(1);
+    expect(result[0].homeScore).toBeNull();
+    expect(result[0].awayScore).toBeNull();
+  });
+
+  it("includes KO round live matches", () => {
+    const result = filterLiveMatches([
+      match({ id: "sf", status: "live", round: "SF", group: null }),
+    ]);
+    expect(result).toHaveLength(1);
+    expect(result[0].round).toBe("SF");
   });
 });
