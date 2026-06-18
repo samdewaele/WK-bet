@@ -1876,7 +1876,7 @@ describe("15. Match table as pure API mirror", () => {
 
     expect(mockDb.match.update).toHaveBeenCalledWith({
       where: { id: "ko-match-1" },
-      data: { status: "scheduled", homeScore: null, awayScore: null },
+      data: { status: "scheduled", homeScore: null, awayScore: null, homeTeamId: null, awayTeamId: null },
     });
   });
 });
