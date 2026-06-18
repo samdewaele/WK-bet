@@ -98,6 +98,28 @@ function makeGroupMatches(total: number, finishedCount: number) {
 }
 
 /**
+ * API response for the "knockout underway" state: all 72 GROUP_STAGE matches
+ * FINISHED (so allGroupDone=true) plus one knockout fixture. ko_active is now
+ * derived purely from the API — a KO match that is live/finished or whose
+ * scheduled time has passed — never from DB kickoff times.
+ */
+function allGroupDoneWithKO(koOverrides: Record<string, any> = {}) {
+  return [
+    ...makeGroupMatches(72, 72),
+    apiGroupMatch({
+      id: 9001,
+      stage: "LAST_32",
+      status: koOverrides.status ?? "SCHEDULED",
+      utcDate: koOverrides.utcDate ?? new Date(Date.now() - 30 * 60 * 1000).toISOString(),
+      homeTeam: { id: 900, name: "KOHome", shortName: "KOHome", tla: "KOH" },
+      awayTeam: { id: 901, name: "KOAway", shortName: "KOAway", tla: "KOA" },
+      score: { winner: null, fullTime: { home: null, away: null } },
+      ...koOverrides,
+    }),
+  ];
+}
+
+/**
  * Build a minimal DB match object.
  * Defaults: status="scheduled", no predictions, round="Group", homeTeam present.
  */
@@ -155,13 +177,17 @@ function setupMocks(opts: SetupOptions = {}) {
   } = opts;
 
   // Differentiate the two findMany calls:
-  // 1. Stale reset pass uses { where: { OR: [...] } } — return only non-clean matches
+  // 1. Stale reset pass uses { where: { OR: [...] } } — return rows that are either
+  //    non-clean (status/score) OR a KO placeholder with a past kickoff (corrupt date).
   // 2. Main update loop has no `where` — return the full list
+  const KO_ROUNDS = ["R32", "R16", "QF", "SF", "3rd", "Final"];
   mockDb.match.findMany.mockImplementation((args: any) => {
     if (args?.where?.OR) {
+      const nowMs = Date.now();
       return Promise.resolve(
         dbMatches.filter((m: any) =>
-          m.status !== "scheduled" || m.homeScore !== null || m.awayScore !== null
+          m.status !== "scheduled" || m.homeScore !== null || m.awayScore !== null ||
+          (KO_ROUNDS.includes(m.round) && new Date(m.kickoff).getTime() < nowMs)
         )
       );
     }
@@ -692,10 +718,11 @@ describe("7. Auto-transition: ko_betting → ko_active", () => {
     mockFetch.mockResolvedValue([apiGroupMatch({ status: "FINISHED" })] as any);
   });
 
-  it("transitions ko_betting → ko_active when a KO kickoff is in the past", async () => {
-    const pastKickoff = new Date(Date.now() - 30 * 60 * 1000);
+  it("transitions ko_betting → ko_active when group stage is done and a KO match has kicked off", async () => {
+    // ko_active is derived from the API: all groups done + a KO fixture whose
+    // scheduled time has passed (here, 30 min ago).
+    mockFetch.mockResolvedValue(allGroupDoneWithKO() as any);
     setupMocks({
-      firstKOKickoff: { kickoff: pastKickoff },
       rooms: [{ id: "r1", status: "ko_betting" }],
     });
 
@@ -704,9 +731,13 @@ describe("7. Auto-transition: ko_betting → ko_active", () => {
     expect(mockDb.room.update).toHaveBeenCalledWith({ where: { id: "r1" }, data: { status: "ko_active" } });
   });
 
-  it("does NOT transition when there is no KO kickoff yet (findFirst returns null)", async () => {
+  it("does NOT transition when group stage is NOT done, even if a KO row has a past kickoff", async () => {
+    // Regression guard: a stale/corrupt KO placeholder kickoff must never force
+    // ko_active while the group stage is still running. The API shows group play
+    // ongoing (not all finished), so the room stays put.
+    mockFetch.mockResolvedValue([apiGroupMatch({ status: "FINISHED" })] as any); // only 1 group match → allGroupDone=false
     setupMocks({
-      firstKOKickoff: null,
+      firstKOKickoff: { kickoff: new Date(Date.now() - 30 * 60 * 1000) }, // ignored now
       rooms: [{ id: "r1", status: "ko_betting" }],
     });
 
@@ -715,34 +746,26 @@ describe("7. Auto-transition: ko_betting → ko_active", () => {
     expect(mockDb.room.update).not.toHaveBeenCalled();
   });
 
-  it("transitions ko_betting → ko_active even when actionable is empty (the production bug: gap between group stage and KO kickoff)", async () => {
-    // Simulate the real-world state: all group matches are done, the API returns
-    // only SCHEDULED/TIMED matches (no live or finished), but the first R32 kickoff
-    // has already passed. Previously this was broken because the actionable early
-    // return fired before auto-transitions. The API has data (hasReliableApiData=true)
-    // but nothing is actionable.
-    const pastKOKickoff = new Date(Date.now() - 30 * 60 * 1000); // 30min ago
-    mockFetch.mockResolvedValue([
-      apiGroupMatch({ status: "SCHEDULED" }), // API returns data but nothing actionable
-    ] as any);
+  it("does NOT transition to ko_active when group is done but no KO match has started yet", async () => {
+    // The gap between group completion and the first KO kickoff: all groups done,
+    // but the KO fixture is still in the future → room should remain ko_betting.
+    mockFetch.mockResolvedValue(
+      allGroupDoneWithKO({ status: "SCHEDULED", utcDate: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString() }) as any
+    );
     setupMocks({
-      firstKOKickoff: { kickoff: pastKOKickoff },
       rooms: [{ id: "r1", status: "ko_betting" }],
     });
 
     await syncMatches();
 
-    expect(mockDb.room.update).toHaveBeenCalledWith({ where: { id: "r1" }, data: { status: "ko_active" } });
+    expect(mockDb.room.update).not.toHaveBeenCalled();
   });
 
-  it("transitions ko_betting → ko_active when API returns only SCHEDULED matches (all group done, KO not started live yet)", async () => {
-    const pastKOKickoff = new Date(Date.now() - 5 * 60 * 1000); // 5min ago
-    mockFetch.mockResolvedValue([
-      apiGroupMatch({ status: "SCHEDULED" }),
-      apiGroupMatch({ id: 2, status: "TIMED" }),
-    ] as any);
+  it("transitions ko_betting → ko_active when group done and a KO match is live, even though it isn't finished", async () => {
+    mockFetch.mockResolvedValue(
+      allGroupDoneWithKO({ status: "IN_PLAY", utcDate: new Date(Date.now() + 60 * 60 * 1000).toISOString() }) as any
+    );
     setupMocks({
-      firstKOKickoff: { kickoff: pastKOKickoff },
       rooms: [{ id: "r1", status: "ko_betting" }],
     });
 
@@ -768,31 +791,30 @@ describe("8. Auto-transition: ko_active → settling (API-based)", () => {
   });
 
   it("does NOT transition when API has no FINAL stage matches at all", async () => {
-    const pastKOKickoff = new Date(Date.now() - 30 * 60 * 1000);
-    mockFetch.mockResolvedValue([apiGroupMatch({ status: "FINISHED" })] as any);
+    // Group done + KO running, but no FINAL in the API → tournamentOver=false →
+    // correctStatus=ko_active → room is already ko_active, so no update.
+    mockFetch.mockResolvedValue(allGroupDoneWithKO() as any);
     setupMocks({
-      firstKOKickoff: { kickoff: pastKOKickoff },
       rooms: [{ id: "r1", status: "ko_active" }],
     });
 
     await syncMatches();
 
-    // koStarted=true, tournamentOver=false → correctStatus=ko_active → no update (already correct)
     expect(mockDb.room.update).not.toHaveBeenCalled();
   });
 
   it("does NOT transition when FINAL match is in API but not yet FINISHED (e.g. IN_PLAY)", async () => {
-    const pastKOKickoff = new Date(Date.now() - 30 * 60 * 1000);
     mockFetch.mockResolvedValue([
-      apiGroupMatch({ stage: "FINAL", status: "IN_PLAY" }),
+      ...allGroupDoneWithKO(),
+      apiGroupMatch({ id: 9100, stage: "FINAL", status: "IN_PLAY", score: { winner: null, fullTime: { home: 1, away: 1 } } }),
     ] as any);
     setupMocks({
-      firstKOKickoff: { kickoff: pastKOKickoff },
       rooms: [{ id: "r1", status: "ko_active" }],
     });
 
     await syncMatches();
 
+    // tournamentOver=false (FINAL not FINISHED) → correctStatus stays ko_active → no update.
     expect(mockDb.room.update).not.toHaveBeenCalled();
   });
 
@@ -800,10 +822,8 @@ describe("8. Auto-transition: ko_active → settling (API-based)", () => {
     // This test documents the production bug that was fixed: the DB had simulation
     // data with Final status=finished, causing every sync to push rooms to settling.
     // The fix reads only the API response; no db.match.count for Final is performed.
-    const pastKOKickoff = new Date(Date.now() - 30 * 60 * 1000);
-    mockFetch.mockResolvedValue([apiGroupMatch({ status: "FINISHED" })] as any); // GROUP_STAGE, not FINAL
+    mockFetch.mockResolvedValue(allGroupDoneWithKO() as any); // group done + KO running, no FINAL
     setupMocks({
-      firstKOKickoff: { kickoff: pastKOKickoff },
       rooms: [{ id: "r1", status: "ko_active" }],
     });
 
@@ -1011,10 +1031,9 @@ describe("11. Multiple rooms, derived status applied uniformly", () => {
     // Production scenario: room was wrongly promoted to 'settling' because old
     // simulation data had a Final match marked finished in the real DB table.
     // After the fix, tournamentOver uses API only — no FINAL in API → self-correct.
-    const pastKOKickoff = new Date(Date.now() - 30 * 60 * 1000);
-    mockFetch.mockResolvedValue([apiGroupMatch({ status: "FINISHED" })] as any); // GROUP_STAGE only
+    // Group stage done + a KO match underway (no FINAL) → ko_active is correct.
+    mockFetch.mockResolvedValue(allGroupDoneWithKO() as any);
     setupMocks({
-      firstKOKickoff: { kickoff: pastKOKickoff },
       rooms: [{ id: "r1", status: "settling" }],
     });
 
@@ -1874,10 +1893,82 @@ describe("15. Match table as pure API mirror", () => {
 
     await syncMatches();
 
+    // Its default kickoff (2026-06-12) is in the past for a KO round with no API
+    // counterpart, so the corrupt date is also repaired to the TBD sentinel.
     expect(mockDb.match.update).toHaveBeenCalledWith({
       where: { id: "ko-match-1" },
-      data: { status: "scheduled", homeScore: null, awayScore: null, homeTeamId: null, awayTeamId: null },
+      data: {
+        status: "scheduled", homeScore: null, awayScore: null,
+        homeTeamId: null, awayTeamId: null,
+        kickoff: new Date("2026-12-31T00:00:00.000Z"),
+      },
     });
+  });
+
+  it("repairs a corrupt kickoff on an already-clean KO placeholder (the false ko_active bug)", async () => {
+    // Exact production state after an earlier sync reset the score/status but left
+    // the kickoff: an R16 placeholder, scheduled with no score, but stamped with a
+    // group-stage date (2026-06-16) by a mis-matched group result. The row is
+    // "clean" so the old stale-reset skipped it — and the past KO kickoff forced
+    // the room into ko_active. The kickoff must be repaired to the TBD sentinel.
+    mockFetch.mockResolvedValue([
+      apiGroupMatch({ status: "SCHEDULED", score: { winner: null, fullTime: { home: null, away: null } } }),
+    ] as any);
+    setupMocks({
+      rooms: [],
+      dbMatches: [
+        dbMatch({
+          id: "r16-corrupt",
+          round: "R16",
+          status: "scheduled",
+          homeScore: null,
+          awayScore: null,
+          kickoff: new Date("2026-06-16T19:00:00.000Z"), // past, group-stage date
+          homeTeam: null,
+          awayTeam: null,
+          predictions: [],
+        }),
+      ],
+    });
+
+    await syncMatches();
+
+    // Score/status already clean → not touched. Only the corrupt kickoff (and any
+    // lingering team slots) are repaired.
+    expect(mockDb.match.update).toHaveBeenCalledWith({
+      where: { id: "r16-corrupt" },
+      data: {
+        homeTeamId: null,
+        awayTeamId: null,
+        kickoff: new Date("2026-12-31T00:00:00.000Z"),
+      },
+    });
+  });
+
+  it("does NOT touch a KO placeholder whose kickoff is in the future (clean, uncorrupted)", async () => {
+    mockFetch.mockResolvedValue([
+      apiGroupMatch({ status: "SCHEDULED", score: { winner: null, fullTime: { home: null, away: null } } }),
+    ] as any);
+    setupMocks({
+      rooms: [],
+      dbMatches: [
+        dbMatch({
+          id: "r16-future",
+          round: "R16",
+          status: "scheduled",
+          homeScore: null,
+          awayScore: null,
+          kickoff: new Date("2026-07-04T19:00:00.000Z"), // real future KO date
+          homeTeam: null,
+          awayTeam: null,
+          predictions: [],
+        }),
+      ],
+    });
+
+    await syncMatches();
+
+    expect(mockDb.match.update).not.toHaveBeenCalled();
   });
 });
 

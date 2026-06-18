@@ -74,11 +74,11 @@ export async function syncMatches(): Promise<SyncResult> {
   // like ko_betting → ko_active must fire even when no API matches are
   // live/finished (the gap between group stage completion and KO kickoff).
   {
-    const [firstGroupKickoff, firstKOKickoff] =
-      await Promise.all([
-        db.match.findFirst({ where: { round: "Group" }, orderBy: { kickoff: "asc" }, select: { kickoff: true } }),
-        db.match.findFirst({ where: { round: { in: ["R32", "R16", "QF", "SF", "3rd", "Final"] }, kickoff: { lte: new Date() } }, orderBy: { kickoff: "asc" }, select: { kickoff: true } }),
-      ]);
+    const firstGroupKickoff = await db.match.findFirst({
+      where: { round: "Group" },
+      orderBy: { kickoff: "asc" },
+      select: { kickoff: true },
+    });
 
     const now = new Date();
     const groupStarted = firstGroupKickoff && now >= firstGroupKickoff.kickoff;
@@ -87,7 +87,19 @@ export async function syncMatches(): Promise<SyncResult> {
     // that would otherwise produce false positives.
     const apiGroupMatches = apiMatches.filter((m) => m.stage === "GROUP_STAGE");
     const allGroupDone = apiGroupMatches.length >= 72 && apiGroupMatches.every((m) => m.status === "FINISHED");
-    const koStarted = !!firstKOKickoff;
+    // KO is underway only once the group stage is fully complete (API-authoritative)
+    // AND the API shows a knockout-stage match that has kicked off or is live/finished.
+    // Both gates are derived from the API — never from DB kickoff times — so a stale
+    // or corrupted KO placeholder kickoff can never force the room into ko_active
+    // while the group stage is still running.
+    const KO_API_STAGES = ["LAST_32", "LAST_16", "QUARTER_FINALS", "SEMI_FINALS", "THIRD_PLACE", "FINAL"];
+    const koStarted =
+      allGroupDone &&
+      apiMatches.some(
+        (m) =>
+          KO_API_STAGES.includes(m.stage) &&
+          (["IN_PLAY", "PAUSED", "HALFTIME", "FINISHED"].includes(m.status) || now >= new Date(m.utcDate))
+      );
     // Tournament over only when the API confirms the Final is FINISHED.
     // Reading from db.match would trigger on old simulation data still in the
     // Match table from runs before the SimResult migration.
@@ -143,12 +155,24 @@ export async function syncMatches(): Promise<SyncResult> {
   // forever — polluting Recent Results, group standings, and the scoring loop.
   // This pass corrects that on every sync cycle that has valid API data.
   if (hasReliableApiData) {
+    const now = new Date();
+    const KO_ROUNDS = ["R32", "R16", "QF", "SF", "3rd", "Final"];
+    // Sentinel kickoff for a KO placeholder whose real fixture date is unknown.
+    // Clearly after the tournament, so it can never look like a started match.
+    const KO_TBD_KICKOFF = new Date("2026-12-31T00:00:00.000Z");
+
     const staleMatches = await db.match.findMany({
       where: {
         OR: [
           { status: { not: "scheduled" } },
           { homeScore: { not: null } },
           { awayScore: { not: null } },
+          // Corrupt KO placeholders: a knockout row whose kickoff is already in
+          // the past is suspicious — during the group stage the real KO fixtures
+          // are still in the future. A past date here was almost certainly left
+          // by a mis-matched group result, so re-evaluate and repair it even if
+          // the score/status were already cleared by an earlier sync.
+          { AND: [{ round: { in: KO_ROUNDS } }, { kickoff: { lt: now } }] },
         ],
       },
       select: {
@@ -170,9 +194,13 @@ export async function syncMatches(): Promise<SyncResult> {
     };
 
     for (const stale of staleMatches) {
-      // The DB query above should have excluded clean rows, but guard defensively
-      // so a test mock that bypasses the WHERE clause doesn't trigger spurious resets.
-      if (stale.status === "scheduled" && stale.homeScore === null && stale.awayScore === null) continue;
+      const isKO = !!stale.round && stale.round !== "Group";
+      const hasStaleScore =
+        stale.status !== "scheduled" || stale.homeScore !== null || stale.awayScore !== null;
+      const hasPastKickoff = stale.kickoff.getTime() < now.getTime();
+
+      // Nothing to do for a clean row that isn't a KO placeholder with a past date.
+      if (!hasStaleScore && !(isKO && hasPastKickoff)) continue;
 
       const expectedStage = stale.round ? ROUND_TO_STAGE[stale.round] : undefined;
       const apiCounterpart = apiMatches.find((api) => {
@@ -181,28 +209,44 @@ export async function syncMatches(): Promise<SyncResult> {
         return findDbMatch(stale, api.id, api.homeTeam, api.awayTeam, new Date(api.utcDate).getTime()) !== null;
       });
 
-      const shouldReset =
-        // API says the match hasn't happened yet — clear any stale score
-        (apiCounterpart && ["SCHEDULED", "TIMED"].includes(apiCounterpart.status)) ||
-        // No API counterpart at all — score can't be a real result (old sim data
-        // for a KO slot whose real teams are still TBD, or a match that name-
-        // matching can't find; either way we cannot trust it)
-        !apiCounterpart;
+      const apiNotStarted = !!apiCounterpart && ["SCHEDULED", "TIMED"].includes(apiCounterpart.status);
+      const noCounterpart = !apiCounterpart;
 
-      if (shouldReset) {
-        const resetData: Record<string, unknown> = { status: "scheduled", homeScore: null, awayScore: null };
-        // For KO placeholders, also clear the team slots so the placeholder no
-        // longer attracts group-stage results via team fdId matching.
-        if (stale.round && stale.round !== "Group") {
-          resetData.homeTeamId = null;
-          resetData.awayTeamId = null;
-        }
-        await db.match.update({ where: { id: stale.id }, data: resetData });
-        console.log(
-          `[sync] Reset stale match ${stale.id} round=${stale.round} (was: ${stale.status}) — ` +
-          (apiCounterpart ? "API reports SCHEDULED" : "no API counterpart (likely old sim data)")
-        );
+      // Reset a stale score when the API says the match hasn't happened yet, or
+      // when there's no API counterpart at all (old sim data / unmatchable row).
+      const shouldResetScore = hasStaleScore && (apiNotStarted || noCounterpart);
+      // Repair a KO placeholder's kickoff when it's in the past but has no valid
+      // same-stage API counterpart — the date is corrupt and must not trip the
+      // ko_active transition or any other time-based logic.
+      const shouldFixKickoff = isKO && hasPastKickoff && noCounterpart;
+
+      if (!shouldResetScore && !shouldFixKickoff) continue;
+
+      const resetData: Record<string, unknown> = {};
+      if (shouldResetScore) {
+        resetData.status = "scheduled";
+        resetData.homeScore = null;
+        resetData.awayScore = null;
       }
+      // For KO placeholders, clear team slots so the row no longer attracts
+      // group-stage results via team fdId matching.
+      if (isKO && (shouldResetScore || shouldFixKickoff)) {
+        resetData.homeTeamId = null;
+        resetData.awayTeamId = null;
+      }
+      if (shouldFixKickoff) {
+        resetData.kickoff = KO_TBD_KICKOFF;
+      } else if (shouldResetScore && isKO && apiCounterpart) {
+        // We know the real fixture date — restore it rather than the sentinel.
+        resetData.kickoff = new Date(apiCounterpart.utcDate);
+      }
+
+      await db.match.update({ where: { id: stale.id }, data: resetData });
+      console.log(
+        `[sync] Repaired stale match ${stale.id} round=${stale.round} (was: ${stale.status})` +
+        (shouldFixKickoff ? " — corrupt KO kickoff cleared" : "") +
+        (shouldResetScore ? (apiCounterpart ? " — API reports SCHEDULED" : " — no API counterpart (likely old sim data)") : "")
+      );
     }
   }
 
