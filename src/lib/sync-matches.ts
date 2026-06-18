@@ -152,17 +152,33 @@ export async function syncMatches(): Promise<SyncResult> {
       },
       select: {
         id: true, fdMatchId: true, status: true, homeScore: true, awayScore: true, kickoff: true,
+        round: true,
         homeTeam: { select: { fdId: true, name: true } },
         awayTeam: { select: { fdId: true, name: true } },
       },
     });
+
+    // Maps DB round names to the API stage string so stale-reset only matches
+    // a DB match against API matches from the same stage. Without this, an R16
+    // placeholder that happens to share team fdIds with a GROUP_STAGE result
+    // would appear to have a valid API counterpart and its wrong score would
+    // never be cleared.
+    const ROUND_TO_STAGE: Partial<Record<string, string>> = {
+      Group: "GROUP_STAGE", R32: "LAST_32", R16: "LAST_16",
+      QF: "QUARTER_FINALS", SF: "SEMI_FINALS", "3rd": "THIRD_PLACE", Final: "FINAL",
+    };
 
     for (const stale of staleMatches) {
       // The DB query above should have excluded clean rows, but guard defensively
       // so a test mock that bypasses the WHERE clause doesn't trigger spurious resets.
       if (stale.status === "scheduled" && stale.homeScore === null && stale.awayScore === null) continue;
 
-      const apiCounterpart = apiMatches.find((api) => findDbMatch(stale, api.id, api.homeTeam, api.awayTeam, new Date(api.utcDate).getTime()) !== null);
+      const expectedStage = stale.round ? ROUND_TO_STAGE[stale.round] : undefined;
+      const apiCounterpart = apiMatches.find((api) => {
+        // Only consider API matches from the same tournament stage as the DB row.
+        if (expectedStage && api.stage !== expectedStage) return false;
+        return findDbMatch(stale, api.id, api.homeTeam, api.awayTeam, new Date(api.utcDate).getTime()) !== null;
+      });
 
       const shouldReset =
         // API says the match hasn't happened yet — clear any stale score
@@ -173,12 +189,16 @@ export async function syncMatches(): Promise<SyncResult> {
         !apiCounterpart;
 
       if (shouldReset) {
-        await db.match.update({
-          where: { id: stale.id },
-          data: { status: "scheduled", homeScore: null, awayScore: null },
-        });
+        const resetData: Record<string, unknown> = { status: "scheduled", homeScore: null, awayScore: null };
+        // For KO placeholders, also clear the team slots so the placeholder no
+        // longer attracts group-stage results via team fdId matching.
+        if (stale.round && stale.round !== "Group") {
+          resetData.homeTeamId = null;
+          resetData.awayTeamId = null;
+        }
+        await db.match.update({ where: { id: stale.id }, data: resetData });
         console.log(
-          `[sync] Reset stale match ${stale.id} (was: ${stale.status}) — ` +
+          `[sync] Reset stale match ${stale.id} round=${stale.round} (was: ${stale.status}) — ` +
           (apiCounterpart ? "API reports SCHEDULED" : "no API counterpart (likely old sim data)")
         );
       }
@@ -213,11 +233,25 @@ export async function syncMatches(): Promise<SyncResult> {
     const apiHome = api.score.fullTime.home;
     const apiAway = api.score.fullTime.away;
 
+    // Pass 1: exact fdMatchId match — avoids being tricked by KO placeholders
+    // that share team fdIds with a group-stage result when dbMatches.find()
+    // iteration happens to visit the placeholder before the Group row.
     let matchOrientation: "normal" | "reversed" | null = null;
-    const dbMatch = dbMatches.find((m) => {
-      matchOrientation = findDbMatch(m, api.id, api.homeTeam, api.awayTeam, apiKickoff);
-      return matchOrientation !== null;
-    });
+    let dbMatch: (typeof dbMatches)[0] | undefined;
+    const byFdMatchId = dbMatches.find((m) => m.fdMatchId === api.id);
+    if (byFdMatchId) {
+      dbMatch = byFdMatchId;
+      matchOrientation = "normal";
+    } else {
+      // Pass 2: fall back to team/name/kickoff matching only for rows that have
+      // no fdMatchId (unrepaired rows). Skip rows with a non-matching fdMatchId —
+      // those belong to a different API match.
+      for (const m of dbMatches) {
+        if (m.fdMatchId !== null) continue;
+        const orient = findDbMatch(m, api.id, api.homeTeam, api.awayTeam, apiKickoff);
+        if (orient !== null) { dbMatch = m; matchOrientation = orient; break; }
+      }
+    }
 
     if (!dbMatch) {
       console.warn(`[sync] No DB match found for API match id=${api.id} (${api.homeTeam.name} vs ${api.awayTeam.name}, status=${api.status}) — skipped`);
