@@ -16,3 +16,9 @@ export function filterRecentResults(matches: RecentMatch[], limit = 5): RecentMa
     .sort((a, b) => new Date(b.kickoff).getTime() - new Date(a.kickoff).getTime())
     .slice(0, limit);
 }
+
+export function filterLiveMatches(matches: RecentMatch[]): RecentMatch[] {
+  return matches
+    .filter((m) => m.status === "live" && m.homeTeam !== null && m.awayTeam !== null)
+    .sort((a, b) => new Date(a.kickoff).getTime() - new Date(b.kickoff).getTime());
+}

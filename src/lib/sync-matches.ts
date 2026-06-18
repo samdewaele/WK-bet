@@ -58,6 +58,7 @@ function findDbMatch(
 export type SyncResult = {
   updated: number;
   predictionsScored: number;
+  hasLiveMatches: boolean;
   notificationsSent: { round: string; sent: number }[];
   remindersSent: { round: string; sent: number }[];
   message: string;
@@ -130,10 +131,10 @@ export async function syncMatches(): Promise<SyncResult> {
     }
   }
 
+  const LIVE_STATUSES = ["IN_PLAY", "PAUSED", "HALFTIME"];
+  const hasLiveMatches = apiMatches.some((m) => LIVE_STATUSES.includes(m.status));
   const actionable = apiMatches.filter(
-    (m) =>
-      m.status === "FINISHED" ||
-      ["IN_PLAY", "PAUSED", "HALFTIME"].includes(m.status)
+    (m) => m.status === "FINISHED" || LIVE_STATUSES.includes(m.status)
   );
 
   // ── Stale reset pass ──────────────────────────────────────────────────────
@@ -211,7 +212,7 @@ export async function syncMatches(): Promise<SyncResult> {
   ]);
 
   if (actionable.length === 0) {
-    return { updated: 0, predictionsScored: 0, notificationsSent, remindersSent, message: "No live or finished matches yet" };
+    return { updated: 0, predictionsScored: 0, hasLiveMatches, notificationsSent, remindersSent, message: "No live or finished matches yet" };
   }
 
   const dbMatches = await db.match.findMany({
@@ -353,6 +354,7 @@ export async function syncMatches(): Promise<SyncResult> {
   return {
     updated,
     predictionsScored,
+    hasLiveMatches,
     notificationsSent,
     remindersSent,
     message: `Updated ${updated} match${updated !== 1 ? "es" : ""}, scored ${predictionsScored} prediction${predictionsScored !== 1 ? "s" : ""}`,
