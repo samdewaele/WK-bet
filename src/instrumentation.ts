@@ -2,7 +2,7 @@
 // Schedules automatic match result syncing every 5 minutes in production
 // when FOOTBALL_DATA_API_KEY is present.
 
-const SYNC_INTERVAL_MS      = 5 * 60 * 1000; // 5 minutes when idle
+const SYNC_INTERVAL_MS      = 60_000;          // 1 minute when idle
 const SYNC_INTERVAL_LIVE_MS = 10_000;          // 10 seconds during a live match
 const WARMUP_DELAY_MS       = 30_000;          // let DB settle before first sync
 
