@@ -266,9 +266,11 @@ test.describe("Full betting journey", () => {
     });
     expect(phase2Res.ok()).toBeTruthy();
 
-    // UI: predictions tab shows actual KO results inline with user's prediction
+    // UI: predictions tab shows actual KO results inline with user's prediction.
+    // The visual bracket is the default KO view; once matches are played each
+    // tile carries an "FT x–y" result indicator next to the user's saved score.
     await page.goto(`/groups/${roomId}?tab=predictions`);
-    await expect(page.getByText(/your pick:/i).first()).toBeVisible({ timeout: 8_000 });
+    await expect(page.getByText(/FT \d/).first()).toBeVisible({ timeout: 8_000 });
 
     // UI: standings tab shows KO earnings in leaderboard
     await page.goto(`/groups/${roomId}?tab=standings`);
