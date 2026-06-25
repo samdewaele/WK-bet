@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "test": "vitest run",
+    "test:integration": "vitest run __tests__/cleanup-sidebets.test.ts __tests__/ko-seeding.test.ts",
     "db:seed": "npx tsx prisma/seed.ts",
     "db:reset": "npx prisma migrate reset --force && npx tsx prisma/seed.ts",
     "test:tournament": "DATABASE_URL=file:./dev.db npx tsx --tsconfig tsconfig.json scripts/test-tournament.ts"
