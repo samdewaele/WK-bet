@@ -2,14 +2,16 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import TeamFlag from "@/components/TeamFlag";
+import KnockoutBracket from "@/components/KnockoutBracket";
+import { BRACKET_PATH, R32_SOURCE_LABELS } from "@/lib/ko-bracket";
 
-type Team = {
+export type Team = {
   id: string;
   name: string;
   flag: string;
 };
 
-type Match = {
+export type Match = {
   id: string;
   round: string;
   group: string | null;
@@ -24,7 +26,7 @@ type Match = {
   matchUberPot?: number | null;
 };
 
-type Prediction = {
+export type Prediction = {
   id: string;
   matchId: string;
   homeScore: number;
@@ -51,49 +53,6 @@ const ROUND_LABELS: Record<string, string> = {
   Final: "Final",
 };
 
-// Static source labels for each R32 match slot (matchNumber → home/away label).
-// Derived from the official FIFA WC 2026 bracket seeding rules in ko-seeding.ts.
-const R32_SOURCE_LABELS: Record<number, { home: string; away: string }> = {
-  73:  { home: "2nd A",                   away: "2nd B" },
-  74:  { home: "1st E",                   away: "Best 3rd (A/B/C/D/F)" },
-  75:  { home: "1st F",                   away: "2nd C" },
-  76:  { home: "1st C",                   away: "2nd F" },
-  77:  { home: "1st I",                   away: "Best 3rd (C/D/F/G/H)" },
-  78:  { home: "2nd E",                   away: "2nd I" },
-  79:  { home: "1st A",                   away: "Best 3rd (C/E/F/H/I)" },
-  80:  { home: "1st L",                   away: "Best 3rd (E/H/I/J/K)" },
-  81:  { home: "1st D",                   away: "Best 3rd (B/E/F/I/J)" },
-  82:  { home: "1st G",                   away: "Best 3rd (A/E/H/I/J)" },
-  83:  { home: "2nd K",                   away: "2nd L" },
-  84:  { home: "1st H",                   away: "2nd J" },
-  85:  { home: "1st B",                   away: "Best 3rd (E/F/G/I/J)" },
-  86:  { home: "1st J",                   away: "2nd H" },
-  87:  { home: "1st K",                   away: "Best 3rd (D/E/I/J/L)" },
-  88:  { home: "2nd D",                   away: "2nd G" },
-};
-
-const BRACKET_PATH: Record<number, {
-  home: { matchNum: number; side: "winner" | "loser" };
-  away: { matchNum: number; side: "winner" | "loser" };
-}> = {
-  89:  { home: { matchNum: 73, side: "winner" }, away: { matchNum: 74, side: "winner" } },
-  90:  { home: { matchNum: 75, side: "winner" }, away: { matchNum: 76, side: "winner" } },
-  91:  { home: { matchNum: 77, side: "winner" }, away: { matchNum: 78, side: "winner" } },
-  92:  { home: { matchNum: 79, side: "winner" }, away: { matchNum: 80, side: "winner" } },
-  93:  { home: { matchNum: 81, side: "winner" }, away: { matchNum: 82, side: "winner" } },
-  94:  { home: { matchNum: 83, side: "winner" }, away: { matchNum: 84, side: "winner" } },
-  95:  { home: { matchNum: 85, side: "winner" }, away: { matchNum: 86, side: "winner" } },
-  96:  { home: { matchNum: 87, side: "winner" }, away: { matchNum: 88, side: "winner" } },
-  97:  { home: { matchNum: 89, side: "winner" }, away: { matchNum: 90, side: "winner" } },
-  98:  { home: { matchNum: 91, side: "winner" }, away: { matchNum: 92, side: "winner" } },
-  99:  { home: { matchNum: 93, side: "winner" }, away: { matchNum: 94, side: "winner" } },
-  100: { home: { matchNum: 95, side: "winner" }, away: { matchNum: 96, side: "winner" } },
-  101: { home: { matchNum: 97,  side: "winner" }, away: { matchNum: 98,  side: "winner" } },
-  102: { home: { matchNum: 99,  side: "winner" }, away: { matchNum: 100, side: "winner" } },
-  103: { home: { matchNum: 101, side: "loser"  }, away: { matchNum: 102, side: "loser"  } },
-  104: { home: { matchNum: 101, side: "winner" }, away: { matchNum: 102, side: "winner" } },
-};
-
 type ScoreState = Record<string, { home: string; away: string }>;
 type MatchSaveStatus = "idle" | "saving" | "saved" | "error";
 
@@ -116,6 +75,7 @@ export default function KnockoutPredictions({ roomId, roomStatus, simulationMode
   const [scores, setScores] = useState<ScoreState>({});
   const [penaltyWinners, setPenaltyWinners] = useState<Record<string, "home" | "away">>({});
   const [activeRound, setActiveRound] = useState<string>("R32");
+  const [view, setView] = useState<"bracket" | "list">("bracket");
   const [matchSaveStatus, setMatchSaveStatus] = useState<Record<string, MatchSaveStatus>>({});
   const [globalSaving, setGlobalSaving] = useState(false);
   const [globalStatus, setGlobalStatus] = useState<"idle" | "saved" | "error">("idle");
@@ -678,31 +638,71 @@ export default function KnockoutPredictions({ roomId, roomStatus, simulationMode
         </div>
       )}
 
-      <div className="flex flex-wrap gap-2 mb-6">
-        {availableRounds.map((r) => (
-          <button
-            key={r}
-            onClick={() => setActiveRound(r)}
-            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-              activeRound === r
-                ? "bg-amber-400 text-gray-900"
-                : "bg-gray-800 text-gray-300 hover:bg-gray-700 hover:text-white"
-            }`}
-          >
-            {ROUND_LABELS[r] ?? r}
-          </button>
-        ))}
+      {/* Bracket ⇄ List view toggle */}
+      <div className="flex items-center gap-2 mb-6">
+        <button
+          onClick={() => setView("bracket")}
+          className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+            view === "bracket"
+              ? "bg-amber-400 text-gray-900"
+              : "bg-gray-800 text-gray-300 hover:bg-gray-700 hover:text-white"
+          }`}
+        >
+          🏆 Bracket
+        </button>
+        <button
+          onClick={() => setView("list")}
+          className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+            view === "list"
+              ? "bg-amber-400 text-gray-900"
+              : "bg-gray-800 text-gray-300 hover:bg-gray-700 hover:text-white"
+          }`}
+        >
+          ☰ List
+        </button>
       </div>
 
-      <div className="space-y-3">
-        {roundMatches.length === 0 ? (
-          <div className="text-center py-12 text-gray-500">
-            <p>No matches for this round yet.</p>
+      {view === "bracket" ? (
+        <KnockoutBracket
+          predictions={predictions}
+          scores={scores}
+          penaltyWinners={penaltyWinners}
+          matchSaveStatus={matchSaveStatus}
+          getDisplayTeams={getDisplayTeams}
+          isLocked={isLocked}
+          isTied={isTied}
+          onScoreChange={handleScoreChange}
+          onPenaltyChange={handlePenaltyChange}
+        />
+      ) : (
+        <>
+          <div className="flex flex-wrap gap-2 mb-6">
+            {availableRounds.map((r) => (
+              <button
+                key={r}
+                onClick={() => setActiveRound(r)}
+                className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                  activeRound === r
+                    ? "bg-amber-400 text-gray-900"
+                    : "bg-gray-800 text-gray-300 hover:bg-gray-700 hover:text-white"
+                }`}
+              >
+                {ROUND_LABELS[r] ?? r}
+              </button>
+            ))}
           </div>
-        ) : (
-          roundMatches.map(renderMatch)
-        )}
-      </div>
+
+          <div className="space-y-3">
+            {roundMatches.length === 0 ? (
+              <div className="text-center py-12 text-gray-500">
+                <p>No matches for this round yet.</p>
+              </div>
+            ) : (
+              roundMatches.map(renderMatch)
+            )}
+          </div>
+        </>
+      )}
     </div>
   );
 }

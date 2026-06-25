@@ -15,6 +15,7 @@ vi.mock("@/lib/db", () => ({
 
 import { auth } from "@auth";
 import { db } from "@/lib/db";
+import { roundOfMatchNumber } from "@/lib/ko-bracket";
 import { GET, POST } from "@/app/api/groups/[roomId]/knockout/route";
 
 const mockAuth = vi.mocked(auth);
@@ -132,6 +133,18 @@ describe("GET /api/groups/[roomId]/knockout", () => {
     expect(body[0].match.round).toBe("R32");
     expect(body[0].match.homeTeam.name).toBe("Brazil");
     expect(body[0].match.awayTeam.name).toBe("Germany");
+  });
+
+  // Bracket-positioning contract: the visual bracket places every KO match by
+  // its matchNumber + round (see src/lib/ko-bracket.ts BRACKET_POSITIONS), so
+  // the API must return both, with a matchNumber inside the KO range 73‑104.
+  it("returns a KO matchNumber and round the bracket can position", async () => {
+    const res = await GET(makeGetRequest(), { params: PARAMS });
+    const body = await res.json();
+    expect(body[0].match.matchNumber).toBe(73);
+    expect(body[0].match.matchNumber).toBeGreaterThanOrEqual(73);
+    expect(body[0].match.matchNumber).toBeLessThanOrEqual(104);
+    expect(roundOfMatchNumber(body[0].match.matchNumber)).toBe(body[0].match.round);
   });
 
   it("simulation mode: overlays SimResult teams onto the match", async () => {

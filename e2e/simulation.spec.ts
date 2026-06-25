@@ -40,10 +40,12 @@ test.describe("Simulation flow", () => {
       page.getByText(/bracket opens after group stage/i)
     ).not.toBeVisible({ timeout: 15_000 });
 
-    // Round-of-32 tab / heading should appear
+    // The visual bracket is the default KO view — its round-column headers
+    // (R32 … FINAL) and the Bracket/List toggle should be present.
     await expect(
-      page.getByRole("button", { name: /round of 32/i })
+      page.getByRole("button", { name: /bracket/i })
     ).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByText("FINAL").first()).toBeVisible();
   });
 
   test("Phase 1: room status banner shows KO betting window message", async ({
@@ -66,7 +68,8 @@ test.describe("Simulation flow", () => {
     await runPhase1(page, roomId);
 
     await page.goto(`/groups/${roomId}?tab=predictions`);
-    await page.getByRole("button", { name: /round of 32/i }).click();
+    // Bracket is the default KO view; tiles render their score inputs directly
+    // (match 73 first), so no round tab needs clicking.
 
     // Fill in a drawn score for the first match
     const inputs = page.locator('input[type="number"]');
@@ -87,7 +90,7 @@ test.describe("Simulation flow", () => {
     await runPhase1(page, roomId);
 
     await page.goto(`/groups/${roomId}?tab=predictions`);
-    await page.getByRole("button", { name: /round of 32/i }).click();
+    // Bracket view (default) renders all tile inputs; match 73 is first.
 
     // Fill in a decisive score for the first match
     const inputs = page.locator('input[type="number"]');
@@ -104,7 +107,7 @@ test.describe("Simulation flow", () => {
     await runPhase1(page, roomId);
 
     await page.goto(`/groups/${roomId}?tab=predictions`);
-    await page.getByRole("button", { name: /round of 32/i }).click();
+    // Bracket view (default); first two tiles are matches 73 and 74.
 
     // Fill scores for two matches
     const inputs = page.locator('input[type="number"]');
