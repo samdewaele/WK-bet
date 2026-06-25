@@ -37,9 +37,10 @@ type Props = {
   currentUserId: string;
   totalPot: number;
   roomStatus: string;
+  accumulatedUberPot?: number;
 };
 
-export default function GroupLeaderboard({ roomId, currentUserId, totalPot, roomStatus }: Props) {
+export default function GroupLeaderboard({ roomId, currentUserId, totalPot, roomStatus, accumulatedUberPot }: Props) {
   const [entries, setEntries] = useState<LeaderboardEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedUserId, setExpandedUserId] = useState<string | null>(null);
@@ -85,7 +86,7 @@ export default function GroupLeaderboard({ roomId, currentUserId, totalPot, room
   }
 
   const distributed = entries.reduce((sum, e) => sum + e.totalEarned, 0);
-  const uberPot = Math.max(0, totalPot - distributed);
+  const uberPot = accumulatedUberPot ?? Math.max(0, totalPot - distributed);
 
   const hasAnyEarnings = entries.some((e) => e.totalEarned > 0);
 

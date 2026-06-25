@@ -276,7 +276,7 @@ export default async function GroupDetailPage({ params, searchParams }: Props) {
         )}
 
         {activeTab === "standings" && (
-          <GroupLeaderboard roomId={roomId} currentUserId={userId} totalPot={pot.totalPot} roomStatus={roomStatus} />
+          <GroupLeaderboard roomId={roomId} currentUserId={userId} totalPot={pot.totalPot} roomStatus={roomStatus} accumulatedUberPot={uberPotResults.accumulatedUberPot} />
         )}
 
         {activeTab === "sidebets-p2p" && (

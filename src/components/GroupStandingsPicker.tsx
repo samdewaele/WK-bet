@@ -53,6 +53,7 @@ type GroupState = {
 export default function GroupStandingsPicker({ roomId, roomStatus, groupKickoffTimes }: Props) {
   const [teams, setTeams] = useState<Team[]>([]);
   const [predictions, setPredictions] = useState<Prediction[]>([]);
+  const [groupUberPot, setGroupUberPot] = useState<Record<string, number>>({});
   const [groupStates, setGroupStates] = useState<Record<string, GroupState>>({});
   const [savedStates, setSavedStates] = useState<Record<string, GroupState>>({});
   const [actualStandings, setActualStandings] = useState<Map<string, TeamStanding[]>>(new Map());
@@ -103,11 +104,15 @@ export default function GroupStandingsPicker({ roomId, roomStatus, groupKickoffT
         ]);
 
         const teamsData: Team[] = teamsRes.ok ? await teamsRes.json() : [];
-        const predsData: Prediction[] = predsRes.ok ? await predsRes.json() : [];
+        const rawStandings = predsRes.ok ? await predsRes.json() : { predictions: [], groupUberPot: {} };
+        // Support both old flat-array format and new object format
+        const predsData: Prediction[] = Array.isArray(rawStandings) ? rawStandings : (rawStandings.predictions ?? []);
+        const groupUberPotData: Record<string, number> = Array.isArray(rawStandings) ? {} : (rawStandings.groupUberPot ?? {});
         const matchesData: MatchData[] = matchesRes.ok ? await matchesRes.json() : [];
 
         setTeams(teamsData);
         setPredictions(predsData);
+        setGroupUberPot(groupUberPotData);
 
         const initialStates: Record<string, GroupState> = {};
         for (const p of predsData) {
@@ -326,6 +331,11 @@ export default function GroupStandingsPicker({ roomId, roomStatus, groupKickoffT
                   {existingPred?.earnedAmount != null && (
                     <span className="text-xs text-green-400 font-bold">
                       +€{existingPred.earnedAmount.toFixed(2)}
+                    </span>
+                  )}
+                  {groupUberPot[group] != null && groupUberPot[group] > 0 && (
+                    <span className="text-xs text-blue-400" title="Unclaimed prize — flows to Uber Pot">
+                      →pot €{groupUberPot[group].toFixed(2)}
                     </span>
                   )}
                 </div>

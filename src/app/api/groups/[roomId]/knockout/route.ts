@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@auth";
 import { db } from "@/lib/db";
 import { requireRoomAccess } from "@/lib/room-auth";
+import { calculatePot, KO_MATCH_WEIGHT, type KORound } from "@/lib/pot";
 
 export async function GET(
   _req: Request,
@@ -15,13 +16,22 @@ export async function GET(
   const KO_ROUNDS = ["R32", "R16", "QF", "SF", "3rd", "Final"];
   const KO_VISIBLE_STATUSES = ["ko_betting", "ko_active", "settling", "finished"];
 
-  const room = await db.room.findUnique({ where: { id: roomId }, select: { status: true, simulationMode: true } });
+  const room = await db.room.findUnique({
+    where: { id: roomId },
+    include: { members: { select: { userId: true, excludedFromPot: true } } },
+  });
 
   if (!room || !KO_VISIBLE_STATUSES.includes(room.status)) {
     return NextResponse.json([]);
   }
 
-  const [koMatches, existingPredictions] = await Promise.all([
+  const activeMemberCount = room.members.filter((m) => !m.excludedFromPot).length;
+  const pot = calculatePot(room.entryFee, activeMemberCount);
+
+  const excludedIds = room.members.filter((m) => m.excludedFromPot).map((m) => m.userId);
+  const excludeFilter = excludedIds.length > 0 ? { userId: { notIn: excludedIds } } : {};
+
+  const [koMatches, existingPredictions, koByMatchAgg] = await Promise.all([
     db.match.findMany({
       where: { round: { in: KO_ROUNDS } },
       include: {
@@ -34,7 +44,14 @@ export async function GET(
       where: { userId: session.user.id, roomId },
       select: { matchId: true, homeScore: true, awayScore: true, penaltyWinner: true, earnedAmount: true },
     }),
+    db.kOPrediction.groupBy({
+      by: ["matchId"],
+      where: { roomId, earnedAmount: { not: null }, ...excludeFilter },
+      _sum: { earnedAmount: true },
+    }),
   ]);
+
+  const distributedByMatch = new Map(koByMatchAgg.map((m) => [m.matchId, m._sum.earnedAmount ?? 0]));
 
   // Simulation rooms keep fake results and bracket teams in SimResult —
   // overlay them so the bracket displays the simulated tournament.
@@ -72,6 +89,9 @@ export async function GET(
       const pred = predMap.get(m.id);
       const sim = simOverlay.get(m.id);
       const simFinished = sim != null && sim.homeScore !== null && sim.awayScore !== null;
+      const round = m.round as KORound;
+      const matchPrize = pot.koUnit * (KO_MATCH_WEIGHT[round] ?? 0);
+      const settled = distributedByMatch.has(m.id);
       return {
         id: m.id,
         matchId: m.id,
@@ -91,6 +111,8 @@ export async function GET(
           status: simFinished ? "finished" : m.status,
           homeTeam: sim?.homeTeam ?? m.homeTeam,
           awayTeam: sim?.awayTeam ?? m.awayTeam,
+          matchPrize,
+          matchUberPot: settled ? Math.max(0, matchPrize - (distributedByMatch.get(m.id) ?? 0)) : null,
         },
       };
     })

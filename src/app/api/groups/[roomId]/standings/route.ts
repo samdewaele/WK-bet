@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@auth";
 import { db } from "@/lib/db";
 import { requireRoomAccess } from "@/lib/room-auth";
+import { calculatePot } from "@/lib/pot";
 
 export async function GET(
   _req: Request,
@@ -12,21 +13,52 @@ export async function GET(
   if (access instanceof NextResponse) return access;
   const session = access.session;
 
-  const predictions = await db.groupStandingPrediction.findMany({
-    where: { userId: session.user.id, roomId },
+  const [predictions, room] = await Promise.all([
+    db.groupStandingPrediction.findMany({
+      where: { userId: session.user.id, roomId },
+    }),
+    db.room.findUnique({
+      where: { id: roomId },
+      include: { members: { select: { userId: true, excludedFromPot: true } } },
+    }),
+  ]);
+
+  const mappedPredictions = predictions.map((p) => ({
+    id: p.id,
+    wcGroup: p.wcGroup,
+    position1: p.position1,
+    position2: p.position2,
+    position3: p.position3,
+    position4: p.position4,
+    earnedAmount: p.earnedAmount,
+  }));
+
+  if (!room) {
+    return NextResponse.json({ predictions: mappedPredictions, prizePerGroup: 0, groupUberPot: {} });
+  }
+
+  const activeMemberCount = room.members.filter((m) => !m.excludedFromPot).length;
+  const pot = calculatePot(room.entryFee, activeMemberCount);
+
+  const excludedIds = room.members.filter((m) => m.excludedFromPot).map((m) => m.userId);
+  const excludeFilter = excludedIds.length > 0 ? { userId: { notIn: excludedIds } } : {};
+
+  const groupByWcGroup = await db.groupStandingPrediction.groupBy({
+    by: ["wcGroup"],
+    where: { roomId, earnedAmount: { not: null }, ...excludeFilter },
+    _sum: { earnedAmount: true },
   });
 
-  return NextResponse.json(
-    predictions.map((p) => ({
-      id: p.id,
-      wcGroup: p.wcGroup,
-      position1: p.position1,
-      position2: p.position2,
-      position3: p.position3,
-      position4: p.position4,
-      earnedAmount: p.earnedAmount,
-    }))
-  );
+  const groupUberPot: Record<string, number> = {};
+  for (const g of groupByWcGroup) {
+    groupUberPot[g.wcGroup] = Math.max(0, pot.prizePerWCGroup - (g._sum.earnedAmount ?? 0));
+  }
+
+  return NextResponse.json({
+    predictions: mappedPredictions,
+    prizePerGroup: pot.prizePerWCGroup,
+    groupUberPot,
+  });
 }
 
 type StandingInput = {
