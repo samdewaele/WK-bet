@@ -219,6 +219,7 @@ export async function GET(
         : null,
     })),
     uberPot: {
+      total: uber.accumulatedUberPot,
       prizePerSettledBet: uber.prizePerSettledBet,
       bets: sideBets
         .filter((sb) => sb.status !== "proposed")

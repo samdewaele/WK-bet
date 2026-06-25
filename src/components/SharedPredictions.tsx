@@ -55,7 +55,7 @@ type Overview = {
   groupUberPot?: Record<string, number>;
   koMatchUberPot?: Record<string, number>;
   members: MemberOverview[];
-  uberPot: { prizePerSettledBet: number; bets: UberBet[] };
+  uberPot: { total?: number; prizePerSettledBet: number; bets: UberBet[] };
 };
 
 const WC_GROUPS = ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L"];
@@ -196,7 +196,7 @@ export default function SharedPredictions({ roomId }: { roomId: string }) {
                   <h3 className="text-sm font-bold text-amber-400">Group {g}</h3>
                   {(data.groupUberPot?.[g] ?? 0) > 0 && (
                     <span className="text-xs text-blue-400" title="Unclaimed prize — flows to Uber Pot">
-                      →pot €{data.groupUberPot![g].toFixed(2)}
+                      →Uber Pot €{data.groupUberPot![g].toFixed(2)}
                     </span>
                   )}
                 </div>
@@ -269,7 +269,7 @@ export default function SharedPredictions({ roomId }: { roomId: string }) {
                       )}
                       {finished && (data.koMatchUberPot?.[km.matchId] ?? 0) > 0 && (
                         <span className="text-xs text-blue-400" title="Unclaimed prize — flows to Uber Pot">
-                          →pot €{data.koMatchUberPot![km.matchId].toFixed(2)}
+                          →Uber Pot €{data.koMatchUberPot![km.matchId].toFixed(2)}
                         </span>
                       )}
                     </div>
@@ -303,6 +303,15 @@ export default function SharedPredictions({ roomId }: { roomId: string }) {
       {/* Uber Pot: all members' answers per bet; winner + money once settled */}
       {view === "uber" && hasUber && (
         <div className="space-y-3">
+          {(data.uberPot.total ?? 0) > 0 && (
+            <div className="flex items-center gap-3 bg-amber-400/10 border border-amber-400/20 rounded-xl px-4 py-3">
+              <span className="text-amber-400 text-lg">🏆</span>
+              <div>
+                <p className="text-sm font-semibold text-amber-300">Uber Pot: {money(data.uberPot.total!)}</p>
+                <p className="text-xs text-gray-400">Accumulated from unclaimed group and match prizes</p>
+              </div>
+            </div>
+          )}
           {data.uberPot.bets.map((bet) => {
             const settled = bet.status === "settled";
             return (

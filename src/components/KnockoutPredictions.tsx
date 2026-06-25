@@ -473,11 +473,6 @@ export default function KnockoutPredictions({ roomId, roomStatus, simulationMode
             {hasActualResult && (
               <span className="text-xs bg-gray-700 text-gray-400 px-1.5 py-0.5 rounded">FT</span>
             )}
-            {match.matchUberPot != null && match.matchUberPot > 0 && (
-              <span className="text-xs text-blue-400" title="Unclaimed prize — flows to Uber Pot">
-                →pot €{match.matchUberPot.toFixed(2)}
-              </span>
-            )}
             {mSaveStatus === "saving" && (
               <span className="text-xs text-gray-500">saving…</span>
             )}
