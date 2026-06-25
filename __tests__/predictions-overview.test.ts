@@ -7,8 +7,8 @@ vi.mock("@/lib/db", () => ({
     roomMember: { findUnique: vi.fn(), findMany: vi.fn() },
     room: { findUnique: vi.fn() },
     match: { findMany: vi.fn() },
-    groupStandingPrediction: { findMany: vi.fn() },
-    kOPrediction: { findMany: vi.fn() },
+    groupStandingPrediction: { findMany: vi.fn(), groupBy: vi.fn() },
+    kOPrediction: { findMany: vi.fn(), groupBy: vi.fn() },
     sideBet: { findMany: vi.fn() },
     team: { findMany: vi.fn() },
   },
@@ -34,6 +34,8 @@ beforeEach(() => {
   mockDb.roomMember.findMany.mockResolvedValue([
     { userId: "u1", user: { id: "u1", name: "Alice", image: null } },
   ]);
+  mockDb.groupStandingPrediction.groupBy.mockResolvedValue([]);
+  mockDb.kOPrediction.groupBy.mockResolvedValue([]);
   mockDb.groupStandingPrediction.findMany.mockResolvedValue([
     { userId: "u1", wcGroup: "A", position1: "t1", position2: "t2", position3: "t3", position4: "t4", earnedAmount: 30 },
   ]);
@@ -52,7 +54,7 @@ beforeEach(() => {
 
 it("returns 403 when not a member", async () => {
   mockDb.roomMember.findUnique.mockResolvedValue(null);
-  mockDb.room.findUnique.mockResolvedValue({ status: "group_active" });
+  mockDb.room.findUnique.mockResolvedValue({ status: "group_active", entryFee: 10, members: [] });
   expect((await call()).status).toBe(403);
 });
 
@@ -64,7 +66,7 @@ it("is locked (403) during setup / betting / closed", async () => {
 });
 
 it("reveals group standings + earned money but NOT KO during group_active", async () => {
-  mockDb.room.findUnique.mockResolvedValue({ status: "group_active" });
+  mockDb.room.findUnique.mockResolvedValue({ status: "group_active", entryFee: 10, members: [] });
   const res = await call();
   expect(res.status).toBe(200);
   const body = await res.json();
@@ -77,7 +79,7 @@ it("reveals group standings + earned money but NOT KO during group_active", asyn
 });
 
 it("reveals KO predictions + earned money from ko_active onwards", async () => {
-  mockDb.room.findUnique.mockResolvedValue({ status: "ko_active" });
+  mockDb.room.findUnique.mockResolvedValue({ status: "ko_active", entryFee: 10, members: [] });
   mockDb.kOPrediction.findMany.mockResolvedValue([
     {
       userId: "u1", matchId: "m1", homeScore: 2, awayScore: 1, earnedAmount: 80,
@@ -98,7 +100,7 @@ it("reveals KO predictions + earned money from ko_active onwards", async () => {
 });
 
 it("includes Uber Pot bets with winner + prize once settled", async () => {
-  mockDb.room.findUnique.mockResolvedValue({ status: "ko_active" });
+  mockDb.room.findUnique.mockResolvedValue({ status: "ko_active", entryFee: 10, members: [] });
   mockDb.sideBet.findMany.mockResolvedValue([
     {
       id: "b1", title: "Top scorer?", description: null, status: "settled", winnerEntryId: "e1",
@@ -131,7 +133,7 @@ it("includes Uber Pot bets with winner + prize once settled", async () => {
 });
 
 it("shows Uber Pot answers but no prize while a bet is still open", async () => {
-  mockDb.room.findUnique.mockResolvedValue({ status: "group_active" });
+  mockDb.room.findUnique.mockResolvedValue({ status: "group_active", entryFee: 10, members: [] });
   mockDb.sideBet.findMany.mockResolvedValue([
     {
       id: "b1", title: "Top scorer?", description: null, status: "open", winnerEntryId: null,

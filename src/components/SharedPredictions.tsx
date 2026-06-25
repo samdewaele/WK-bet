@@ -52,6 +52,8 @@ type GroupVisibility = { revealed: boolean; kickoff: string | null };
 type Overview = {
   revealKO: boolean;
   groupVisibility: Record<string, GroupVisibility>;
+  groupUberPot?: Record<string, number>;
+  koMatchUberPot?: Record<string, number>;
   members: MemberOverview[];
   uberPot: { prizePerSettledBet: number; bets: UberBet[] };
 };
@@ -121,14 +123,14 @@ export default function SharedPredictions({ roomId }: { roomId: string }) {
     );
   };
 
-  // Pivot KO predictions into per-match rows: { match, picks: [{member, pred}] }
+  // Pivot KO predictions into per-match rows: { matchId, match, picks: [{member, pred}] }
   const koMatches = (() => {
-    const map = new Map<string, { match: KORow["match"]; round: string; matchNumber: number; picks: { userId: string; row: KORow }[] }>();
+    const map = new Map<string, { matchId: string; match: KORow["match"]; round: string; matchNumber: number; picks: { userId: string; row: KORow }[] }>();
     for (const m of data.members) {
       for (const p of m.knockout ?? []) {
         let entry = map.get(p.matchId);
         if (!entry) {
-          entry = { match: p.match, round: p.round, matchNumber: p.matchNumber, picks: [] };
+          entry = { matchId: p.matchId, match: p.match, round: p.round, matchNumber: p.matchNumber, picks: [] };
           map.set(p.matchId, entry);
         }
         entry.picks.push({ userId: m.userId, row: p });
@@ -190,7 +192,14 @@ export default function SharedPredictions({ roomId }: { roomId: string }) {
             const scored = rows.some((r) => r.s.earnedAmount != null);
             return (
               <div key={g} className="bg-gray-900 border border-gray-800 rounded-xl p-4">
-                <h3 className="text-sm font-bold text-amber-400 mb-3">Group {g}</h3>
+                <div className="flex items-center gap-3 mb-3">
+                  <h3 className="text-sm font-bold text-amber-400">Group {g}</h3>
+                  {(data.groupUberPot?.[g] ?? 0) > 0 && (
+                    <span className="text-xs text-blue-400" title="Unclaimed prize — flows to Uber Pot">
+                      →pot €{data.groupUberPot![g].toFixed(2)}
+                    </span>
+                  )}
+                </div>
                 <div className="overflow-x-auto">
                   <table className="w-full text-xs">
                     <thead>
@@ -252,11 +261,18 @@ export default function SharedPredictions({ roomId }: { roomId: string }) {
                         {km.match.awayTeam?.name ?? "TBD"}
                       </span>
                     </div>
-                    {finished && (
-                      <span className="text-xs font-bold bg-gray-800 text-white px-2 py-1 rounded">
-                        {km.match.homeScore}–{km.match.awayScore} FT
-                      </span>
-                    )}
+                    <div className="flex items-center gap-2">
+                      {finished && (
+                        <span className="text-xs font-bold bg-gray-800 text-white px-2 py-1 rounded">
+                          {km.match.homeScore}–{km.match.awayScore} FT
+                        </span>
+                      )}
+                      {finished && (data.koMatchUberPot?.[km.matchId] ?? 0) > 0 && (
+                        <span className="text-xs text-blue-400" title="Unclaimed prize — flows to Uber Pot">
+                          →pot €{data.koMatchUberPot![km.matchId].toFixed(2)}
+                        </span>
+                      )}
+                    </div>
                   </div>
                   <table className="w-full text-xs">
                     <tbody>

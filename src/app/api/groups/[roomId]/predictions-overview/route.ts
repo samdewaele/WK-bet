@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { computeUberPotResults } from "@/lib/uber-pot";
 import { requireRoomAccess } from "@/lib/room-auth";
+import { calculatePot, KO_MATCH_WEIGHT, type KORound } from "@/lib/pot";
 
 const WC_GROUPS = ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L"];
 
@@ -28,7 +29,10 @@ export async function GET(
   const access = await requireRoomAccess(roomId);
   if (access instanceof NextResponse) return access;
 
-  const room = await db.room.findUnique({ where: { id: roomId }, select: { status: true, simulationMode: true } });
+  const room = await db.room.findUnique({
+    where: { id: roomId },
+    include: { members: { select: { userId: true, excludedFromPot: true } } },
+  });
   if (!room) return NextResponse.json({ error: "Room not found" }, { status: 404 });
 
   const revealAll = STANDINGS_VISIBLE.includes(room.status);
@@ -62,7 +66,12 @@ export async function GET(
     Object.entries(groupVisibility).filter(([, v]) => v.revealed).map(([g]) => g),
   );
 
-  const [members, groupStandings, koPredictions, teams, sideBets, uber] = await Promise.all([
+  const activeMemberCount = room.members.filter((m) => !m.excludedFromPot).length;
+  const pot = calculatePot(room.entryFee, activeMemberCount);
+  const excludedIds = room.members.filter((m) => m.excludedFromPot).map((m) => m.userId);
+  const excludeFilter = excludedIds.length > 0 ? { userId: { notIn: excludedIds } } : {};
+
+  const [members, groupStandings, koPredictions, teams, sideBets, uber, groupByWcGroup, koByMatch] = await Promise.all([
     db.roomMember.findMany({
       where: { roomId },
       include: { user: { select: { id: true, name: true, image: true } } },
@@ -100,10 +109,40 @@ export async function GET(
       orderBy: { createdAt: "asc" },
     }),
     computeUberPotResults(roomId),
+    db.groupStandingPrediction.groupBy({
+      by: ["wcGroup"],
+      where: { roomId, earnedAmount: { not: null }, ...excludeFilter },
+      _sum: { earnedAmount: true },
+    }),
+    revealKO
+      ? db.kOPrediction.groupBy({
+          by: ["matchId"],
+          where: { roomId, earnedAmount: { not: null }, ...excludeFilter },
+          _sum: { earnedAmount: true },
+        })
+      : Promise.resolve([] as { matchId: string; _sum: { earnedAmount: number | null } }[]),
   ]);
 
   const teamMap = new Map(teams.map((t) => [t.id, t]));
   const resolve = (id: string) => teamMap.get(id) ?? { id, name: "?", flag: "" };
+
+  // Per-group Uber Pot: how much of that group's prize went unclaimed
+  const groupUberPot: Record<string, number> = {};
+  for (const g of groupByWcGroup) {
+    groupUberPot[g.wcGroup] = Math.max(0, pot.prizePerWCGroup - (g._sum.earnedAmount ?? 0));
+  }
+
+  // Per-match Uber Pot: how much of that match's prize went unclaimed
+  const matchRoundMap = new Map<string, KORound>(
+    koPredictions.map((p) => [p.matchId, p.match.round as KORound]),
+  );
+  const koMatchUberPot: Record<string, number> = {};
+  for (const m of koByMatch) {
+    const round = matchRoundMap.get(m.matchId);
+    if (!round) continue;
+    const matchPrize = pot.koUnit * (KO_MATCH_WEIGHT[round] ?? 0);
+    koMatchUberPot[m.matchId] = Math.max(0, matchPrize - (m._sum.earnedAmount ?? 0));
+  }
 
   // Simulation rooms keep fake KO results and bracket teams in SimResult —
   // overlay them so the shared KO picks view shows the simulated tournament.
@@ -156,6 +195,8 @@ export async function GET(
   return NextResponse.json({
     revealKO,
     groupVisibility,
+    groupUberPot,
+    koMatchUberPot,
     members: members.map((m) => ({
       userId: m.userId,
       name: m.user.name,
