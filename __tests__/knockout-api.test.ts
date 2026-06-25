@@ -7,7 +7,7 @@ vi.mock("@/lib/db", () => ({
     roomMember: { findUnique: vi.fn() },
     room: { findUnique: vi.fn() },
     match: { findMany: vi.fn() },
-    kOPrediction: { findMany: vi.fn(), upsert: vi.fn() },
+    kOPrediction: { findMany: vi.fn(), upsert: vi.fn(), groupBy: vi.fn() },
     simResult: { findMany: vi.fn() },
     team: { findMany: vi.fn() },
   },
@@ -58,9 +58,10 @@ describe("GET /api/groups/[roomId]/knockout", () => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "u1", role: "user" } } as never);
     mockDb.roomMember.findUnique.mockResolvedValue({ userId: "u1", roomId: "r1" });
-    mockDb.room.findUnique.mockResolvedValue({ status: "ko_betting", simulationMode: false });
+    mockDb.room.findUnique.mockResolvedValue({ status: "ko_betting", simulationMode: false, entryFee: 10, members: [] });
     mockDb.match.findMany.mockResolvedValue([KO_MATCH]);
     mockDb.kOPrediction.findMany.mockResolvedValue([]);
+    mockDb.kOPrediction.groupBy.mockResolvedValue([]);
     mockDb.simResult.findMany.mockResolvedValue([]);
     mockDb.team.findMany.mockResolvedValue([]);
   });
@@ -93,7 +94,7 @@ describe("GET /api/groups/[roomId]/knockout", () => {
   it.each(["ko_betting", "ko_active", "settling", "finished"])(
     "returns matches when room status is %s",
     async (status) => {
-      mockDb.room.findUnique.mockResolvedValue({ status, simulationMode: false });
+      mockDb.room.findUnique.mockResolvedValue({ status, simulationMode: false, entryFee: 10, members: [] });
       const res = await GET(makeGetRequest(), { params: PARAMS });
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -134,7 +135,7 @@ describe("GET /api/groups/[roomId]/knockout", () => {
   });
 
   it("simulation mode: overlays SimResult teams onto the match", async () => {
-    mockDb.room.findUnique.mockResolvedValue({ status: "ko_betting", simulationMode: true });
+    mockDb.room.findUnique.mockResolvedValue({ status: "ko_betting", simulationMode: true, entryFee: 10, members: [] });
     mockDb.simResult.findMany.mockResolvedValue([
       { matchId: "m1", homeTeamId: "fra", awayTeamId: "esp", homeScore: null, awayScore: null },
     ]);
@@ -149,7 +150,7 @@ describe("GET /api/groups/[roomId]/knockout", () => {
   });
 
   it("simulation mode: overlays SimResult scores and marks match finished", async () => {
-    mockDb.room.findUnique.mockResolvedValue({ status: "ko_active", simulationMode: true });
+    mockDb.room.findUnique.mockResolvedValue({ status: "ko_active", simulationMode: true, entryFee: 10, members: [] });
     mockDb.simResult.findMany.mockResolvedValue([
       { matchId: "m1", homeTeamId: null, awayTeamId: null, homeScore: 3, awayScore: 2 },
     ]);
@@ -162,7 +163,7 @@ describe("GET /api/groups/[roomId]/knockout", () => {
   });
 
   it("simulation mode: status stays non-finished when SimResult has no scores", async () => {
-    mockDb.room.findUnique.mockResolvedValue({ status: "ko_betting", simulationMode: true });
+    mockDb.room.findUnique.mockResolvedValue({ status: "ko_betting", simulationMode: true, entryFee: 10, members: [] });
     mockDb.simResult.findMany.mockResolvedValue([
       { matchId: "m1", homeTeamId: "fra", awayTeamId: "esp", homeScore: null, awayScore: null },
     ]);

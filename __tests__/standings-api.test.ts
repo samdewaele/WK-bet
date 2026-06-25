@@ -18,6 +18,7 @@ vi.mock("@/lib/db", () => ({
     },
     groupStandingPrediction: {
       findMany: vi.fn(),
+      groupBy: vi.fn(),
       upsert: vi.fn(),
     },
   },
@@ -49,9 +50,10 @@ const validTeams = [
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mockDb.room.findUnique.mockResolvedValue({ status: "open" });
+  mockDb.room.findUnique.mockResolvedValue({ status: "open", entryFee: 10, members: [] });
   // No kickoff times by default → no per-group locks
   mockDb.match.findMany.mockResolvedValue([]);
+  mockDb.groupStandingPrediction.groupBy.mockResolvedValue([]);
 });
 
 describe("GET /api/groups/[roomId]/standings", () => {
@@ -86,8 +88,8 @@ describe("GET /api/groups/[roomId]/standings", () => {
     const res = await GET({} as never, { params: PARAMS });
     expect(res.status).toBe(200);
     const json = await res.json();
-    expect(json).toHaveLength(1);
-    expect(json[0].wcGroup).toBe("A");
+    expect(json.predictions).toHaveLength(1);
+    expect(json.predictions[0].wcGroup).toBe("A");
   });
 });
 
