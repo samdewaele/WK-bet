@@ -397,9 +397,10 @@ export default function KnockoutPredictions({ roomId, roomStatus, simulationMode
     const scoreState = scores[match.id];
     const mSaveStatus = matchSaveStatus[match.id] ?? "idle";
 
-    const { home: projectedHome, away: projectedAway } = getDisplayTeams(match);
-    const displayHome = match.homeTeam ?? projectedHome;
-    const displayAway = match.awayTeam ?? projectedAway;
+    // Resolve teams exactly like the bracket: R32 from the match itself, later
+    // rounds projected through the corrected tree. (Previously this preferred
+    // match.homeTeam, which surfaced stale/wrong DB teams in undecided rounds.)
+    const { home: displayHome, away: displayAway } = getDisplayTeams(match);
     const homeLabel = getSlotLabel(match.matchNumber, "home");
     const awayLabel = getSlotLabel(match.matchNumber, "away");
 

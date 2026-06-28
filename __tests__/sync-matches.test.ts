@@ -32,6 +32,7 @@ vi.mock("@/lib/ko-seeding", () => ({
   computeGroupStandings: vi.fn(),
   populateR32Bracket: vi.fn(),
   populateR32FromApi: vi.fn(),
+  repropagateKOBracket: vi.fn(),
   populateNextRoundSlot: vi.fn(),
 }));
 
@@ -48,7 +49,7 @@ import { db } from "@/lib/db";
 import { fetchWCMatches } from "@/lib/football-data";
 import { calculatePoints } from "@/lib/points";
 import { checkAndSendRoundNotifications, checkAndSendIncompleteReminders } from "@/lib/notifications";
-import { computeGroupStandings, populateR32Bracket, populateR32FromApi, populateNextRoundSlot } from "@/lib/ko-seeding";
+import { computeGroupStandings, populateR32Bracket, populateR32FromApi, repropagateKOBracket, populateNextRoundSlot } from "@/lib/ko-seeding";
 import { scoreAndAdvanceCompletedGroups, scoreKOMatchForAllRooms } from "@/lib/scoring";
 import { syncMatches } from "@/lib/sync-matches";
 
@@ -227,6 +228,7 @@ function setupMocks(opts: SetupOptions = {}) {
   mockComputeStandings.mockResolvedValue([] as any);
   mockPopulateR32.mockResolvedValue(undefined as any);
   mockPopulateR32FromApi.mockResolvedValue(undefined as any);
+  vi.mocked(repropagateKOBracket).mockResolvedValue(undefined as any);
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────

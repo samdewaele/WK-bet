@@ -2,7 +2,7 @@ import { db } from "@/lib/db";
 import { fetchWCMatches, mapStatus, teamNameMatches } from "@/lib/football-data";
 import { calculatePoints, type Round } from "@/lib/points";
 import { checkAndSendRoundNotifications, checkAndSendIncompleteReminders } from "@/lib/notifications";
-import { computeGroupStandings, populateR32Bracket, populateR32FromApi, populateNextRoundSlot } from "@/lib/ko-seeding";
+import { computeGroupStandings, populateR32Bracket, populateR32FromApi, populateNextRoundSlot, repropagateKOBracket } from "@/lib/ko-seeding";
 import { scoreAndAdvanceCompletedGroups, scoreKOMatchForAllRooms } from "@/lib/scoring";
 import type { KORound } from "@/lib/pot";
 
@@ -400,6 +400,12 @@ export async function syncMatches(): Promise<SyncResult> {
         const standings = await computeGroupStandings();
         await populateR32FromApi(standings, apiLast32).catch((err) =>
           console.error("[sync] R32 API seeding failed:", err)
+        );
+        // Rebuild R16→Final from finished matches via the corrected tree, so any
+        // downstream slots left holding stale/wrong teams by the old propagation
+        // are cleared (undecided rounds correctly show TBD).
+        await repropagateKOBracket().catch((err) =>
+          console.error("[sync] KO re-propagation failed:", err)
         );
       } else {
         const r32FullyPopulated = await db.match.count({

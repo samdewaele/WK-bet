@@ -495,6 +495,39 @@ export async function resetKOBracket(): Promise<void> {
   });
 }
 
+/**
+ * Rebuild the R16→Final team slots from scratch, authoritatively, using the
+ * current corrected tree (NEXT_ROUND_SLOT). Clears every downstream slot, then
+ * re-propagates ONLY from genuinely finished KO matches in bracket order. This
+ * heals slots left holding stale/wrong teams by the old (buggy) propagation: a
+ * round that hasn't been decided yet correctly ends up empty (TBD) rather than
+ * showing phantom teams. Real tournament only — simulation overlays its own
+ * bracket via SimResult.
+ */
+export async function repropagateKOBracket(): Promise<void> {
+  await resetKOBracket();
+  const finished = await db.match.findMany({
+    where: {
+      round: { in: ["R32", "R16", "QF", "SF"] },
+      status: "finished",
+      homeTeamId: { not: null },
+      awayTeamId: { not: null },
+      homeScore: { not: null },
+      awayScore: { not: null },
+    },
+    orderBy: { matchNumber: "asc" },
+    select: { matchNumber: true, homeTeamId: true, awayTeamId: true, homeScore: true, awayScore: true },
+  });
+  for (const m of finished) {
+    if (m.matchNumber == null || m.homeScore == null || m.awayScore == null) continue;
+    // Mirror the sync's winner rule (home advances on a level full-time score).
+    const homeWins = m.homeScore >= m.awayScore;
+    const winnerId = homeWins ? m.homeTeamId : m.awayTeamId;
+    const loserId = homeWins ? m.awayTeamId : m.homeTeamId;
+    if (winnerId) await populateNextRoundSlot(m.matchNumber, winnerId, loserId);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Player bracket simulation
 // ---------------------------------------------------------------------------
