@@ -22,6 +22,15 @@ import { buildStandingsFromMatches, populateGroupQualifiers, buildPlayerBracket,
 
 type Top4 = [string, string, string, string];
 
+/** Set of userIds excluded from the pot in a room (never win, never count toward splits). */
+async function excludedUserIds(roomId: string): Promise<Set<string>> {
+  const rows = await db.roomMember.findMany({
+    where: { roomId, excludedFromPot: true },
+    select: { userId: true },
+  });
+  return new Set(rows.map((r) => r.userId));
+}
+
 /** Rooms with the data needed to compute their pot. */
 async function roomsWithPot() {
   // The pot is sized on members who are IN the pot — must match every read path
@@ -47,20 +56,32 @@ export async function scoreRoomGroupStanding(
   actualTop4: Top4,
   prizePerGroup: number,
 ): Promise<void> {
-  const preds = await db.groupStandingPrediction.findMany({ where: { roomId, wcGroup: group } });
+  const [preds, excluded] = await Promise.all([
+    db.groupStandingPrediction.findMany({ where: { roomId, wcGroup: group } }),
+    excludedUserIds(roomId),
+  ]);
   if (preds.length === 0) return;
 
   const scored = preds.map((gp) => {
     const predicted = [gp.position1, gp.position2, gp.position3, gp.position4] as Top4;
-    return { id: gp.id, predicted, multiplier: scoreGroupStanding(predicted, actualTop4).scoreMultiplier };
+    return {
+      id: gp.id,
+      predicted,
+      excluded: excluded.has(gp.userId),
+      multiplier: scoreGroupStanding(predicted, actualTop4).scoreMultiplier,
+    };
   });
-  const maxMultiplier = scored.reduce((m, s) => Math.max(m, s.multiplier), 0);
-  const topCount = scored.filter((s) => s.multiplier === maxMultiplier && maxMultiplier > 0).length;
+  // The winning tier + split are computed over IN-POT members only — an excluded
+  // member tying the top tier must not inflate topCount and shrink real winners'
+  // shares. Excluded members always earn 0.
+  const eligible = scored.filter((s) => !s.excluded);
+  const maxMultiplier = eligible.reduce((m, s) => Math.max(m, s.multiplier), 0);
+  const topCount = eligible.filter((s) => s.multiplier === maxMultiplier && maxMultiplier > 0).length;
 
   await Promise.all(
     scored.map((s) => {
       const earnedAmount =
-        s.multiplier === maxMultiplier && maxMultiplier > 0
+        !s.excluded && s.multiplier === maxMultiplier && maxMultiplier > 0
           ? earnedFromGroupStanding(s.predicted, actualTop4, prizePerGroup, topCount)
           : 0;
       return db.groupStandingPrediction.update({ where: { id: s.id }, data: { earnedAmount } });
@@ -84,7 +105,7 @@ export async function scoreRoomKOMatch(
   actualHome: number,
   actualAway: number,
 ): Promise<void> {
-  const [koMatches, allRoomPreds] = await Promise.all([
+  const [koMatches, allRoomPreds, excluded] = await Promise.all([
     db.match.findMany({
       where: { round: { in: ["R32", "R16", "QF", "SF", "3rd", "Final"] } },
       select: { id: true, matchNumber: true, homeTeamId: true, awayTeamId: true, penaltyWinner: true },
@@ -94,6 +115,7 @@ export async function scoreRoomKOMatch(
       where: { roomId },
       select: { id: true, userId: true, matchId: true, homeScore: true, awayScore: true, penaltyWinner: true },
     }),
+    excludedUserIds(roomId),
   ]);
 
   const matchPreds = allRoomPreds.filter((p) => p.matchId === matchId);
@@ -119,6 +141,7 @@ export async function scoreRoomKOMatch(
     const predictedSlot = userBrackets.get(p.userId)?.get(matchId);
     return {
       id: p.id,
+      excluded: excluded.has(p.userId),
       homeScore: p.homeScore,
       awayScore: p.awayScore,
       points: calculatePoints(round, p.homeScore, p.awayScore, actualHome, actualAway),
@@ -134,13 +157,16 @@ export async function scoreRoomKOMatch(
     };
   });
 
-  const maxMultiplier = scored.reduce((m, s) => Math.max(m, s.multiplier), 0);
-  const topCount = scored.filter((s) => s.multiplier === maxMultiplier && maxMultiplier > 0).length;
+  // Winning tier + split over IN-POT members only (excluded members earn 0 and
+  // must not inflate the split).
+  const eligible = scored.filter((s) => !s.excluded);
+  const maxMultiplier = eligible.reduce((m, s) => Math.max(m, s.multiplier), 0);
+  const topCount = eligible.filter((s) => s.multiplier === maxMultiplier && maxMultiplier > 0).length;
 
   await Promise.all(
     scored.map((s) => {
       const earnedAmount =
-        s.multiplier === maxMultiplier && maxMultiplier > 0
+        !s.excluded && s.multiplier === maxMultiplier && maxMultiplier > 0
           ? (matchPrize * s.multiplier) / topCount
           : 0;
       return db.kOPrediction.update({ where: { id: s.id }, data: { points: s.points, earnedAmount } });
@@ -160,6 +186,29 @@ export async function scoreKOMatchForAllRooms(
     const pot = calculatePot(room.entryFee, room.memberCount);
     const matchPrize = pot.prizePerKOMatch[round] ?? 0;
     await scoreRoomKOMatch(room.id, matchId, round, matchPrize, actualHome, actualAway);
+  }
+}
+
+/**
+ * Re-score EVERY finished KO match across all rooms. KO scoring is team-aware,
+ * so when an upstream result changes the downstream slots' actual teams change
+ * (via repropagation) — but those rounds were already scored against the old
+ * teams. Re-running all finished matches after a bracket rebuild keeps earnings
+ * consistent. Idempotent (earnedAmount is overwritten), so it's safe to repeat.
+ */
+export async function rescoreFinishedKOMatches(): Promise<void> {
+  const finished = await db.match.findMany({
+    where: {
+      round: { in: ["R32", "R16", "QF", "SF", "3rd", "Final"] },
+      status: "finished",
+      homeScore: { not: null },
+      awayScore: { not: null },
+    },
+    select: { id: true, round: true, homeScore: true, awayScore: true },
+    orderBy: { matchNumber: "asc" },
+  });
+  for (const m of finished) {
+    await scoreKOMatchForAllRooms(m.id, m.round as KORound, m.homeScore!, m.awayScore!);
   }
 }
 

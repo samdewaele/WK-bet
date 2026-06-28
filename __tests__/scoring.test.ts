@@ -5,6 +5,7 @@ vi.mock("@/lib/db", () => ({
     groupStandingPrediction: { findMany: vi.fn(), update: vi.fn().mockResolvedValue({}) },
     kOPrediction: { findMany: vi.fn(), update: vi.fn().mockResolvedValue({}) },
     match: { findMany: vi.fn() },
+    roomMember: { findMany: vi.fn().mockResolvedValue([]) },
   },
 }));
 
@@ -26,6 +27,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mockDb.groupStandingPrediction.update.mockResolvedValue({});
   mockDb.kOPrediction.update.mockResolvedValue({});
+  mockDb.roomMember.findMany.mockResolvedValue([]); // no excluded members by default
   // Default: single R32 match with fixed teams, no other rounds
   mockDb.match.findMany.mockResolvedValue([
     { id: "m1", matchNumber: 73, homeTeamId: "tA", awayTeamId: "tB" },
@@ -102,6 +104,20 @@ describe("scoreRoomGroupStanding — top tier wins, split within tier", () => {
     expect(earned.y).toBe(0);
   });
 
+  it("an excluded member tying the top tier doesn't shrink the real winner's share", async () => {
+    mockDb.roomMember.findMany.mockResolvedValue([{ userId: "uX" }]); // uX is excluded
+    mockDb.groupStandingPrediction.findMany.mockResolvedValue([
+      { id: "active", userId: "u1", position1: "A", position2: "B", position3: "C", position4: "D" },
+      { id: "excluded", userId: "uX", position1: "A", position2: "B", position3: "C", position4: "D" },
+    ]);
+
+    await scoreRoomGroupStanding("r1", "A", ACTUAL, 120);
+
+    const earned = earnedById(mockDb.groupStandingPrediction.update);
+    expect(earned.active).toBe(120); // sole IN-POT winner takes the whole prize (not 60)
+    expect(earned.excluded).toBe(0); // excluded members never earn
+  });
+
   it("never pays out more than the group prize", async () => {
     mockDb.groupStandingPrediction.findMany.mockResolvedValue([
       gp("p1", ["A", "B", "C", "D"]),
@@ -142,6 +158,20 @@ describe("scoreRoomKOMatch — R32 (team-aware, same teams for all)", () => {
     expect(earned.exact).toBe(80);
     expect(earned.winner).toBe(0);
     expect(earned.wrong).toBe(0);
+  });
+
+  it("an excluded member's exact score doesn't steal the in-pot winner's prize", async () => {
+    mockDb.roomMember.findMany.mockResolvedValue([{ userId: "uX" }]); // uX excluded
+    mockDb.kOPrediction.findMany.mockResolvedValue([
+      ko("active", "u1", "m1", 2, 0), // in-pot, exact
+      ko("excluded", "uX", "m1", 2, 0), // excluded, also exact
+    ]);
+
+    await scoreRoomKOMatch("r1", "m1", "R32", 80, 2, 0);
+
+    const earned = earnedById(mockDb.kOPrediction.update);
+    expect(earned.active).toBe(80);   // sole in-pot winner takes the whole prize (not 40)
+    expect(earned.excluded).toBe(0);  // excluded never earns
   });
 
   it("with no exact score, correct-winner tier splits the prize", async () => {

@@ -3,7 +3,7 @@ import { fetchWCMatches, mapStatus, winnerSide, teamNameMatches } from "@/lib/fo
 import { calculatePoints, type Round } from "@/lib/points";
 import { checkAndSendRoundNotifications, checkAndSendIncompleteReminders } from "@/lib/notifications";
 import { computeGroupStandings, populateR32Bracket, populateR32FromApi, populateNextRoundSlot, repropagateKOBracket } from "@/lib/ko-seeding";
-import { scoreAndAdvanceCompletedGroups, scoreKOMatchForAllRooms } from "@/lib/scoring";
+import { scoreAndAdvanceCompletedGroups, scoreKOMatchForAllRooms, rescoreFinishedKOMatches } from "@/lib/scoring";
 import { koWinnerSide, type KORound } from "@/lib/pot";
 
 import type { FDTeam } from "@/lib/football-data";
@@ -430,6 +430,14 @@ export async function syncMatches(): Promise<SyncResult> {
         await repropagateKOBracket().catch((err) =>
           console.error("[sync] KO re-propagation failed:", err)
         );
+        // If anything changed this cycle, re-score all finished KO matches: a
+        // corrected upstream result changes downstream slots' teams, and KO
+        // scoring is team-aware, so stale earnings must be recomputed.
+        if (updated > 0) {
+          await rescoreFinishedKOMatches().catch((err) =>
+            console.error("[sync] KO re-scoring failed:", err)
+          );
+        }
       } else {
         const r32FullyPopulated = await db.match.count({
           where: { round: "R32", homeTeamId: { not: null }, awayTeamId: { not: null } },
