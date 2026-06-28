@@ -10,6 +10,8 @@ import {
   roundOfMatchNumber,
   computeBracketLayout,
   computeConnectors,
+  formatKickoff,
+  KO_TBD_ISO,
 } from "@/lib/ko-bracket";
 import type { KORound } from "@/lib/pot";
 
@@ -20,6 +22,19 @@ describe("KO bracket topology", () => {
     expect(Object.keys(BRACKET_PATH).map(Number).sort((a, b) => a - b)).toEqual(
       Array.from({ length: 16 }, (_, i) => 89 + i),
     );
+  });
+
+  it("formatKickoff renders TBD for unknown/sentinel/invalid dates, a real time otherwise", () => {
+    // Sentinel placeholder the sync loop uses for an unresolved fixture date.
+    expect(formatKickoff(KO_TBD_ISO)).toBe("TBD");
+    expect(formatKickoff("2026-12-31T00:00:00.000Z")).toBe("TBD");
+    expect(formatKickoff("not-a-date")).toBe("TBD");
+    expect(formatKickoff("")).toBe("TBD");
+    // A real fixture date formats to a non-TBD string carrying the month.
+    // (Assert on month, not exact hour, so the test is timezone-independent.)
+    const real = formatKickoff("2026-07-14T19:00:00.000Z");
+    expect(real).not.toBe("TBD");
+    expect(real).toMatch(/Jul/);
   });
 
   it("every BRACKET_PATH feeder references a strictly earlier match", () => {

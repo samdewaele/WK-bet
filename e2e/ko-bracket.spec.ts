@@ -42,6 +42,12 @@ test.describe("KO bracket", () => {
 
     // Tiles carry score inputs for editing directly in the bracket.
     await expect(page.locator('input[type="number"]').first()).toBeVisible();
+
+    // Each tile shows its playing date ("dd Mon, HH:mm") pulled from the match
+    // kickoff. The seed gives KO matches real future dates, so a date must show.
+    await expect(
+      page.getByText(/\d{2}\s\w{3},?\s\d{2}:\d{2}/).first()
+    ).toBeVisible({ timeout: 10_000 });
   });
 
   test("Bracket ⇄ List toggle switches to the legacy round-tab view", async ({ page }) => {

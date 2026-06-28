@@ -8,6 +8,24 @@ import type { KORound } from "./pot";
 
 export type BracketSide = "winner" | "loser";
 
+// KO placeholder kickoff written by the sync loop when a fixture's real date is
+// not yet known (see sync-matches.ts KO_TBD_KICKOFF). Render this as "TBD"
+// rather than a bogus "31 Dec" so an unresolved slot never reads as a real time.
+export const KO_TBD_ISO = "2026-12-31T00:00:00.000Z";
+
+/** Compact, locale-formatted kickoff for a bracket tile ("14 Jul, 21:00"). */
+export function formatKickoff(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "TBD";
+  if (d.getUTCFullYear() === 2026 && d.getUTCMonth() === 11 && d.getUTCDate() === 31) return "TBD";
+  return d.toLocaleString("en-GB", {
+    day: "2-digit",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
 /**
  * For every match from R16 onward: which earlier match feeds its home/away slot,
  * and whether the winner or loser advances. R32 matches (73‑88) are fed directly

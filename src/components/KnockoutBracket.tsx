@@ -6,6 +6,7 @@ import type { Match, Prediction, Team } from "@/components/KnockoutPredictions";
 import {
   computeBracketLayout,
   computeConnectors,
+  formatKickoff,
   R32_SOURCE_LABELS,
   BRACKET_LAYOUT,
   type PositionedTile,
@@ -239,8 +240,11 @@ function BracketTile({
         style={{ left: tile.x, top: tile.y, width: tile.width, height: tile.height }}
       >
         {/* tiny header line: match # + status / save indicator */}
-        <div className="flex items-center justify-between px-1.5 pt-[1px] text-[8px] leading-none text-emerald-500/60">
-          <span>{isFinal ? "🏆 FINAL" : isThird ? "🥉 3RD" : `#${tile.matchNumber}`}</span>
+        <div className="flex items-center justify-between gap-1 px-1.5 pt-[1px] text-[8px] leading-none text-emerald-500/60">
+          <span className="shrink-0">
+            {isFinal ? "🏆 FINAL" : isThird ? "🥉 3RD" : `#${tile.matchNumber}`}
+            <span className="ml-1 font-normal text-emerald-400/45">{formatKickoff(match.kickoff)}</span>
+          </span>
           <span>
             {live && <span className="text-green-400">● LIVE</span>}
             {finished && <span className="text-gray-400">FT {match.homeScore}–{match.awayScore}</span>}
