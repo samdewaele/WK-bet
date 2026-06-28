@@ -25,28 +25,25 @@
 - Tests: official feeders, NEXT_ROUND_SLOT-inverse, layout, KO_SCHEDULE; scoring
   R16 cases updated. 558 unit + 3 e2e bracket tests pass; verified visually.
 
-## REMAINING
-### A. R32 third-place real teams (the last visible wrong-teams bug)
-Replace the MRV guess with the real matchups from football-data, bound by the
-group-position **anchor** team (deterministic). Plan:
-- Pure resolver `resolveR32ThirdPlaceFromFixtures(standingsByFdId, apiLast32)`
-  -> Map<matchNumber, thirdTeamFdId>. For each third slot, find the LAST_32
-  fixture containing the slot's group-anchor team; the other team is the third.
-  Unit-test with the real response (slot 74 -> Paraguay, 77 -> Sweden, 79 ->
-  Ecuador, 80 -> Congo DR, 81 -> Bosnia, 82 -> Senegal, 85 -> Algeria,
-  87 -> Ghana).
-- Wire into sync `populateR32Bracket` path: when LAST_32 fixtures with real
-  teams exist, use them; else fall back to MRV. Also bind fdMatchId per R32 slot
-  by anchor so result scores attach to the right slot.
-- Live-verify on prod (sandbox has no football-data egress).
+## DONE (commit 34ffa7b)
+### A. R32 third-place real teams — FIXED
+- `src/lib/ko-r32-binding.ts` pure resolver (anchor on group winner) reads the
+  real third-place team per slot from LAST_32 fixtures. Unit-tested against the
+  real response (74→Paraguay, 77→Sweden, 79→Ecuador, 80→Congo DR, 81→Bosnia,
+  82→Senegal, 85→Algeria, 87→Ghana).
+- `resolveR32Bracket` takes a third-place override; `populateR32FromApi` builds
+  it from football-data and also binds each slot's fdMatchId. Idempotent +
+  self-healing (only rewrites unplayed slots that differ) so it corrects R32
+  rows already seeded with the wrong heuristic teams in prod. Sync runs it
+  whenever LAST_32 carries real teams; heuristic kept as fallback / for sim.
+- Needs prod live-verify (sandbox has no football-data egress).
 
-### B. fdMatchId rebind for R16+ + prod self-heal
-- R16+ bind to football-data by team once a slot's teams resolve (sync pass-2
-  already team-matches null-fdMatchId rows; confirm it writes fdMatchId).
-- One-off prod repair: existing rows seeded with wrong fdMatchId/kickoff —
-  clear KO fdMatchId and reset kickoff to KO_SCHEDULE so the corrected logic
-  takes over. (Display already uses KO_SCHEDULE, so dates are correct now even
-  before the repair.)
+## REMAINING
+### B. fdMatchId rebind for R16+ (lower priority)
+- R16+ slots get teams via populateNextRoundSlot as rounds resolve; sync pass-2
+  team-matches null-fdMatchId rows for scoring. Optionally bind fdMatchId for
+  R16+ the same way populateR32FromApi does, once those slots' teams are known,
+  so pass-1 fdMatchId matching is used. Dates already correct via KO_SCHEDULE.
 
 ## Reference data
 Real football-data KO response saved at (scratchpad, not committed):
