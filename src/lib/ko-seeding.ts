@@ -17,6 +17,7 @@
 
 import { db } from "@/lib/db";
 import { NEXT_ROUND_SLOT } from "@/lib/ko-bracket";
+import { resolveR32ThirdPlace, type R32Fixture } from "@/lib/ko-r32-binding";
 
 export const WC_GROUPS = ["A","B","C","D","E","F","G","H","I","J","K","L"] as const;
 export type WCGroup = typeof WC_GROUPS[number];
@@ -221,7 +222,11 @@ export function assignThirdPlaceTeams(
  */
 export function resolveR32Bracket(
   standings: Map<WCGroup, TeamStats[]>,
-  bestThirdPlace: TeamStats[]
+  bestThirdPlace: TeamStats[],
+  // Optional real third-place assignment from football-data (matchNumber 73–88 →
+  // teamId). When a slot is present here it overrides the heuristic guess; this
+  // is how the real tournament gets FIFA's actual draw instead of an estimate.
+  thirdOverride?: Record<number, string>,
 ): Array<{ homeTeamId: string; awayTeamId: string }> {
   // Collect all third-place slots and pre-assign them
   const thirdSlots: ThirdSlot[] = R32_SLOTS
@@ -231,7 +236,7 @@ export function resolveR32Bracket(
   const thirdAssignments = assignThirdPlaceTeams(bestThirdPlace, thirdSlots);
   let thirdIdx = 0;
 
-  const resolveSlot = (slot: BracketSlot): string => {
+  const resolveSlot = (slot: BracketSlot, matchNumber: number): string => {
     if (slot.type === "group") {
       const gs = standings.get(slot.group);
       if (!gs || gs.length <= slot.position) {
@@ -239,14 +244,15 @@ export function resolveR32Bracket(
       }
       return gs[slot.position].teamId;
     }
-    const teamId = thirdAssignments[thirdIdx++];
+    const heuristic = thirdAssignments[thirdIdx++];
+    const teamId = thirdOverride?.[matchNumber] ?? heuristic;
     if (!teamId) throw new Error("No third-place team available for slot");
     return teamId;
   };
 
-  return R32_SLOTS.map(slot => ({
-    homeTeamId: resolveSlot(slot.home),
-    awayTeamId: resolveSlot(slot.away),
+  return R32_SLOTS.map((slot, i) => ({
+    homeTeamId: resolveSlot(slot.home, 73 + i),
+    awayTeamId: resolveSlot(slot.away, 73 + i),
   }));
 }
 
@@ -284,6 +290,94 @@ export async function populateR32Bracket(
         },
       })
     )
+  );
+}
+
+type ApiR32Fixture = { id: number; homeTeam: { id: number | null }; awayTeam: { id: number | null } };
+
+/**
+ * Populate the R32 bracket from the REAL football-data LAST_32 fixtures.
+ *
+ * Group winners/runners-up come from our own standings (deterministic), but the
+ * best-third-place assignment is taken from FIFA's actual draw via football-data
+ * (see ko-r32-binding) rather than the heuristic guess — this is what fixes the
+ * wrong third-place teams. Also binds each slot's fdMatchId so live scores attach
+ * to the right slot. Falls back silently per-slot to the heuristic if a fixture
+ * can't be resolved. Caller should only invoke this once LAST_32 fixtures carry
+ * real teams (group stage complete).
+ */
+export async function populateR32FromApi(
+  standings: Map<WCGroup, TeamStats[]>,
+  apiLast32: ApiR32Fixture[],
+): Promise<void> {
+  const teams = await db.team.findMany({
+    where: { fdId: { not: null } },
+    select: { id: true, fdId: true },
+  });
+  const fdToDb = new Map(teams.map((t) => [t.fdId!, t.id]));
+  const dbToFd = new Map(teams.map((t) => [t.id, t.fdId!]));
+
+  // Group winner football-data id per group (the anchor for third-place slots).
+  const winnerFdByGroup: Record<string, number> = {};
+  for (const [group, arr] of standings) {
+    const fd = arr[0] && dbToFd.get(arr[0].teamId);
+    if (fd != null) winnerFdByGroup[group] = fd;
+  }
+
+  const fixtures: R32Fixture[] = apiLast32.map((m) => ({
+    homeFdId: m.homeTeam.id,
+    awayFdId: m.awayTeam.id,
+  }));
+  const thirdsFd = resolveR32ThirdPlace(winnerFdByGroup, fixtures);
+  const thirdOverride: Record<number, string> = {};
+  for (const [matchNumber, fd] of Object.entries(thirdsFd)) {
+    const dbId = fdToDb.get(fd);
+    if (dbId) thirdOverride[Number(matchNumber)] = dbId;
+  }
+
+  const bestThird = selectBestThirdPlace(standings);
+  const bracketTeams = resolveR32Bracket(standings, bestThird, thirdOverride);
+
+  // Map a resolved {home,away} pair → fdMatchId via the fixture's team set.
+  const fdMatchByPair = new Map<string, number>();
+  const pairKey = (a: number, b: number) => [a, b].sort((x, y) => x - y).join("-");
+  for (const m of apiLast32) {
+    if (m.homeTeam.id != null && m.awayTeam.id != null) {
+      fdMatchByPair.set(pairKey(m.homeTeam.id, m.awayTeam.id), m.id);
+    }
+  }
+
+  const r32Matches = await db.match.findMany({
+    where: { round: "R32" },
+    orderBy: { matchNumber: "asc" },
+    select: { id: true, status: true, homeTeamId: true, awayTeamId: true, fdMatchId: true },
+  });
+  if (r32Matches.length !== 16) {
+    throw new Error(`Expected 16 R32 matches in DB, found ${r32Matches.length}.`);
+  }
+
+  // Idempotent + self-healing: only rewrite a slot that is still unplayed and
+  // whose teams/fdMatchId actually differ. This corrects the wrong heuristic
+  // third-place teams already seeded in production without disturbing matches
+  // that have kicked off or rebinding on every sync cycle.
+  await Promise.all(
+    r32Matches.map((match, i) => {
+      if (match.status !== "scheduled") return null;
+      const { homeTeamId, awayTeamId } = bracketTeams[i];
+      const hFd = dbToFd.get(homeTeamId);
+      const aFd = dbToFd.get(awayTeamId);
+      const fdMatchId =
+        hFd != null && aFd != null ? fdMatchByPair.get(pairKey(hFd, aFd)) ?? null : null;
+      const unchanged =
+        match.homeTeamId === homeTeamId &&
+        match.awayTeamId === awayTeamId &&
+        (fdMatchId == null || match.fdMatchId === fdMatchId);
+      if (unchanged) return null;
+      return db.match.update({
+        where: { id: match.id },
+        data: { homeTeamId, awayTeamId, ...(fdMatchId != null && { fdMatchId }) },
+      });
+    }),
   );
 }
 
