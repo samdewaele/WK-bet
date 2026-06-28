@@ -3,7 +3,8 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import TeamFlag from "@/components/TeamFlag";
 import KnockoutBracket from "@/components/KnockoutBracket";
-import { BRACKET_PATH, R32_SOURCE_LABELS } from "@/lib/ko-bracket";
+import { BRACKET_PATH, R32_SOURCE_LABELS, formatKickoff } from "@/lib/ko-bracket";
+import { koScheduledKickoff } from "@/lib/ko-schedule";
 
 export type Team = {
   id: string;
@@ -405,13 +406,9 @@ export default function KnockoutPredictions({ roomId, roomStatus, simulationMode
     const hasActualResult = match.status === "finished" && match.homeScore !== null && match.awayScore !== null;
     const isLive = match.status === "live";
 
-    const kickoffDate = new Date(match.kickoff);
-    const timeStr = kickoffDate.toLocaleString("en-GB", {
-      day: "2-digit",
-      month: "short",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
+    // Dates come from the official static schedule (team-independent), falling
+    // back to the stored kickoff only if a slot is somehow missing.
+    const timeStr = formatKickoff(koScheduledKickoff(match.matchNumber) ?? match.kickoff);
 
     const tied = !locked && isTied(match.id);
     const needsPenalty = tied && !penaltyWinners[match.id];

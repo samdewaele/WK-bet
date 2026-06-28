@@ -16,6 +16,7 @@
  */
 
 import { db } from "@/lib/db";
+import { NEXT_ROUND_SLOT } from "@/lib/ko-bracket";
 
 export const WC_GROUPS = ["A","B","C","D","E","F","G","H","I","J","K","L"] as const;
 export type WCGroup = typeof WC_GROUPS[number];
@@ -336,48 +337,11 @@ export async function resetR32Bracket(): Promise<void> {
 // ---------------------------------------------------------------------------
 
 /**
- * Maps each KO match number to the next-round slot the winner fills.
- * SF losers also fill the 3rd-place match slots.
+ * Maps each KO match number to the next-round slot the winner fills (SF losers
+ * also fill the 3rd-place slots). Re-exported from the bracket topology, which
+ * derives it from BRACKET_PATH so the tree has a single source of truth.
  */
-export const NEXT_ROUND_SLOT: Record<
-  number,
-  {
-    winner: { matchNumber: number; side: "home" | "away" };
-    loser?: { matchNumber: number; side: "home" | "away" };
-  }
-> = {
-  73:  { winner: { matchNumber: 89,  side: "home" } },
-  74:  { winner: { matchNumber: 89,  side: "away" } },
-  75:  { winner: { matchNumber: 90,  side: "home" } },
-  76:  { winner: { matchNumber: 90,  side: "away" } },
-  77:  { winner: { matchNumber: 91,  side: "home" } },
-  78:  { winner: { matchNumber: 91,  side: "away" } },
-  79:  { winner: { matchNumber: 92,  side: "home" } },
-  80:  { winner: { matchNumber: 92,  side: "away" } },
-  81:  { winner: { matchNumber: 93,  side: "home" } },
-  82:  { winner: { matchNumber: 93,  side: "away" } },
-  83:  { winner: { matchNumber: 94,  side: "home" } },
-  84:  { winner: { matchNumber: 94,  side: "away" } },
-  85:  { winner: { matchNumber: 95,  side: "home" } },
-  86:  { winner: { matchNumber: 95,  side: "away" } },
-  87:  { winner: { matchNumber: 96,  side: "home" } },
-  88:  { winner: { matchNumber: 96,  side: "away" } },
-  89:  { winner: { matchNumber: 97,  side: "home" } },
-  90:  { winner: { matchNumber: 97,  side: "away" } },
-  91:  { winner: { matchNumber: 98,  side: "home" } },
-  92:  { winner: { matchNumber: 98,  side: "away" } },
-  93:  { winner: { matchNumber: 99,  side: "home" } },
-  94:  { winner: { matchNumber: 99,  side: "away" } },
-  95:  { winner: { matchNumber: 100, side: "home" } },
-  96:  { winner: { matchNumber: 100, side: "away" } },
-  97:  { winner: { matchNumber: 101, side: "home" } },
-  98:  { winner: { matchNumber: 101, side: "away" } },
-  99:  { winner: { matchNumber: 102, side: "home" } },
-  100: { winner: { matchNumber: 102, side: "away" } },
-  101: { winner: { matchNumber: 104, side: "home" }, loser: { matchNumber: 103, side: "home" } },
-  102: { winner: { matchNumber: 104, side: "away" }, loser: { matchNumber: 103, side: "away" } },
-  // 103 and 104 are Final/3rd — no next round
-};
+export { NEXT_ROUND_SLOT };
 
 /**
  * After a KO match finishes, populate the next-round match's team slot(s) in the DB.

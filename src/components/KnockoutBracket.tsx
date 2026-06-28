@@ -11,6 +11,7 @@ import {
   BRACKET_LAYOUT,
   type PositionedTile,
 } from "@/lib/ko-bracket";
+import { koScheduledKickoff } from "@/lib/ko-schedule";
 
 type ScoreState = Record<string, { home: string; away: string }>;
 type SaveStatus = "idle" | "saving" | "saved" | "error";
@@ -243,7 +244,9 @@ function BracketTile({
         <div className="flex items-center justify-between gap-1 px-1.5 pt-[1px] text-[8px] leading-none text-emerald-500/60">
           <span className="shrink-0">
             {isFinal ? "🏆 FINAL" : isThird ? "🥉 3RD" : `#${tile.matchNumber}`}
-            <span className="ml-1 font-normal text-emerald-400/45">{formatKickoff(match.kickoff)}</span>
+            <span className="ml-1 font-normal text-emerald-400/45">
+              {formatKickoff(koScheduledKickoff(tile.matchNumber) ?? match.kickoff)}
+            </span>
           </span>
           <span>
             {live && <span className="text-green-400">● LIVE</span>}

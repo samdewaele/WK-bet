@@ -12,7 +12,9 @@ import {
   computeConnectors,
   formatKickoff,
   KO_TBD_ISO,
+  NEXT_ROUND_SLOT,
 } from "@/lib/ko-bracket";
+import { KO_SCHEDULE, koScheduledKickoff } from "@/lib/ko-schedule";
 import type { KORound } from "@/lib/pot";
 
 const ALL_KO = Array.from({ length: 32 }, (_, i) => 73 + i); // 73..104
@@ -59,6 +61,43 @@ describe("KO bracket topology", () => {
     // The Final and 3rd-place are terminal — never feeders.
     expect(counts.get(103)).toBeUndefined();
     expect(counts.get(104)).toBeUndefined();
+  });
+
+  it("matches the official FIFA 2026 R16 + QF feeder pairings (not naive 73+74)", () => {
+    // Verified against the published 2026 bracket on Wikipedia.
+    const feeders = (n: number) => [BRACKET_PATH[n].home.matchNum, BRACKET_PATH[n].away.matchNum];
+    expect(feeders(89)).toEqual([74, 77]);
+    expect(feeders(90)).toEqual([73, 75]);
+    expect(feeders(91)).toEqual([76, 78]);
+    expect(feeders(92)).toEqual([79, 80]);
+    expect(feeders(93)).toEqual([83, 84]);
+    expect(feeders(94)).toEqual([81, 82]);
+    expect(feeders(95)).toEqual([86, 88]);
+    expect(feeders(96)).toEqual([85, 87]);
+    expect(feeders(97)).toEqual([89, 90]);
+    expect(feeders(98)).toEqual([93, 94]);
+    expect(feeders(99)).toEqual([91, 92]);
+    expect(feeders(100)).toEqual([95, 96]);
+    expect(feeders(101)).toEqual([97, 98]);
+    expect(feeders(102)).toEqual([99, 100]);
+  });
+
+  it("NEXT_ROUND_SLOT is the exact inverse of BRACKET_PATH", () => {
+    for (const [parentStr, path] of Object.entries(BRACKET_PATH)) {
+      const parent = Number(parentStr);
+      for (const side of ["home", "away"] as const) {
+        const feeder = path[side];
+        const routed = feeder.side === "winner"
+          ? NEXT_ROUND_SLOT[feeder.matchNum].winner
+          : NEXT_ROUND_SLOT[feeder.matchNum].loser;
+        expect(routed).toEqual({ matchNumber: parent, side });
+      }
+    }
+    // Every non-terminal match (73..102) routes its winner somewhere.
+    for (let n = 73; n <= 102; n++) expect(NEXT_ROUND_SLOT[n].winner).toBeDefined();
+    // Only the semi-finals route a loser (to the 3rd-place match).
+    expect(NEXT_ROUND_SLOT[101].loser).toEqual({ matchNumber: 103, side: "home" });
+    expect(NEXT_ROUND_SLOT[102].loser).toEqual({ matchNumber: 103, side: "away" });
   });
 
   it("3rd-place match is fed by the two SF losers; Final by the two SF winners", () => {
@@ -119,10 +158,17 @@ describe("BRACKET_POSITIONS", () => {
     }
   });
 
-  it("mirrors left and right halves at equal slotY (e.g. R32 73 ↔ 81)", () => {
-    expect(BRACKET_POSITIONS[73]).toEqual({ col: 0, slotY: 0 });
-    expect(BRACKET_POSITIONS[81]).toEqual({ col: 8, slotY: 0 });
-    expect(BRACKET_POSITIONS[73].slotY).toBe(BRACKET_POSITIONS[81].slotY);
+  it("splits the 16 R32 matches into 8 left (col 0) + 8 right (col 8)", () => {
+    const r32 = ROUND_MATCH_NUMBERS.R32;
+    const left = r32.filter((n) => BRACKET_POSITIONS[n].col === 0);
+    const right = r32.filter((n) => BRACKET_POSITIONS[n].col === 8);
+    expect(left).toHaveLength(8);
+    expect(right).toHaveLength(8);
+    // Each half occupies the 8 vertical slots 0..7 exactly once.
+    expect(left.map((n) => BRACKET_POSITIONS[n].slotY).sort((a, b) => a - b))
+      .toEqual([0, 1, 2, 3, 4, 5, 6, 7]);
+    expect(right.map((n) => BRACKET_POSITIONS[n].slotY).sort((a, b) => a - b))
+      .toEqual([0, 1, 2, 3, 4, 5, 6, 7]);
   });
 
   it("puts the Final and 3rd-place in the centre column, Final above 3rd", () => {
@@ -160,7 +206,7 @@ describe("computeBracketLayout", () => {
     const byNum = new Map(layout.tiles.map((t) => [t.matchNumber, t]));
     expect(byNum.get(73)!.side).toBe("left");
     expect(byNum.get(104)!.side).toBe("center");
-    expect(byNum.get(81)!.side).toBe("right");
+    expect(byNum.get(76)!.side).toBe("right");
     expect(byNum.get(104)!.round).toBe<KORound>("Final");
     expect(byNum.get(103)!.round).toBe<KORound>("3rd");
   });
@@ -251,5 +297,33 @@ describe("computeConnectors", () => {
     const sf102 = finalConns.find((c) => c.child === 102)!;
     // 101 is on the left of the final, 102 on the right
     expect(sf101.points[0].x).toBeLessThan(sf102.points[0].x);
+  });
+});
+
+describe("KO_SCHEDULE (official static kickoff times)", () => {
+  it("covers every KO match number 73..104 with a valid UTC ISO date", () => {
+    expect(Object.keys(KO_SCHEDULE).map(Number).sort((a, b) => a - b)).toEqual(ALL_KO);
+    for (const iso of Object.values(KO_SCHEDULE)) {
+      expect(iso).toMatch(/^2026-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
+      expect(Number.isNaN(new Date(iso).getTime())) .toBe(false);
+    }
+  });
+
+  it("is chronologically consistent with the bracket — a match never precedes its feeders", () => {
+    for (const [parentStr, path] of Object.entries(BRACKET_PATH)) {
+      const parent = Number(parentStr);
+      const pT = new Date(KO_SCHEDULE[parent]).getTime();
+      for (const child of [path.home.matchNum, path.away.matchNum]) {
+        expect(pT).toBeGreaterThan(new Date(KO_SCHEDULE[child]).getTime());
+      }
+    }
+  });
+
+  it("anchors known fixtures to the right slot (R32 73 = 28 Jun, Final 104 = 19 Jul)", () => {
+    expect(KO_SCHEDULE[73]).toBe("2026-06-28T19:00:00Z"); // South Africa v Canada
+    expect(KO_SCHEDULE[104]).toBe("2026-07-19T19:00:00Z"); // Final
+    expect(koScheduledKickoff(73)).toBe(KO_SCHEDULE[73]);
+    expect(koScheduledKickoff(1)).toBeNull();
+    expect(koScheduledKickoff(null)).toBeNull();
   });
 });

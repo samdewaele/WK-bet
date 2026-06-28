@@ -2,6 +2,7 @@ import { PrismaBetterSqlite3 } from "@prisma/adapter-better-sqlite3";
 import { PrismaClient } from "../src/generated/prisma/client";
 import path from "path";
 import { TEAMS } from "../src/lib/teams-data";
+import { KO_SCHEDULE } from "../src/lib/ko-schedule";
 import { fetchWCMatches, teamNameMatches } from "../src/lib/football-data";
 import type { FDTeam } from "../src/lib/football-data";
 
@@ -153,27 +154,25 @@ async function main() {
     { stage: "THIRD_PLACE",    round: "3rd",   count: 1  },
     { stage: "FINAL",          round: "Final", count: 1  },
   ];
-  const fallbackKoBase = new Date("2026-07-01T18:00:00Z");
-  let dayOffset = 0;
-  for (const { stage, round, count } of koRounds) {
-    const stageMatches = allApiMatches
-      .filter((m) => m.stage === stage)
-      .sort((a, b) => new Date(a.utcDate).getTime() - new Date(b.utcDate).getTime());
+  // Knockout kickoffs come from the static official schedule keyed by match
+  // number (KO_SCHEDULE) — NOT from football-data. football-data's KO fixtures
+  // can't be mapped to bracket slots up front (ids are scrambled vs the bracket,
+  // later-round teams are null), so binding by its order/date put the wrong time
+  // on the wrong slot. fdMatchId is left null here and bound at runtime by team
+  // once a slot's teams are known (see sync).
+  for (const { round, count } of koRounds) {
     for (let i = 0; i < count; i++) {
-      const apiM = stageMatches[i];
       await db.match.create({
         data: {
           round, matchNumber,
-          kickoff: apiM ? new Date(apiM.utcDate) : new Date(fallbackKoBase.getTime() + (dayOffset + i) * 86400000),
+          kickoff: new Date(KO_SCHEDULE[matchNumber]),
           status: "scheduled",
-          ...(apiM && { fdMatchId: apiM.id }),
         },
       });
       matchNumber++;
     }
-    dayOffset += count + 1;
   }
-  console.log("✓ Knockout placeholder matches seeded (fdMatchId from API)");
+  console.log("✓ Knockout placeholder matches seeded (kickoffs from official KO_SCHEDULE)");
 
   await db.room.upsert({ where: { inviteCode: "wkbet2026" }, create: { name: "WK 2026", inviteCode: "wkbet2026" }, update: {} });
   console.log("✓ Default room created (code: wkbet2026)");

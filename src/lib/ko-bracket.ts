@@ -35,17 +35,20 @@ export const BRACKET_PATH: Record<
   number,
   { home: { matchNum: number; side: BracketSide }; away: { matchNum: number; side: BracketSide } }
 > = {
-  89:  { home: { matchNum: 73, side: "winner" }, away: { matchNum: 74, side: "winner" } },
-  90:  { home: { matchNum: 75, side: "winner" }, away: { matchNum: 76, side: "winner" } },
-  91:  { home: { matchNum: 77, side: "winner" }, away: { matchNum: 78, side: "winner" } },
+  // Round of 16 — official FIFA WC 2026 feeder pairings (NOT naive 73+74).
+  // Verified against the published bracket: e.g. M89 = W74 v W77, M90 = W73 v W75.
+  89:  { home: { matchNum: 74, side: "winner" }, away: { matchNum: 77, side: "winner" } },
+  90:  { home: { matchNum: 73, side: "winner" }, away: { matchNum: 75, side: "winner" } },
+  91:  { home: { matchNum: 76, side: "winner" }, away: { matchNum: 78, side: "winner" } },
   92:  { home: { matchNum: 79, side: "winner" }, away: { matchNum: 80, side: "winner" } },
-  93:  { home: { matchNum: 81, side: "winner" }, away: { matchNum: 82, side: "winner" } },
-  94:  { home: { matchNum: 83, side: "winner" }, away: { matchNum: 84, side: "winner" } },
-  95:  { home: { matchNum: 85, side: "winner" }, away: { matchNum: 86, side: "winner" } },
-  96:  { home: { matchNum: 87, side: "winner" }, away: { matchNum: 88, side: "winner" } },
+  93:  { home: { matchNum: 83, side: "winner" }, away: { matchNum: 84, side: "winner" } },
+  94:  { home: { matchNum: 81, side: "winner" }, away: { matchNum: 82, side: "winner" } },
+  95:  { home: { matchNum: 86, side: "winner" }, away: { matchNum: 88, side: "winner" } },
+  96:  { home: { matchNum: 85, side: "winner" }, away: { matchNum: 87, side: "winner" } },
+  // Quarter-finals
   97:  { home: { matchNum: 89, side: "winner" }, away: { matchNum: 90, side: "winner" } },
-  98:  { home: { matchNum: 91, side: "winner" }, away: { matchNum: 92, side: "winner" } },
-  99:  { home: { matchNum: 93, side: "winner" }, away: { matchNum: 94, side: "winner" } },
+  98:  { home: { matchNum: 93, side: "winner" }, away: { matchNum: 94, side: "winner" } },
+  99:  { home: { matchNum: 91, side: "winner" }, away: { matchNum: 92, side: "winner" } },
   100: { home: { matchNum: 95, side: "winner" }, away: { matchNum: 96, side: "winner" } },
   101: { home: { matchNum: 97,  side: "winner" }, away: { matchNum: 98,  side: "winner" } },
   102: { home: { matchNum: 99,  side: "winner" }, away: { matchNum: 100, side: "winner" } },
@@ -122,30 +125,77 @@ export const BRACKET_LAYOUT = {
 
 const COL_STEP = BRACKET_LAYOUT.TILE_W + BRACKET_LAYOUT.COL_GAP;
 
-/** (col, slotY) grid coordinate of every KO match. */
-export const BRACKET_POSITIONS: Record<number, { col: number; slotY: number }> = {
-  // Left half — R32
-  73: { col: 0, slotY: 0 }, 74: { col: 0, slotY: 1 }, 75: { col: 0, slotY: 2 }, 76: { col: 0, slotY: 3 },
-  77: { col: 0, slotY: 4 }, 78: { col: 0, slotY: 5 }, 79: { col: 0, slotY: 6 }, 80: { col: 0, slotY: 7 },
-  // Left half — R16 (centred between its two R32 feeders)
-  89: { col: 1, slotY: 0.5 }, 90: { col: 1, slotY: 2.5 }, 91: { col: 1, slotY: 4.5 }, 92: { col: 1, slotY: 6.5 },
-  // Left half — QF
-  97: { col: 2, slotY: 1.5 }, 98: { col: 2, slotY: 5.5 },
-  // Left half — SF
-  101: { col: 3, slotY: 3.5 },
-  // Centre — Final + 3rd place
-  104: { col: 4, slotY: 3.5 },
-  103: { col: 4, slotY: 5.5 },
-  // Right half — SF
-  102: { col: 5, slotY: 3.5 },
-  // Right half — QF
-  99: { col: 6, slotY: 1.5 }, 100: { col: 6, slotY: 5.5 },
-  // Right half — R16
-  93: { col: 7, slotY: 0.5 }, 94: { col: 7, slotY: 2.5 }, 95: { col: 7, slotY: 4.5 }, 96: { col: 7, slotY: 6.5 },
-  // Right half — R32
-  81: { col: 8, slotY: 0 }, 82: { col: 8, slotY: 1 }, 83: { col: 8, slotY: 2 }, 84: { col: 8, slotY: 3 },
-  85: { col: 8, slotY: 4 }, 86: { col: 8, slotY: 5 }, 87: { col: 8, slotY: 6 }, 88: { col: 8, slotY: 7 },
-};
+/**
+ * Inverse of BRACKET_PATH: for each match, which parent slot its winner (and,
+ * for the semi-finals, its loser) advances to. Derived from BRACKET_PATH so the
+ * tree has a single source of truth — ko-seeding imports this rather than
+ * maintaining its own copy.
+ */
+export const NEXT_ROUND_SLOT: Record<
+  number,
+  { winner: { matchNumber: number; side: "home" | "away" }; loser?: { matchNumber: number; side: "home" | "away" } }
+> = (() => {
+  const map: Record<number, { winner?: { matchNumber: number; side: "home" | "away" }; loser?: { matchNumber: number; side: "home" | "away" } }> = {};
+  for (const [parentStr, path] of Object.entries(BRACKET_PATH)) {
+    const parent = Number(parentStr);
+    for (const side of ["home", "away"] as const) {
+      const feeder = path[side];
+      map[feeder.matchNum] ??= {};
+      map[feeder.matchNum][feeder.side] = { matchNumber: parent, side };
+    }
+  }
+  return map as Record<number, { winner: { matchNumber: number; side: "home" | "away" }; loser?: { matchNumber: number; side: "home" | "away" } }>;
+})();
+
+/**
+ * (col, slotY) grid coordinate of every KO match — DERIVED from BRACKET_PATH so
+ * the visual tree always matches the real feeder structure. A match's two
+ * feeders are placed adjacently and the parent is centred between them, which
+ * keeps the connectors clean no matter how the official bracket interleaves.
+ *
+ *   col:  0     1     2    3       4       5     6     7     8
+ *         R32 → R16 → QF → SF → FINAL/3rd ← SF ← QF ← R16 ← R32
+ */
+export const BRACKET_POSITIONS: Record<number, { col: number; slotY: number }> = (() => {
+  const LEFT_COL: Record<KORound, number> = { R32: 0, R16: 1, QF: 2, SF: 3, Final: 4, "3rd": 4 };
+  const RIGHT_COL: Record<KORound, number> = { R32: 8, R16: 7, QF: 6, SF: 5, Final: 4, "3rd": 4 };
+
+  // R32 leaves under a node, in top-to-bottom visual order.
+  const leafOrder = (m: number): number[] => {
+    const p = BRACKET_PATH[m];
+    return p ? [...leafOrder(p.home.matchNum), ...leafOrder(p.away.matchNum)] : [m];
+  };
+  // Every node in a subtree (parent before children).
+  const subtree = (m: number): number[] => {
+    const p = BRACKET_PATH[m];
+    return p ? [m, ...subtree(p.home.matchNum), ...subtree(p.away.matchNum)] : [m];
+  };
+
+  const pos: Record<number, { col: number; slotY: number }> = {};
+  const final = BRACKET_PATH[104];
+  const halves: Array<[number, Record<KORound, number>]> = [
+    [final.home.matchNum, LEFT_COL],   // SF feeding the Final's home slot → left
+    [final.away.matchNum, RIGHT_COL],  // → right
+  ];
+
+  for (const [root, cols] of halves) {
+    const y: Record<number, number> = {};
+    leafOrder(root).forEach((leaf, i) => { y[leaf] = i; });
+    const slotY = (m: number): number => {
+      if (y[m] !== undefined) return y[m];
+      const p = BRACKET_PATH[m];
+      return (y[m] = (slotY(p.home.matchNum) + slotY(p.away.matchNum)) / 2);
+    };
+    for (const m of subtree(root)) {
+      pos[m] = { col: cols[roundOfMatchNumber(m)!], slotY: slotY(m) };
+    }
+  }
+
+  // Final sits centre, level with the two semi-finals; 3rd place tucks beneath.
+  pos[104] = { col: 4, slotY: pos[final.home.matchNum].slotY };
+  pos[103] = { col: 4, slotY: pos[final.home.matchNum].slotY + 2 };
+  return pos;
+})();
 
 export type BracketColumn = {
   col: number;

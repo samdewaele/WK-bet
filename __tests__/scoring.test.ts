@@ -177,14 +177,15 @@ describe("scoreRoomKOMatch — R32 (team-aware, same teams for all)", () => {
 // ---------------------------------------------------------------------------
 // KO matches — team-aware: wrong bracket prediction earns 0
 // ---------------------------------------------------------------------------
-// NEXT_ROUND_SLOT[73] = { winner: { matchNumber: 89, side: "home" } }
-// so the winner of R32 match #73 becomes the home team in R16 match #89.
+// NEXT_ROUND_SLOT[74] = { winner: { matchNumber: 89, side: "home" } }
+// so the winner of R32 match #74 becomes the home team in R16 match #89 (official tree).
 
 describe("scoreRoomKOMatch — team-aware bracket scoring (R16)", () => {
   beforeEach(() => {
-    // Two matches: R32 #73 (tA vs tB) and R16 #89 (actual home=tA, away=tC)
+    // Two matches: R32 #74 (tA vs tB) and R16 #89 (actual home=tA, away=tC).
+    // Official tree: winner of #74 feeds #89's home slot.
     mockDb.match.findMany.mockResolvedValue([
-      { id: "m73", matchNumber: 73, homeTeamId: "tA", awayTeamId: "tB" },
+      { id: "m74", matchNumber: 74, homeTeamId: "tA", awayTeamId: "tB" },
       { id: "m89", matchNumber: 89, homeTeamId: "tA", awayTeamId: "tC" },
     ]);
   });
@@ -192,7 +193,7 @@ describe("scoreRoomKOMatch — team-aware bracket scoring (R16)", () => {
   it("awards full prize when player predicted the correct team to advance AND exact score", async () => {
     mockDb.kOPrediction.findMany.mockResolvedValue([
       // u1 correctly predicted tA to win R32 (home wins 2-0)
-      ko("u1_r32", "u1", "m73", 2, 0),
+      ko("u1_r32", "u1", "m74", 2, 0),
       // u1 predicts 2-1 in the R16 match → tA (home) wins → exact score
       ko("u1_r16", "u1", "m89", 2, 1),
     ]);
@@ -207,7 +208,7 @@ describe("scoreRoomKOMatch — team-aware bracket scoring (R16)", () => {
   it("awards 0 when player predicted the wrong team to advance, even if score digits match", async () => {
     mockDb.kOPrediction.findMany.mockResolvedValue([
       // u2 wrongly predicted tB to win R32 (away wins 0-2) → tB in R16 home slot
-      ko("u2_r32", "u2", "m73", 0, 2),
+      ko("u2_r32", "u2", "m74", 0, 2),
       // u2 predicts 2-1 in R16 → predicted home (tB) wins, but actual home is tA
       ko("u2_r16", "u2", "m89", 2, 1),
     ]);
@@ -221,7 +222,7 @@ describe("scoreRoomKOMatch — team-aware bracket scoring (R16)", () => {
 
   it("correct winner, wrong exact score → 0.75x partial prize", async () => {
     mockDb.kOPrediction.findMany.mockResolvedValue([
-      ko("u1_r32", "u1", "m73", 2, 0), // correctly predicted tA to advance
+      ko("u1_r32", "u1", "m74", 2, 0), // correctly predicted tA to advance
       ko("u1_r16", "u1", "m89", 3, 1), // correct winner (tA) but wrong score
     ]);
 
@@ -234,9 +235,9 @@ describe("scoreRoomKOMatch — team-aware bracket scoring (R16)", () => {
 
   it("two players: one correct team, one wrong — only correct team player earns", async () => {
     mockDb.kOPrediction.findMany.mockResolvedValue([
-      ko("u1_r32", "u1", "m73", 2, 0), // tA wins R32
+      ko("u1_r32", "u1", "m74", 2, 0), // tA wins R32
       ko("u1_r16", "u1", "m89", 3, 0), // correct winner (tA), wrong score → 0.75x
-      ko("u2_r32", "u2", "m73", 0, 2), // tB "wins" R32 in u2's prediction
+      ko("u2_r32", "u2", "m74", 0, 2), // tB "wins" R32 in u2's prediction
       ko("u2_r16", "u2", "m89", 3, 0), // same score, but wrong team in bracket → 0
     ]);
 
