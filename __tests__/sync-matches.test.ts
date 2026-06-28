@@ -31,6 +31,7 @@ vi.mock("@/lib/notifications", () => ({
 vi.mock("@/lib/ko-seeding", () => ({
   computeGroupStandings: vi.fn(),
   populateR32Bracket: vi.fn(),
+  populateR32FromApi: vi.fn(),
   populateNextRoundSlot: vi.fn(),
 }));
 
@@ -47,7 +48,7 @@ import { db } from "@/lib/db";
 import { fetchWCMatches } from "@/lib/football-data";
 import { calculatePoints } from "@/lib/points";
 import { checkAndSendRoundNotifications, checkAndSendIncompleteReminders } from "@/lib/notifications";
-import { computeGroupStandings, populateR32Bracket, populateNextRoundSlot } from "@/lib/ko-seeding";
+import { computeGroupStandings, populateR32Bracket, populateR32FromApi, populateNextRoundSlot } from "@/lib/ko-seeding";
 import { scoreAndAdvanceCompletedGroups, scoreKOMatchForAllRooms } from "@/lib/scoring";
 import { syncMatches } from "@/lib/sync-matches";
 
@@ -61,6 +62,7 @@ const mockReminders = vi.mocked(checkAndSendIncompleteReminders);
 const mockPopulateNextRound = vi.mocked(populateNextRoundSlot);
 const mockComputeStandings = vi.mocked(computeGroupStandings);
 const mockPopulateR32 = vi.mocked(populateR32Bracket);
+const mockPopulateR32FromApi = vi.mocked(populateR32FromApi);
 const mockScoreGroups = vi.mocked(scoreAndAdvanceCompletedGroups);
 const mockScoreKO = vi.mocked(scoreKOMatchForAllRooms);
 
@@ -224,6 +226,7 @@ function setupMocks(opts: SetupOptions = {}) {
   mockPopulateNextRound.mockResolvedValue(undefined as any);
   mockComputeStandings.mockResolvedValue([] as any);
   mockPopulateR32.mockResolvedValue(undefined as any);
+  mockPopulateR32FromApi.mockResolvedValue(undefined as any);
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
@@ -884,7 +887,7 @@ describe("9. Simulation mode exclusion", () => {
   });
 });
 
-describe("10. R32 bracket seeding (only when updated > 0)", () => {
+describe("10. R32 bracket seeding (every reliable sync, not gated on updated)", () => {
   const kickoff = new Date("2026-06-12T15:00:00Z");
 
   it("calls computeGroupStandings and populateR32Bracket when updated>0, all 72 GROUP_STAGE done, r32 < 16", async () => {
@@ -960,18 +963,48 @@ describe("10. R32 bracket seeding (only when updated > 0)", () => {
     expect(mockPopulateR32).not.toHaveBeenCalled();
   });
 
-  it("does NOT call seeding when updated=0, even if all GROUP_STAGE are done", async () => {
+  it("STILL seeds when updated=0 and all GROUP_STAGE are done (self-heal between rounds)", async () => {
+    // Regression: seeding used to be gated behind updated>0, so a wrong R32 slot
+    // (e.g. a non-qualifier left by the old binding) was never corrected in the
+    // quiet cycles between the group stage finishing and R32 kicking off.
     const matches72 = makeGroupMatches(72, 72);
     mockFetch.mockResolvedValue(matches72 as any);
     setupMocks({
       r32PopulatedCount: 0,
       rooms: [],
-      dbMatches: [], // no DB matches → no match found → updated stays 0
+      dbMatches: [], // no DB matches → updated stays 0
     });
 
     await syncMatches();
 
-    expect(mockComputeStandings).not.toHaveBeenCalled();
+    // No LAST_32 fixtures in the API here → heuristic seeding runs anyway.
+    expect(mockComputeStandings).toHaveBeenCalled();
+    expect(mockPopulateR32).toHaveBeenCalled();
+  });
+
+  it("uses the real football-data draw (populateR32FromApi) when LAST_32 carries teams, even at updated=0", async () => {
+    const matches72 = makeGroupMatches(72, 72);
+    const last32 = Array.from({ length: 16 }, (_, i) => ({
+      id: 9000 + i,
+      utcDate: new Date("2026-06-28T19:00:00Z").toISOString(),
+      status: "TIMED",
+      stage: "LAST_32",
+      homeTeam: { id: 300 + i, name: `H${i}`, shortName: `H${i}`, tla: `H${i}` },
+      awayTeam: { id: 400 + i, name: `A${i}`, shortName: `A${i}`, tla: `A${i}` },
+      score: { winner: null, fullTime: { home: null, away: null } },
+    }));
+    mockFetch.mockResolvedValue([...matches72, ...last32] as any);
+    setupMocks({
+      r32PopulatedCount: 16, // already populated (with possibly-wrong teams)
+      rooms: [],
+      dbMatches: [],
+    });
+
+    await syncMatches();
+
+    // API path is preferred and self-heals even though r32 is already populated
+    // and nothing was updated this cycle.
+    expect(mockPopulateR32FromApi).toHaveBeenCalled();
     expect(mockPopulateR32).not.toHaveBeenCalled();
   });
 });

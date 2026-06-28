@@ -356,26 +356,31 @@ export async function populateR32FromApi(
     throw new Error(`Expected 16 R32 matches in DB, found ${r32Matches.length}.`);
   }
 
-  // Idempotent + self-healing: only rewrite a slot that is still unplayed and
-  // whose teams/fdMatchId actually differ. This corrects the wrong heuristic
-  // third-place teams already seeded in production without disturbing matches
-  // that have kicked off or rebinding on every sync cycle.
+  // Idempotent + self-healing. Only writes a slot whose teams/fdMatchId differ
+  // from the real draw, so it's a no-op once correct. When the teams DO change
+  // (i.e. the slot held a wrong team — e.g. a non-qualifier left by the old
+  // heuristic/binding), we also reset status + scores: any stored result came
+  // from a wrong fixture binding and must be reconciled by the next sync via the
+  // now-correct fdMatchId. Genuine results keep correct teams, so they no-op.
   await Promise.all(
     r32Matches.map((match, i) => {
-      if (match.status !== "scheduled") return null;
       const { homeTeamId, awayTeamId } = bracketTeams[i];
       const hFd = dbToFd.get(homeTeamId);
       const aFd = dbToFd.get(awayTeamId);
       const fdMatchId =
         hFd != null && aFd != null ? fdMatchByPair.get(pairKey(hFd, aFd)) ?? null : null;
-      const unchanged =
-        match.homeTeamId === homeTeamId &&
-        match.awayTeamId === awayTeamId &&
-        (fdMatchId == null || match.fdMatchId === fdMatchId);
-      if (unchanged) return null;
+      const teamsChanged =
+        match.homeTeamId !== homeTeamId || match.awayTeamId !== awayTeamId;
+      const fdChanged = fdMatchId != null && match.fdMatchId !== fdMatchId;
+      if (!teamsChanged && !fdChanged) return null;
       return db.match.update({
         where: { id: match.id },
-        data: { homeTeamId, awayTeamId, ...(fdMatchId != null && { fdMatchId }) },
+        data: {
+          homeTeamId,
+          awayTeamId,
+          ...(fdMatchId != null && { fdMatchId }),
+          ...(teamsChanged && { status: "scheduled", homeScore: null, awayScore: null }),
+        },
       });
     }),
   );

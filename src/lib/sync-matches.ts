@@ -373,40 +373,45 @@ export async function syncMatches(): Promise<SyncResult> {
     }
   }
 
-  // Score / seed work runs only when matches were actually updated.
+  // Score completed groups + progressively drop their qualifiers into R32 —
+  // only when matches actually changed (scoring is update-driven).
   if (updated > 0) {
-    // Score completed groups + progressively drop their qualifiers into R32.
     await scoreAndAdvanceCompletedGroups().catch((err) =>
       console.error("[sync] group scoring failed:", err)
     );
+  }
 
-    // Once all groups are done, run the full seeding to fill the best-third
-    // slots that progressive per-group fill leaves blank.
+  // R32 bracket seeding runs every reliable sync — NOT gated on `updated` — so
+  // it corrects already-populated wrong slots even in cycles where no match
+  // changed (e.g. between the group stage finishing and R32 kicking off).
+  // populateR32FromApi is idempotent and self-healing.
+  if (hasReliableApiData) {
     const apiGroupMatchesDone = apiMatches.filter((m) => m.stage === "GROUP_STAGE");
-    const allGroupMatchesDone = apiGroupMatchesDone.length >= 72 && apiGroupMatchesDone.every((m) => m.status === "FINISHED");
-    const r32FullyPopulated = await db.match.count({
-      where: { round: "R32", homeTeamId: { not: null }, awayTeamId: { not: null } },
-    });
-    // Prefer FIFA's real R32 draw from football-data (correct third-place teams
-    // + fdMatchId binding). populateR32FromApi is idempotent and self-healing,
-    // so we run it whenever the LAST_32 fixtures carry real teams — that also
-    // corrects R32 slots already populated by the heuristic. The heuristic seed
-    // only runs when the bracket is still blank and the API has no teams yet.
-    const apiLast32 = allGroupMatchesDone
-      ? apiMatches.filter(
-          (m) => m.stage === "LAST_32" && m.homeTeam?.id != null && m.awayTeam?.id != null,
-        )
-      : [];
-    if (apiLast32.length >= 16) {
-      const standings = await computeGroupStandings();
-      await populateR32FromApi(standings, apiLast32).catch((err) =>
-        console.error("[sync] R32 API seeding failed:", err)
+    const allGroupMatchesDone =
+      apiGroupMatchesDone.length >= 72 && apiGroupMatchesDone.every((m) => m.status === "FINISHED");
+    if (allGroupMatchesDone) {
+      // Prefer FIFA's real R32 draw from football-data (correct third-place
+      // teams + fdMatchId binding); fall back to the heuristic only while the
+      // bracket is still blank and the API hasn't published LAST_32 teams.
+      const apiLast32 = apiMatches.filter(
+        (m) => m.stage === "LAST_32" && m.homeTeam?.id != null && m.awayTeam?.id != null,
       );
-    } else if (allGroupMatchesDone && r32FullyPopulated < 16) {
-      const standings = await computeGroupStandings();
-      await populateR32Bracket(standings).catch((err) =>
-        console.error("[sync] R32 seeding failed:", err)
-      );
+      if (apiLast32.length >= 16) {
+        const standings = await computeGroupStandings();
+        await populateR32FromApi(standings, apiLast32).catch((err) =>
+          console.error("[sync] R32 API seeding failed:", err)
+        );
+      } else {
+        const r32FullyPopulated = await db.match.count({
+          where: { round: "R32", homeTeamId: { not: null }, awayTeamId: { not: null } },
+        });
+        if (r32FullyPopulated < 16) {
+          const standings = await computeGroupStandings();
+          await populateR32Bracket(standings).catch((err) =>
+            console.error("[sync] R32 seeding failed:", err)
+          );
+        }
+      }
     }
   }
 
