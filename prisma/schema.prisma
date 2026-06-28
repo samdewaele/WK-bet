@@ -120,6 +120,10 @@ model Match {
   kickoff       DateTime
   homeScore     Int?
   awayScore     Int?
+  // For KO matches level after full/extra time: which side won the shootout
+  // ("home"/"away"), from football-data's score.winner. Authoritative for
+  // bracket propagation and team-aware scoring (NULL for decisive results).
+  penaltyWinner String?
   status        String         @default("scheduled")
   predictions   Prediction[]
   koPredictions KOPrediction[]

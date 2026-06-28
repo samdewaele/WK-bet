@@ -17,7 +17,7 @@ vi.mock("@/lib/football-data", async (importOriginal) => {
 
 vi.mock("@/lib/db", () => ({
   db: {
-    match: { findMany: vi.fn(), update: vi.fn(), count: vi.fn(), findFirst: vi.fn() },
+    match: { findMany: vi.fn(), update: vi.fn(), updateMany: vi.fn(), count: vi.fn(), findFirst: vi.fn() },
     prediction: { update: vi.fn() },
     room: { findMany: vi.fn(), update: vi.fn() },
   },

@@ -18,6 +18,7 @@
 import { db } from "@/lib/db";
 import { NEXT_ROUND_SLOT } from "@/lib/ko-bracket";
 import { resolveR32ThirdPlace, type R32Fixture } from "@/lib/ko-r32-binding";
+import { koWinnerSide } from "@/lib/pot";
 
 export const WC_GROUPS = ["A","B","C","D","E","F","G","H","I","J","K","L"] as const;
 export type WCGroup = typeof WC_GROUPS[number];
@@ -43,7 +44,12 @@ type MatchInput = {
 };
 
 function compareTeams(a: TeamStats, b: TeamStats): number {
-  return b.pts - a.pts || b.gd - a.gd || b.gf - a.gf;
+  // pts → GD → GF, then a STABLE final tiebreaker on teamId. Without the stable
+  // key, two teams equal on pts/GD/GF could swap order between syncs (Map
+  // iteration order), flipping who's "1st" vs "2nd" and causing populateR32FromApi
+  // to reset an already-played R32 slot every cycle. (Not FIFA's real
+  // head-to-head tiebreak, but deterministic — see audit note.)
+  return b.pts - a.pts || b.gd - a.gd || b.gf - a.gf || a.teamId.localeCompare(b.teamId);
 }
 
 /**
@@ -516,14 +522,15 @@ export async function repropagateKOBracket(): Promise<void> {
       awayScore: { not: null },
     },
     orderBy: { matchNumber: "asc" },
-    select: { matchNumber: true, homeTeamId: true, awayTeamId: true, homeScore: true, awayScore: true },
+    select: { matchNumber: true, homeTeamId: true, awayTeamId: true, homeScore: true, awayScore: true, penaltyWinner: true },
   });
   for (const m of finished) {
     if (m.matchNumber == null || m.homeScore == null || m.awayScore == null) continue;
-    // Mirror the sync's winner rule (home advances on a level full-time score).
-    const homeWins = m.homeScore >= m.awayScore;
-    const winnerId = homeWins ? m.homeTeamId : m.awayTeamId;
-    const loserId = homeWins ? m.awayTeamId : m.homeTeamId;
+    // Canonical winner rule (penalties decide a level score) — shared with sync.
+    const side = koWinnerSide(m.homeScore, m.awayScore, m.penaltyWinner);
+    if (!side) continue; // level score with no recorded shootout winner → undecided
+    const winnerId = side === "home" ? m.homeTeamId : m.awayTeamId;
+    const loserId = side === "home" ? m.awayTeamId : m.homeTeamId;
     if (winnerId) await populateNextRoundSlot(m.matchNumber, winnerId, loserId);
   }
 }
@@ -532,7 +539,7 @@ export async function repropagateKOBracket(): Promise<void> {
 // Player bracket simulation
 // ---------------------------------------------------------------------------
 
-type PredInput = { matchId: string; homeScore: number; awayScore: number };
+type PredInput = { matchId: string; homeScore: number; awayScore: number; penaltyWinner?: string | null };
 type KOMatchInfo = { id: string; matchNumber: number; homeTeamId: string | null; awayTeamId: string | null };
 
 /**
@@ -571,9 +578,12 @@ export function buildPlayerBracket(
     if (!pred) continue;
 
     const slots = bracket.get(match.id)!;
-    // KO must have a decisive winner (no draw ⇒ use home as tiebreak)
-    const predictedWinnerId = pred.homeScore >= pred.awayScore ? slots.homeTeamId : slots.awayTeamId;
-    const predictedLoserId  = pred.homeScore >= pred.awayScore ? slots.awayTeamId : slots.homeTeamId;
+    // KO must have a decisive winner: a level score is resolved by the player's
+    // predicted penalty winner (a draw with no penalty pick can't advance).
+    const winnerSide = koWinnerSide(pred.homeScore, pred.awayScore, pred.penaltyWinner);
+    if (!winnerSide) continue;
+    const predictedWinnerId = winnerSide === "home" ? slots.homeTeamId : slots.awayTeamId;
+    const predictedLoserId  = winnerSide === "home" ? slots.awayTeamId : slots.homeTeamId;
 
     const nextSlot = NEXT_ROUND_SLOT[match.matchNumber];
     if (!nextSlot) continue;

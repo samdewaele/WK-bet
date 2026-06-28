@@ -43,6 +43,14 @@ export async function fetchWCMatches(): Promise<FDMatch[]> {
   return (data.matches ?? []) as FDMatch[];
 }
 
+// The decisive winner side per football-data's score.winner (covers extra time
+// and penalty shootouts, which a level fullTime score alone can't tell you).
+export function winnerSide(score: FDMatch["score"]): "home" | "away" | null {
+  if (score.winner === "HOME_TEAM") return "home";
+  if (score.winner === "AWAY_TEAM") return "away";
+  return null;
+}
+
 // Maps football-data.org status to our match status
 export function mapStatus(apiStatus: FDMatch["status"]): "scheduled" | "live" | "finished" {
   if (["IN_PLAY", "PAUSED", "HALFTIME"].includes(apiStatus)) return "live";

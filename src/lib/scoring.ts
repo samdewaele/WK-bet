@@ -24,9 +24,17 @@ type Top4 = [string, string, string, string];
 
 /** Rooms with the data needed to compute their pot. */
 async function roomsWithPot() {
-  return db.room.findMany({
-    select: { id: true, entryFee: true, _count: { select: { members: true } } },
+  // The pot is sized on members who are IN the pot — must match every read path
+  // (leaderboard/standings/uber-pot all use the non-excluded count). Using the
+  // raw total here made distributed winnings exceed the real pot.
+  const rooms = await db.room.findMany({
+    select: { id: true, entryFee: true, members: { select: { excludedFromPot: true } } },
   });
+  return rooms.map((r) => ({
+    id: r.id,
+    entryFee: r.entryFee,
+    memberCount: r.members.filter((m) => !m.excludedFromPot).length,
+  }));
 }
 
 /**
@@ -79,12 +87,12 @@ export async function scoreRoomKOMatch(
   const [koMatches, allRoomPreds] = await Promise.all([
     db.match.findMany({
       where: { round: { in: ["R32", "R16", "QF", "SF", "3rd", "Final"] } },
-      select: { id: true, matchNumber: true, homeTeamId: true, awayTeamId: true },
+      select: { id: true, matchNumber: true, homeTeamId: true, awayTeamId: true, penaltyWinner: true },
       orderBy: { matchNumber: "asc" },
     }),
     db.kOPrediction.findMany({
       where: { roomId },
-      select: { id: true, userId: true, matchId: true, homeScore: true, awayScore: true },
+      select: { id: true, userId: true, matchId: true, homeScore: true, awayScore: true, penaltyWinner: true },
     }),
   ]);
 
@@ -94,6 +102,7 @@ export async function scoreRoomKOMatch(
   const thisMatch = koMatches.find((m) => m.id === matchId);
   const actualHomeTeamId = thisMatch?.homeTeamId ?? null;
   const actualAwayTeamId = thisMatch?.awayTeamId ?? null;
+  const actualPenaltyWinner = thisMatch?.penaltyWinner ?? null;
 
   // Build each user's predicted bracket (traces R32 predictions upward)
   const predsByUser = new Map<string, typeof allRoomPreds>();
@@ -119,6 +128,8 @@ export async function scoreRoomKOMatch(
         predictedSlot?.awayTeamId ?? null,
         actualHomeTeamId,
         actualAwayTeamId,
+        p.penaltyWinner,
+        actualPenaltyWinner,
       ).scoreMultiplier,
     };
   });
@@ -146,7 +157,7 @@ export async function scoreKOMatchForAllRooms(
 ): Promise<void> {
   const rooms = await roomsWithPot();
   for (const room of rooms) {
-    const pot = calculatePot(room.entryFee, room._count.members);
+    const pot = calculatePot(room.entryFee, room.memberCount);
     const matchPrize = pot.prizePerKOMatch[round] ?? 0;
     await scoreRoomKOMatch(room.id, matchId, round, matchPrize, actualHome, actualAway);
   }
@@ -190,7 +201,7 @@ export async function scoreAndAdvanceCompletedGroups(): Promise<void> {
     await populateGroupQualifiers(g, ordered[0].teamId, ordered[1].teamId).catch(() => {});
 
     for (const room of rooms) {
-      const pot = calculatePot(room.entryFee, room._count.members);
+      const pot = calculatePot(room.entryFee, room.memberCount);
       await scoreRoomGroupStanding(room.id, g, top4, pot.groupStagePot / 12);
     }
   }

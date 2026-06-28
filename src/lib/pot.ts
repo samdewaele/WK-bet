@@ -84,6 +84,22 @@ function getMatchWinner(home: number, away: number): "home" | "away" | "draw" {
   return "draw";
 }
 
+/**
+ * Canonical KO winner side. A level full/extra-time score is decided by the
+ * shootout (penaltyWinner); a level score with no penalty winner isn't decided
+ * yet → null. The single source of truth for "who advances" — used by sync
+ * propagation, repropagation, and team-aware scoring so they never disagree.
+ */
+export function koWinnerSide(
+  home: number,
+  away: number,
+  penaltyWinner?: "home" | "away" | string | null,
+): "home" | "away" | null {
+  if (home > away) return "home";
+  if (away > home) return "away";
+  return penaltyWinner === "home" || penaltyWinner === "away" ? penaltyWinner : null;
+}
+
 export interface KOMatchResult {
   scoreMultiplier: number; // 0 | 0.75 | 1.0
   label: string;
@@ -132,9 +148,14 @@ export function scoreKnockoutMatchWithTeams(
   predictedAwayTeamId: string | null,
   actualHomeTeamId: string | null,
   actualAwayTeamId: string | null,
+  // Shootout winners for a level full-time score (KO matches always have one).
+  predPenaltyWinner?: "home" | "away" | string | null,
+  actualPenaltyWinner?: "home" | "away" | string | null,
 ): KOMatchResult {
-  const actualWinner = getMatchWinner(actualHome, actualAway);
-  const predictedWinner = getMatchWinner(predHome, predAway);
+  // A KO match is decided by the shootout when level — resolve via penalties so
+  // the actual/predicted winning TEAM is correct even on a 1-1.
+  const actualWinner = koWinnerSide(actualHome, actualAway, actualPenaltyWinner);
+  const predictedWinner = koWinnerSide(predHome, predAway, predPenaltyWinner);
 
   const actualWinnerTeamId =
     actualWinner === "home" ? actualHomeTeamId :
@@ -143,28 +164,17 @@ export function scoreKnockoutMatchWithTeams(
     predictedWinner === "home" ? predictedHomeTeamId :
     predictedWinner === "away" ? predictedAwayTeamId : null;
 
-  // Both draw: correct outcome — check team alignment + exact score
-  if (actualWinner === "draw" && predictedWinner === "draw") {
-    const teamsMatch =
-      predictedHomeTeamId === actualHomeTeamId &&
-      predictedAwayTeamId === actualAwayTeamId;
-    if (teamsMatch && predHome === actualHome && predAway === actualAway) {
-      return { scoreMultiplier: 1.0, label: "Exact score" };
-    }
-    return { scoreMultiplier: 0.75, label: "Correct draw" };
-  }
-
-  // Missing team ID or mismatched draw/decisive outcome → wrong
+  // Undecided (level score with no shootout winner) or missing team → wrong.
   if (!actualWinnerTeamId || !predictedWinnerTeamId) {
     return { scoreMultiplier: 0, label: "Wrong" };
   }
 
-  // Wrong winner team → no money, even if score digits coincidentally match
+  // Wrong winning team → no money, even if score digits coincidentally match.
   if (predictedWinnerTeamId !== actualWinnerTeamId) {
     return { scoreMultiplier: 0, label: "Wrong winner" };
   }
 
-  // Correct winner team — check for exact score (requires same team slot assignment too)
+  // Correct winning team — exact score (incl. correct slot teams) pays full.
   const teamsMatch =
     predictedHomeTeamId === actualHomeTeamId &&
     predictedAwayTeamId === actualAwayTeamId;

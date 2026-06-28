@@ -1,10 +1,10 @@
 import { db } from "@/lib/db";
-import { fetchWCMatches, mapStatus, teamNameMatches } from "@/lib/football-data";
+import { fetchWCMatches, mapStatus, winnerSide, teamNameMatches } from "@/lib/football-data";
 import { calculatePoints, type Round } from "@/lib/points";
 import { checkAndSendRoundNotifications, checkAndSendIncompleteReminders } from "@/lib/notifications";
 import { computeGroupStandings, populateR32Bracket, populateR32FromApi, populateNextRoundSlot, repropagateKOBracket } from "@/lib/ko-seeding";
 import { scoreAndAdvanceCompletedGroups, scoreKOMatchForAllRooms } from "@/lib/scoring";
-import type { KORound } from "@/lib/pot";
+import { koWinnerSide, type KORound } from "@/lib/pot";
 
 import type { FDTeam } from "@/lib/football-data";
 
@@ -160,6 +160,16 @@ export async function syncMatches(): Promise<SyncResult> {
     // Sentinel kickoff for a KO placeholder whose real fixture date is unknown.
     // Clearly after the tournament, so it can never look like a started match.
     const KO_TBD_KICKOFF = new Date("2026-12-31T00:00:00.000Z");
+
+    // Clear any fdMatchId on R16→Final rows. The old date-bound seed left wrong
+    // fdMatchIds there, and pass-1 below matches API results by fdMatchId — so a
+    // stale value would attach a real result to the wrong slot. R16+ are bound by
+    // teams (pass-2) once decided; only R32 carries a real fdMatchId (set by
+    // populateR32FromApi). Idempotent: a no-op once they're null.
+    await db.match.updateMany({
+      where: { round: { in: ["R16", "QF", "SF", "3rd", "Final"] }, fdMatchId: { not: null } },
+      data: { fdMatchId: null },
+    });
 
     const staleMatches = await db.match.findMany({
       where: {
@@ -321,15 +331,30 @@ export async function syncMatches(): Promise<SyncResult> {
     // that the stale reset pass didn't clear (e.g. first sync after a new sim run).
     const scoresChanged = dbMatch.homeScore !== storeHome || dbMatch.awayScore !== storeAway;
 
+    const KO_ROUND_NAMES = ["R32", "R16", "QF", "SF", "3rd", "Final"];
+    const isKO = KO_ROUND_NAMES.includes(dbMatch.round);
+    // The shootout winner (DB orientation) for a KO match level after ET. Only
+    // meaningful when the stored score is level; null otherwise (decisive).
+    const apiWin = winnerSide(api.score);
+    const dbWin =
+      matchOrientation === "reversed"
+        ? apiWin === "home" ? "away" : apiWin === "away" ? "home" : null
+        : apiWin;
+    const koPenaltyWinner =
+      isKO && storeHome !== null && storeAway !== null && storeHome === storeAway ? dbWin : null;
+
     await db.match.update({
       where: { id: dbMatch.id },
       data: {
         status: apiStatus,
-        kickoff: new Date(api.utcDate), // sync real kickoff so per-group locks use correct times
+        // KO kickoffs come from the static official KO_SCHEDULE — never overwrite
+        // them from the API (which, on a mis-bound row, would be the wrong date).
+        ...(!isKO && { kickoff: new Date(api.utcDate) }),
         // Sync group letter from API in case it was null or wrong in the DB
         ...(api.group && { group: api.group.replace(/^GROUP_/, "") }),
         ...(storeHome !== null && { homeScore: storeHome }),
         ...(storeAway !== null && { awayScore: storeAway }),
+        ...(isKO && { penaltyWinner: koPenaltyWinner }),
       },
     });
     updated++;
@@ -350,15 +375,12 @@ export async function syncMatches(): Promise<SyncResult> {
       );
       predictionsScored += dbMatch.predictions.length;
 
-      // Propagate KO bracket: populate the next round's team slots
-      const KO_ROUND_NAMES = ["R32", "R16", "QF", "SF", "3rd", "Final"];
-      if (KO_ROUND_NAMES.includes(dbMatch.round) && dbMatch.matchNumber) {
-        const winnerId = storeHome > storeAway
-          ? (dbMatch.homeTeam?.id ?? null)
-          : (dbMatch.awayTeam?.id ?? null);
-        const loserId = storeHome > storeAway
-          ? (dbMatch.awayTeam?.id ?? null)
-          : (dbMatch.homeTeam?.id ?? null);
+      // Propagate KO bracket: populate the next round's team slots using the
+      // canonical winner rule (penalties decide a level score).
+      if (isKO && dbMatch.matchNumber) {
+        const side = koWinnerSide(storeHome, storeAway, koPenaltyWinner);
+        const winnerId = side === "home" ? (dbMatch.homeTeam?.id ?? null) : side === "away" ? (dbMatch.awayTeam?.id ?? null) : null;
+        const loserId = side === "home" ? (dbMatch.awayTeam?.id ?? null) : side === "away" ? (dbMatch.homeTeam?.id ?? null) : null;
         if (winnerId) {
           await populateNextRoundSlot(dbMatch.matchNumber, winnerId, loserId).catch(
             (err) => console.error("[sync] KO bracket progression failed:", err)
@@ -366,6 +388,7 @@ export async function syncMatches(): Promise<SyncResult> {
         }
 
         // Score every room's KO predictions for this finished match (live money).
+        // scoreRoomKOMatch reads the actual shootout winner from the match row.
         await scoreKOMatchForAllRooms(dbMatch.id, dbMatch.round as KORound, storeHome, storeAway).catch(
           (err) => console.error("[sync] KO scoring failed:", err)
         );

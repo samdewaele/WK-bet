@@ -6,10 +6,27 @@ import {
   scoreKnockoutMatch,
   earnedFromKOMatch,
   scoreKnockoutMatchWithTeams,
+  koWinnerSide,
   prizePerSideBet,
   KO_MATCH_WEIGHT,
   KO_ROUNDS,
 } from "@/lib/pot";
+
+describe("koWinnerSide (canonical KO winner)", () => {
+  it("returns the higher-scoring side for a decisive result", () => {
+    expect(koWinnerSide(2, 1)).toBe("home");
+    expect(koWinnerSide(0, 3)).toBe("away");
+  });
+  it("uses the penalty winner for a level score", () => {
+    expect(koWinnerSide(1, 1, "home")).toBe("home");
+    expect(koWinnerSide(1, 1, "away")).toBe("away");
+  });
+  it("is undecided (null) for a level score with no penalty winner", () => {
+    expect(koWinnerSide(1, 1)).toBeNull();
+    expect(koWinnerSide(0, 0, null)).toBeNull();
+    expect(koWinnerSide(2, 2, "draw")).toBeNull();
+  });
+});
 
 // ─── KO weight sanity ───────────────────────────────────────────────────────
 
@@ -274,19 +291,37 @@ describe("scoreKnockoutMatchWithTeams", () => {
     expect(r.scoreMultiplier).toBe(0.75);
   });
 
-  it("both draw, same teams, same score → 1.0", () => {
-    const r = scoreKnockoutMatchWithTeams(1, 1, 1, 1, "tA", "tB", "tA", "tB");
+  it("level score decided on penalties: same teams, same score, same shootout winner → 1.0", () => {
+    const r = scoreKnockoutMatchWithTeams(1, 1, 1, 1, "tA", "tB", "tA", "tB", "home", "home");
     expect(r.scoreMultiplier).toBe(1.0);
   });
 
-  it("both draw but wrong teams → 0.75", () => {
-    const r = scoreKnockoutMatchWithTeams(1, 1, 1, 1, "tX", "tY", "tA", "tB");
+  it("level score, correct shootout winner team but wrong score → 0.75", () => {
+    const r = scoreKnockoutMatchWithTeams(1, 1, 2, 2, "tA", "tB", "tA", "tB", "home", "home");
     expect(r.scoreMultiplier).toBe(0.75);
   });
 
-  it("predicted draw but actual decisive → 0", () => {
-    const r = scoreKnockoutMatchWithTeams(1, 1, 2, 1, "tA", "tB", "tA", "tB");
+  it("level score, predicted the WRONG penalty winner → 0", () => {
+    // Predicted away (tB) on pens; actual home (tA) won the shootout → wrong winner.
+    const r = scoreKnockoutMatchWithTeams(1, 1, 1, 1, "tA", "tB", "tA", "tB", "away", "home");
     expect(r.scoreMultiplier).toBe(0);
+  });
+
+  it("a level score with NO recorded shootout winner is undecided → 0", () => {
+    const r = scoreKnockoutMatchWithTeams(1, 1, 1, 1, "tA", "tB", "tA", "tB");
+    expect(r.scoreMultiplier).toBe(0);
+  });
+
+  it("predicted a draw won on pens by the team that actually LOST → 0", () => {
+    // Predicted 1-1, away (tB) on pens; actual 2-1 home (tA) → wrong team advances.
+    const r = scoreKnockoutMatchWithTeams(1, 1, 2, 1, "tA", "tB", "tA", "tB", "away");
+    expect(r.scoreMultiplier).toBe(0);
+  });
+
+  it("predicted a draw won on pens by the team that actually advanced → 0.75", () => {
+    // Predicted 1-1, home (tA) on pens; actual 2-1 home (tA) → right team, wrong score.
+    const r = scoreKnockoutMatchWithTeams(1, 1, 2, 1, "tA", "tB", "tA", "tB", "home");
+    expect(r.scoreMultiplier).toBe(0.75);
   });
 
   it("missing actual team ID → 0", () => {
