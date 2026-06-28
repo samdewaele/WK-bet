@@ -153,9 +153,12 @@ test.describe("Simulation flow", () => {
     const refreshBtn = page.getByRole("button", { name: /↻ Refresh/i });
     if (await refreshBtn.isVisible()) await refreshBtn.click();
 
-    // Admin's own KO prediction count should now show total/total
+    // Admin's own KO prediction count should now show total/total. Several
+    // elements legitimately read "32/32" (the admin's row, simulation users'
+    // rows, and the editor's progress label), so assert on the first match
+    // rather than tripping Playwright strict mode.
     await expect(
-      page.getByText(new RegExp(`${total}\\/${total}`))
+      page.getByText(new RegExp(`${total}\\/${total}`)).first()
     ).toBeVisible({ timeout: 8_000 });
   });
 
