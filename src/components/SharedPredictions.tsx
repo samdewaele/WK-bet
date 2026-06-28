@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 import TeamFlag from "@/components/TeamFlag";
+import { formatKickoff } from "@/lib/ko-bracket";
+import { koScheduledKickoff } from "@/lib/ko-schedule";
 
 type Team = { id: string; name: string; flag: string };
 
@@ -251,6 +253,8 @@ export default function SharedPredictions({ roomId }: { roomId: string }) {
                   <div className="flex items-center justify-between mb-3">
                     <div className="flex items-center gap-2 text-sm">
                       <span className="text-gray-500">{ROUND_LABELS[km.round] ?? km.round}</span>
+                      {/* Date from the official static schedule (team-independent), same as the bracket. */}
+                      <span className="text-gray-600 text-xs">{formatKickoff(koScheduledKickoff(km.matchNumber) ?? km.match.kickoff)}</span>
                       <span className="inline-flex items-center gap-1.5 text-gray-200">
                         {km.match.homeTeam && <TeamFlag flag={km.match.homeTeam.flag} name={km.match.homeTeam.name} size={18} />}
                         {km.match.homeTeam?.name ?? "TBD"}

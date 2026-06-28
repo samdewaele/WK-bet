@@ -36,8 +36,15 @@ export async function POST() {
     .filter((m) => m.stage === "GROUP_STAGE")
     .sort((a, b) => new Date(a.utcDate).getTime() - new Date(b.utcDate).getTime());
 
-  if (apiGroupMatches.length === 0) {
-    return NextResponse.json({ error: "API returned no group-stage matches" }, { status: 502 });
+  // Must be the full group schedule. A partial/truncated API response would
+  // otherwise delete the real matches and rebuild an incomplete set (and, if it
+  // ever exceeded 72, overrun matchNumber into the KO range 73-104 and hit the
+  // unique constraint mid-rebuild).
+  if (apiGroupMatches.length !== 72) {
+    return NextResponse.json(
+      { error: `Expected 72 group-stage matches from the API, got ${apiGroupMatches.length} — refusing to rebuild` },
+      { status: 502 },
+    );
   }
 
   // ── 2. Upsert teams ───────────────────────────────────────────────────────
@@ -93,34 +100,25 @@ export async function POST() {
   }
 
   // ── 4. Rebuild group-stage matches from API ───────────────────────────────
-  await db.match.deleteMany({ where: { round: "Group" } });
+  // Group matches take matchNumber 1–72 (chronological); KO matches are 73-104,
+  // so there is no collision. Delete + recreate run in a single transaction so a
+  // mid-rebuild failure can never leave the schedule partially deleted.
+  const matchData = apiGroupMatches.map((apiM, i) => ({
+    fdMatchId: apiM.id,
+    homeTeamId: teamIdByFdId.get(apiM.homeTeam.id) ?? null,
+    awayTeamId: teamIdByFdId.get(apiM.awayTeam.id) ?? null,
+    round: "Group",
+    group: apiM.group ? apiM.group.replace(/^GROUP_/, "") : null,
+    matchNumber: i + 1,
+    kickoff: new Date(apiM.utcDate),
+    status: "scheduled",
+  }));
 
-  // matchNumber must not collide with KO matches (which start at 49 in a 48+56 tournament).
-  // Assign 1–N for the N group matches in chronological order.
-  let matchNumber = 1;
-  let groupMatchesCreated = 0;
-
-  for (const apiM of apiGroupMatches) {
-    const homeTeamId = teamIdByFdId.get(apiM.homeTeam.id) ?? null;
-    const awayTeamId = teamIdByFdId.get(apiM.awayTeam.id) ?? null;
-    // "GROUP_A" → "A"
-    const groupLetter = apiM.group ? apiM.group.replace(/^GROUP_/, "") : null;
-
-    await db.match.create({
-      data: {
-        fdMatchId: apiM.id,
-        homeTeamId,
-        awayTeamId,
-        round: "Group",
-        group: groupLetter,
-        matchNumber,
-        kickoff: new Date(apiM.utcDate),
-        status: "scheduled",
-      },
-    });
-    matchNumber++;
-    groupMatchesCreated++;
-  }
+  await db.$transaction([
+    db.match.deleteMany({ where: { round: "Group" } }),
+    db.match.createMany({ data: matchData }),
+  ]);
+  const groupMatchesCreated = matchData.length;
 
   return NextResponse.json({
     ok: true,
