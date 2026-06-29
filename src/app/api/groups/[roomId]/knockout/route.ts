@@ -3,6 +3,7 @@ import { auth } from "@auth";
 import { db } from "@/lib/db";
 import { requireRoomAccess } from "@/lib/room-auth";
 import { calculatePot, KO_MATCH_WEIGHT, type KORound } from "@/lib/pot";
+import { KO_REOPEN_DEADLINE } from "@/lib/ko-schedule";
 
 export async function GET(
   _req: Request,
@@ -146,7 +147,11 @@ export async function POST(
   }
 
   const room = await db.room.findUnique({ where: { id: roomId }, select: { status: true } });
-  if (room?.status !== "ko_betting") {
+  // KO predictions are accepted while the bracket is being filled (ko_betting)
+  // and during the re-opened window once the KO has started (ko_active) — the
+  // per-match checks below enforce the actual deadlines (R32 by kickoff,
+  // R16→Final until the 2nd R32 match).
+  if (room?.status !== "ko_betting" && room?.status !== "ko_active") {
     return NextResponse.json({ error: "KO predictions are not open for this group" }, { status: 403 });
   }
 
@@ -165,16 +170,24 @@ export async function POST(
   const matchIds = predictions.map((p) => p.matchId);
   const matches = await db.match.findMany({
     where: { id: { in: matchIds } },
-    select: { id: true, kickoff: true, status: true },
+    select: { id: true, kickoff: true, status: true, round: true },
   });
   const matchMap = new Map(matches.map((m) => [m.id, m]));
+  const now = Date.now();
+  const reopenDeadline = new Date(KO_REOPEN_DEADLINE).getTime();
 
   const valid: KOPredictionInput[] = [];
   for (const pred of predictions) {
     const match = matchMap.get(pred.matchId);
     if (!match) continue;
-    if (new Date(match.kickoff) <= new Date()) continue;
     if (match.status === "live" || match.status === "finished") continue;
+    // R32 is fixed (each match locks at its own kickoff); R16→Final stay open
+    // for late entrants until the 2nd R32 match kicks off.
+    if (match.round === "R32") {
+      if (new Date(match.kickoff).getTime() <= now) continue;
+    } else if (now >= reopenDeadline) {
+      continue;
+    }
     if (
       typeof pred.homeScore !== "number" ||
       typeof pred.awayScore !== "number" ||

@@ -56,3 +56,20 @@ export function koScheduledKickoff(matchNumber: number | null | undefined): stri
   if (matchNumber == null) return null;
   return KO_SCHEDULE[matchNumber] ?? null;
 }
+
+/**
+ * Deadline for editing R16→Final bracket predictions (the "re-opened" window for
+ * late entrants). R32 stays fixed per its own kickoff; everything beyond R32
+ * locks when the SECOND round-of-32 match kicks off. Derived as the 2nd-earliest
+ * R32 (match 73-88) kickoff. ISO strings sort chronologically.
+ */
+export const KO_REOPEN_DEADLINE: string = (() => {
+  const r32Kickoffs = Object.entries(KO_SCHEDULE)
+    .filter(([n]) => Number(n) >= 73 && Number(n) <= 88)
+    .map(([, iso]) => iso)
+    .sort();
+  return r32Kickoffs[1]; // 2nd-earliest R32 kickoff
+})();
+
+/** Rounds whose predictions stay editable during the re-open window. */
+export const REOPENABLE_KO_ROUNDS = ["R16", "QF", "SF", "3rd", "Final"] as const;

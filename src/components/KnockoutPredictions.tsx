@@ -4,7 +4,20 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import TeamFlag from "@/components/TeamFlag";
 import KnockoutBracket from "@/components/KnockoutBracket";
 import { BRACKET_PATH, R32_SOURCE_LABELS, formatKickoff } from "@/lib/ko-bracket";
-import { koScheduledKickoff } from "@/lib/ko-schedule";
+import { koScheduledKickoff, KO_REOPEN_DEADLINE } from "@/lib/ko-schedule";
+
+/** "2d 3h 12m", "3h 12m 05s", or "Closing…" for a millisecond duration. */
+function formatCountdown(ms: number): string {
+  if (ms <= 0) return "Closing…";
+  const s = Math.floor(ms / 1000);
+  const d = Math.floor(s / 86400);
+  const h = Math.floor((s % 86400) / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  if (d > 0) return `${d}d ${h}h ${m}m`;
+  if (h > 0) return `${h}h ${m}m ${String(sec).padStart(2, "0")}s`;
+  return `${m}m ${String(sec).padStart(2, "0")}s`;
+}
 
 export type Team = {
   id: string;
@@ -82,6 +95,13 @@ export default function KnockoutPredictions({ roomId, roomStatus, simulationMode
   const [globalStatus, setGlobalStatus] = useState<"idle" | "saved" | "error">("idle");
   const [loading, setLoading] = useState(true);
   const debounceRefs = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  // Ticking clock so the re-open countdown updates live and tiles lock the
+  // instant the deadline passes.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, []);
 
   useEffect(() => {
     async function fetchData() {
@@ -191,16 +211,21 @@ export default function KnockoutPredictions({ roomId, roomStatus, simulationMode
     predictions.some((p) => p.match.round === r)
   );
 
-  // KO predictions are editable only during the "ko_betting" window (between the
-  // group stage finishing and the knockout stage starting). Once the room is
-  // ko_active (first KO match kicked off) the whole bracket is locked.
-  const allKOLocked = roomStatus !== "ko_betting";
+  const reopenDeadline = new Date(KO_REOPEN_DEADLINE).getTime();
+  const reopenOpen = now < reopenDeadline; // R16→Final still editable?
 
   const isLocked = (match: Match) => {
-    if (allKOLocked) return true;
     if (match.status === "finished" || match.status === "live") return true;
-    return new Date(match.kickoff) <= new Date();
+    if (match.round === "R32") {
+      // R32 stays fixed: each match locks at its own kickoff.
+      return new Date(match.kickoff).getTime() <= now;
+    }
+    // R16→Final: re-opened for late entrants until the 2nd R32 match kicks off.
+    return !reopenOpen;
   };
+
+  // Anything still editable? (used for the save bar + locked banner)
+  const koEditingOpen = predictions.some((p) => !isLocked(p.match));
 
   const isTied = (matchId: string) => {
     const s = scores[matchId];
@@ -278,7 +303,7 @@ export default function KnockoutPredictions({ roomId, roomStatus, simulationMode
 
   // Trigger auto-save after score or penalty winner changes
   useEffect(() => {
-    if (allKOLocked) return;
+    if (!koEditingOpen) return;
     for (const match of roundMatches) {
       const s = scores[match.id];
       if (!s || s.home === "" || s.away === "") continue;
@@ -594,20 +619,33 @@ export default function KnockoutPredictions({ roomId, roomStatus, simulationMode
 
   return (
     <div>
-      {allKOLocked && roomStatus && roomStatus !== "ko_betting" && availableRounds.length > 0 && (
+      {/* Re-open window countdown: R16→Final are editable for late entrants
+          until the 2nd R32 match kicks off. R32 itself stays fixed. */}
+      {reopenOpen && availableRounds.length > 0 && (
+        <div className="mb-4 flex items-center gap-2 text-sm text-emerald-300 bg-emerald-400/10 border border-emerald-400/20 rounded-xl px-4 py-3">
+          <span>⏳</span>
+          <span>
+            R16→Final predictions are still open — they lock in{" "}
+            <span className="font-bold text-emerald-200">{formatCountdown(reopenDeadline - now)}</span>{" "}
+            <span className="text-emerald-400/70">
+              (when the 2nd R32 match kicks off, {formatKickoff(KO_REOPEN_DEADLINE)}). R32 picks are locked.
+            </span>
+          </span>
+        </div>
+      )}
+
+      {!koEditingOpen && availableRounds.length > 0 && (
         <div className="mb-4 flex items-center gap-2 text-sm text-amber-400 bg-amber-400/10 border border-amber-400/20 rounded-xl px-4 py-3">
           <span>🔒</span>
-          {roomStatus === "ko_active" || roomStatus === "settling" || roomStatus === "finished"
-            ? <span>KO predictions are locked — bracket is now playing out.</span>
-            : simulationMode
+          {simulationMode && roomStatus !== "ko_betting" && roomStatus !== "ko_active"
             ? <span>Run Phase 1 simulation first to open the KO prediction window.</span>
-            : <span>KO predictions open during the &quot;KO Betting&quot; window between group stage and first KO match.</span>
+            : <span>KO predictions are locked — the bracket is now playing out.</span>
           }
         </div>
       )}
 
       {/* Global save bar */}
-      {!allKOLocked && (
+      {koEditingOpen && (
         <div className="flex items-center justify-between mb-4 bg-gray-900 border border-gray-800 rounded-xl px-4 py-3">
           <div className="flex items-center gap-3">
             <span className="text-sm text-gray-400">
