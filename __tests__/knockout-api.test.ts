@@ -216,14 +216,29 @@ describe("POST /api/groups/[roomId]/knockout", () => {
     expect(res.status).toBe(403);
   });
 
-  it("returns 403 when room status is not ko_betting", async () => {
-    mockDb.room.findUnique.mockResolvedValue({ status: "ko_active" });
+  it("returns 403 when KO predictions are not open (e.g. settling)", async () => {
+    mockDb.room.findUnique.mockResolvedValue({ status: "settling" });
     const res = await POST(
       makePostRequest({ predictions: [{ matchId: "m1", homeScore: 2, awayScore: 1 }] }),
       { params: PARAMS }
     );
     expect(res.status).toBe(403);
     expect((await res.json()).error).toMatch(/not open/i);
+  });
+
+  it("does not blanket-reject ko_active — the re-open window lets R16+ through the room gate", async () => {
+    // ko_active used to 403 the whole POST; now the per-match deadline decides,
+    // so an R16 row is no longer rejected by the room-status gate (clock-robust:
+    // assert it's not the 403 'not open' rejection rather than a timing-dependent 200).
+    mockDb.room.findUnique.mockResolvedValue({ status: "ko_active" });
+    mockDb.match.findMany.mockResolvedValue([
+      { id: "m1", kickoff: FUTURE, status: "scheduled", round: "R16" },
+    ]);
+    const res = await POST(
+      makePostRequest({ predictions: [{ matchId: "m1", homeScore: 2, awayScore: 1 }] }),
+      { params: PARAMS }
+    );
+    expect(res.status).not.toBe(403);
   });
 
   it("returns 400 when predictions array is empty", async () => {
@@ -241,9 +256,9 @@ describe("POST /api/groups/[roomId]/knockout", () => {
     expect(res.status).toBe(400);
   });
 
-  it("rejects prediction for a match whose kickoff has already passed", async () => {
+  it("rejects an R32 prediction whose kickoff has already passed (R32 stays fixed)", async () => {
     mockDb.match.findMany.mockResolvedValue([
-      { id: "m1", kickoff: PAST, status: "scheduled" },
+      { id: "m1", kickoff: PAST, status: "scheduled", round: "R32" },
     ]);
     const res = await POST(
       makePostRequest({ predictions: [{ matchId: "m1", homeScore: 1, awayScore: 0 }] }),

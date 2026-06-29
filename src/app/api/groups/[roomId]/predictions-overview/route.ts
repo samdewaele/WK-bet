@@ -213,6 +213,7 @@ export async function GET(
             matchNumber: p.match.matchNumber,
             homeScore: p.homeScore,
             awayScore: p.awayScore,
+            penaltyWinner: p.penaltyWinner,
             earnedAmount: p.earnedAmount,
             match: overlayMatch(p.matchId, p.match),
           }))

@@ -19,6 +19,7 @@ type KORow = {
   matchNumber: number;
   homeScore: number;
   awayScore: number;
+  penaltyWinner: string | null;
   earnedAmount: number | null;
   match: {
     kickoff: string;
@@ -290,6 +291,14 @@ export default function SharedPredictions({ roomId }: { roomId: string }) {
                             </td>
                             <td className="px-2 py-1.5 text-center font-bold text-white whitespace-nowrap">
                               {row.homeScore}–{row.awayScore}
+                              {row.homeScore === row.awayScore && row.penaltyWinner && (
+                                <div className="text-[10px] font-normal text-amber-400/80">
+                                  pens:{" "}
+                                  {row.penaltyWinner === "home"
+                                    ? km.match.homeTeam?.name ?? "Home"
+                                    : km.match.awayTeam?.name ?? "Away"}
+                                </div>
+                              )}
                             </td>
                             <td className="px-2 py-1.5 text-right">{earnedBadge(row.earnedAmount)}</td>
                           </tr>
