@@ -4,20 +4,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import TeamFlag from "@/components/TeamFlag";
 import KnockoutBracket from "@/components/KnockoutBracket";
 import { BRACKET_PATH, R32_SOURCE_LABELS, formatKickoff } from "@/lib/ko-bracket";
-import { koScheduledKickoff, KO_REOPEN_DEADLINE } from "@/lib/ko-schedule";
-
-/** "2d 3h 12m", "3h 12m 05s", or "Closing…" for a millisecond duration. */
-function formatCountdown(ms: number): string {
-  if (ms <= 0) return "Closing…";
-  const s = Math.floor(ms / 1000);
-  const d = Math.floor(s / 86400);
-  const h = Math.floor((s % 86400) / 3600);
-  const m = Math.floor((s % 3600) / 60);
-  const sec = s % 60;
-  if (d > 0) return `${d}d ${h}h ${m}m`;
-  if (h > 0) return `${h}h ${m}m ${String(sec).padStart(2, "0")}s`;
-  return `${m}m ${String(sec).padStart(2, "0")}s`;
-}
+import { koScheduledKickoff } from "@/lib/ko-schedule";
 
 export type Team = {
   id: string;
@@ -55,6 +42,9 @@ type Props = {
   roomId: string;
   roomStatus?: string;
   simulationMode?: boolean;
+  // Room admin (creator/platform admin): may edit any member's bracket.
+  isManager?: boolean;
+  members?: { userId: string; name: string | null }[];
 };
 
 const KO_ROUNDS = ["R32", "R16", "QF", "SF", "3rd", "Final"] as const;
@@ -84,7 +74,7 @@ function randomKOScore(): { home: number; away: number } {
   return { home, away };
 }
 
-export default function KnockoutPredictions({ roomId, roomStatus, simulationMode }: Props) {
+export default function KnockoutPredictions({ roomId, roomStatus, simulationMode, isManager, members }: Props) {
   const [predictions, setPredictions] = useState<Prediction[]>([]);
   const [scores, setScores] = useState<ScoreState>({});
   const [penaltyWinners, setPenaltyWinners] = useState<Record<string, "home" | "away">>({});
@@ -94,19 +84,18 @@ export default function KnockoutPredictions({ roomId, roomStatus, simulationMode
   const [globalSaving, setGlobalSaving] = useState(false);
   const [globalStatus, setGlobalStatus] = useState<"idle" | "saved" | "error">("idle");
   const [loading, setLoading] = useState(true);
+  // Admin override: which member's bracket is being edited (null = own / normal).
+  const [editingFor, setEditingFor] = useState<string | null>(null);
   const debounceRefs = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
-  // Ticking clock so the re-open countdown updates live and tiles lock the
-  // instant the deadline passes.
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(t);
-  }, []);
+  const adminEditing = !!isManager && editingFor != null;
 
   useEffect(() => {
     async function fetchData() {
       try {
-        const res = await fetch(`/api/groups/${roomId}/knockout`);
+        const url = editingFor
+          ? `/api/groups/${roomId}/knockout?userId=${encodeURIComponent(editingFor)}`
+          : `/api/groups/${roomId}/knockout`;
+        const res = await fetch(url);
         if (!res.ok) return;
         const data: Prediction[] = await res.json();
         setPredictions(data);
@@ -132,7 +121,7 @@ export default function KnockoutPredictions({ roomId, roomStatus, simulationMode
       }
     }
     fetchData();
-  }, [roomId, roomStatus]);
+  }, [roomId, roomStatus, editingFor]);
 
   const matchByNum = new Map(predictions.map((p) => [p.match.matchNumber, p.match]));
 
@@ -211,21 +200,19 @@ export default function KnockoutPredictions({ roomId, roomStatus, simulationMode
     predictions.some((p) => p.match.round === r)
   );
 
-  const reopenDeadline = new Date(KO_REOPEN_DEADLINE).getTime();
-  const reopenOpen = now < reopenDeadline; // R16→Final still editable?
+  // KO predictions are editable only during the "ko_betting" window (between the
+  // group stage finishing and the knockout stage starting). Once the room is
+  // ko_active (first KO match kicked off) the whole bracket is locked.
+  const allKOLocked = roomStatus !== "ko_betting";
 
   const isLocked = (match: Match) => {
+    // A started/finished match is always final, even for an admin.
     if (match.status === "finished" || match.status === "live") return true;
-    if (match.round === "R32") {
-      // R32 stays fixed: each match locks at its own kickoff.
-      return new Date(match.kickoff).getTime() <= now;
-    }
-    // R16→Final: re-opened for late entrants until the 2nd R32 match kicks off.
-    return !reopenOpen;
+    if (new Date(match.kickoff) <= new Date()) return true;
+    // An admin editing a member's bracket bypasses the room-level lock.
+    if (adminEditing) return false;
+    return allKOLocked;
   };
-
-  // Anything still editable? (used for the save bar + locked banner)
-  const koEditingOpen = predictions.some((p) => !isLocked(p.match));
 
   const isTied = (matchId: string) => {
     const s = scores[matchId];
@@ -259,7 +246,7 @@ export default function KnockoutPredictions({ roomId, roomStatus, simulationMode
     const res = await fetch(`/api/groups/${roomId}/knockout`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ predictions: toSave }),
+      body: JSON.stringify({ predictions: toSave, ...(adminEditing && { targetUserId: editingFor }) }),
     });
     return { ok: res.ok, saved: toSave.length, res };
   }
@@ -303,7 +290,7 @@ export default function KnockoutPredictions({ roomId, roomStatus, simulationMode
 
   // Trigger auto-save after score or penalty winner changes
   useEffect(() => {
-    if (!koEditingOpen) return;
+    if (allKOLocked && !adminEditing) return;
     for (const match of roundMatches) {
       const s = scores[match.id];
       if (!s || s.home === "" || s.away === "") continue;
@@ -357,7 +344,7 @@ export default function KnockoutPredictions({ roomId, roomStatus, simulationMode
     const res = await fetch(`/api/groups/${roomId}/knockout`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ predictions: toSave }),
+      body: JSON.stringify({ predictions: toSave, ...(adminEditing && { targetUserId: editingFor }) }),
     });
     setGlobalSaving(false);
     setGlobalStatus(res.ok ? "saved" : "error");
@@ -619,33 +606,43 @@ export default function KnockoutPredictions({ roomId, roomStatus, simulationMode
 
   return (
     <div>
-      {/* Re-open window countdown: R16→Final are editable for late entrants
-          until the 2nd R32 match kicks off. R32 itself stays fixed. */}
-      {reopenOpen && availableRounds.length > 0 && (
-        <div className="mb-4 flex items-center gap-2 text-sm text-emerald-300 bg-emerald-400/10 border border-emerald-400/20 rounded-xl px-4 py-3">
-          <span>⏳</span>
-          <span>
-            R16→Final predictions are still open — they lock in{" "}
-            <span className="font-bold text-emerald-200">{formatCountdown(reopenDeadline - now)}</span>{" "}
-            <span className="text-emerald-400/70">
-              (when the 2nd R32 match kicks off, {formatKickoff(KO_REOPEN_DEADLINE)}). R32 picks are locked.
+      {/* Admin tool: edit any member's bracket (bypasses the lock). */}
+      {isManager && members && members.length > 0 && availableRounds.length > 0 && (
+        <div className="mb-4 flex flex-wrap items-center gap-2 text-sm bg-purple-500/10 border border-purple-400/30 rounded-xl px-4 py-3">
+          <span>👑</span>
+          <label className="text-purple-200">Admin — edit predictions for:</label>
+          <select
+            value={editingFor ?? ""}
+            onChange={(e) => setEditingFor(e.target.value || null)}
+            className="bg-gray-800 border border-gray-700 text-white rounded-lg px-2 py-1 text-sm outline-none focus:border-purple-400"
+          >
+            <option value="">Yourself (normal)</option>
+            {members.map((m) => (
+              <option key={m.userId} value={m.userId}>{m.name ?? m.userId}</option>
+            ))}
+          </select>
+          {adminEditing && (
+            <span className="text-purple-300/80">
+              Editing {members.find((m) => m.userId === editingFor)?.name ?? "this member"}&apos;s bracket — changes save to them, even though the window is closed.
             </span>
-          </span>
+          )}
         </div>
       )}
 
-      {!koEditingOpen && availableRounds.length > 0 && (
+      {allKOLocked && !adminEditing && roomStatus && roomStatus !== "ko_betting" && availableRounds.length > 0 && (
         <div className="mb-4 flex items-center gap-2 text-sm text-amber-400 bg-amber-400/10 border border-amber-400/20 rounded-xl px-4 py-3">
           <span>🔒</span>
-          {simulationMode && roomStatus !== "ko_betting" && roomStatus !== "ko_active"
+          {roomStatus === "ko_active" || roomStatus === "settling" || roomStatus === "finished"
+            ? <span>KO predictions are locked — bracket is now playing out.</span>
+            : simulationMode
             ? <span>Run Phase 1 simulation first to open the KO prediction window.</span>
-            : <span>KO predictions are locked — the bracket is now playing out.</span>
+            : <span>KO predictions open during the &quot;KO Betting&quot; window between group stage and first KO match.</span>
           }
         </div>
       )}
 
       {/* Global save bar */}
-      {koEditingOpen && (
+      {(!allKOLocked || adminEditing) && (
         <div className="flex items-center justify-between mb-4 bg-gray-900 border border-gray-800 rounded-xl px-4 py-3">
           <div className="flex items-center gap-3">
             <span className="text-sm text-gray-400">

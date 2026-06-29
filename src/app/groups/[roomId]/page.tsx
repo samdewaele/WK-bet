@@ -246,7 +246,13 @@ export default async function GroupDetailPage({ params, searchParams }: Props) {
             </div>
             <div>
               <h2 className="text-xl font-bold text-white mb-4">Knockout Predictions</h2>
-              <KnockoutPredictions roomId={roomId} roomStatus={roomStatus} simulationMode={simulationMode} />
+              <KnockoutPredictions
+                roomId={roomId}
+                roomStatus={roomStatus}
+                simulationMode={simulationMode}
+                isManager={isManager}
+                members={room.members.map((m) => ({ userId: m.userId, name: m.user.name }))}
+              />
             </div>
             <div>
               <h2 className="text-xl font-bold text-white mb-2">Uber Pot Bets</h2>

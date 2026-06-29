@@ -3,10 +3,9 @@ import { auth } from "@auth";
 import { db } from "@/lib/db";
 import { requireRoomAccess } from "@/lib/room-auth";
 import { calculatePot, KO_MATCH_WEIGHT, type KORound } from "@/lib/pot";
-import { KO_REOPEN_DEADLINE } from "@/lib/ko-schedule";
 
 export async function GET(
-  _req: Request,
+  req: Request,
   { params }: { params: Promise<{ roomId: string }> }
 ) {
   const { roomId } = await params;
@@ -26,6 +25,12 @@ export async function GET(
     return NextResponse.json([]);
   }
 
+  // A room admin (creator or platform admin) may view another member's bracket
+  // via ?userId= (used by the admin "edit a member's predictions" tool).
+  const isAdmin = room.creatorId === session.user.id || access.isPlatformAdmin;
+  const targetParam = new URL(req.url).searchParams.get("userId");
+  const viewUserId = targetParam && isAdmin ? targetParam : session.user.id;
+
   const activeMemberCount = room.members.filter((m) => !m.excludedFromPot).length;
   const pot = calculatePot(room.entryFee, activeMemberCount);
 
@@ -42,7 +47,7 @@ export async function GET(
       orderBy: { kickoff: "asc" },
     }),
     db.kOPrediction.findMany({
-      where: { userId: session.user.id, roomId },
+      where: { userId: viewUserId, roomId },
       select: { matchId: true, homeScore: true, awayScore: true, penaltyWinner: true, earnedAmount: true },
     }),
     db.kOPrediction.groupBy({
@@ -127,6 +132,8 @@ type KOPredictionInput = {
   penaltyWinner?: "home" | "away" | null;
 };
 
+type KOPostBody = { predictions: KOPredictionInput[]; targetUserId?: string };
+
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ roomId: string }> }
@@ -146,16 +153,9 @@ export async function POST(
     return NextResponse.json({ error: "Not a member" }, { status: 403 });
   }
 
-  const room = await db.room.findUnique({ where: { id: roomId }, select: { status: true } });
-  // KO predictions are accepted while the bracket is being filled (ko_betting)
-  // and during the re-opened window once the KO has started (ko_active) — the
-  // per-match checks below enforce the actual deadlines (R32 by kickoff,
-  // R16→Final until the 2nd R32 match).
-  if (room?.status !== "ko_betting" && room?.status !== "ko_active") {
-    return NextResponse.json({ error: "KO predictions are not open for this group" }, { status: 403 });
-  }
+  const room = await db.room.findUnique({ where: { id: roomId }, select: { status: true, creatorId: true } });
 
-  let body: { predictions: KOPredictionInput[] };
+  let body: KOPostBody;
   try {
     body = await req.json();
   } catch {
@@ -167,27 +167,39 @@ export async function POST(
     return NextResponse.json({ error: "No predictions provided" }, { status: 400 });
   }
 
+  // Admin override: a room admin (creator or platform admin) may edit another
+  // member's bracket via targetUserId — and that bypasses the room-level lock so
+  // they can fix a member's picks after the KO window has closed. Per-match locks
+  // (kickoff/live/finished) still apply, so already-started matches stay final.
+  const isAdmin = room?.creatorId === userId || session.user.role === "admin";
+  const isAdminOverride = !!body.targetUserId && isAdmin;
+  const effectiveUserId = isAdminOverride ? body.targetUserId! : userId;
+
+  if (!isAdminOverride && room?.status !== "ko_betting") {
+    return NextResponse.json({ error: "KO predictions are not open for this group" }, { status: 403 });
+  }
+  if (isAdminOverride) {
+    const targetMember = await db.roomMember.findUnique({
+      where: { userId_roomId: { userId: effectiveUserId, roomId } },
+    });
+    if (!targetMember) {
+      return NextResponse.json({ error: "Target user is not a member of this group" }, { status: 400 });
+    }
+  }
+
   const matchIds = predictions.map((p) => p.matchId);
   const matches = await db.match.findMany({
     where: { id: { in: matchIds } },
-    select: { id: true, kickoff: true, status: true, round: true },
+    select: { id: true, kickoff: true, status: true },
   });
   const matchMap = new Map(matches.map((m) => [m.id, m]));
-  const now = Date.now();
-  const reopenDeadline = new Date(KO_REOPEN_DEADLINE).getTime();
 
   const valid: KOPredictionInput[] = [];
   for (const pred of predictions) {
     const match = matchMap.get(pred.matchId);
     if (!match) continue;
+    if (new Date(match.kickoff) <= new Date()) continue;
     if (match.status === "live" || match.status === "finished") continue;
-    // R32 is fixed (each match locks at its own kickoff); R16→Final stay open
-    // for late entrants until the 2nd R32 match kicks off.
-    if (match.round === "R32") {
-      if (new Date(match.kickoff).getTime() <= now) continue;
-    } else if (now >= reopenDeadline) {
-      continue;
-    }
     if (
       typeof pred.homeScore !== "number" ||
       typeof pred.awayScore !== "number" ||
@@ -210,9 +222,9 @@ export async function POST(
   const upserted = await Promise.all(
     valid.map((pred) =>
       db.kOPrediction.upsert({
-        where: { userId_matchId_roomId: { userId, matchId: pred.matchId, roomId } },
+        where: { userId_matchId_roomId: { userId: effectiveUserId, matchId: pred.matchId, roomId } },
         create: {
-          userId,
+          userId: effectiveUserId,
           matchId: pred.matchId,
           roomId,
           homeScore: pred.homeScore,

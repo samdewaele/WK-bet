@@ -199,7 +199,7 @@ describe("POST /api/groups/[roomId]/knockout", () => {
     mockDb.roomMember.findUnique.mockResolvedValue({ userId: "u1", roomId: "r1" });
     mockDb.room.findUnique.mockResolvedValue({ status: "ko_betting" });
     mockDb.match.findMany.mockResolvedValue([
-      { id: "m1", kickoff: FUTURE, status: "scheduled" },
+      { id: "m1", kickoff: FUTURE, status: "scheduled", round: "R32" },
     ]);
     mockDb.kOPrediction.upsert.mockResolvedValue({});
   });
@@ -216,8 +216,8 @@ describe("POST /api/groups/[roomId]/knockout", () => {
     expect(res.status).toBe(403);
   });
 
-  it("returns 403 when KO predictions are not open (e.g. settling)", async () => {
-    mockDb.room.findUnique.mockResolvedValue({ status: "settling" });
+  it("returns 403 when room status is not ko_betting", async () => {
+    mockDb.room.findUnique.mockResolvedValue({ status: "ko_active" });
     const res = await POST(
       makePostRequest({ predictions: [{ matchId: "m1", homeScore: 2, awayScore: 1 }] }),
       { params: PARAMS }
@@ -226,19 +226,28 @@ describe("POST /api/groups/[roomId]/knockout", () => {
     expect((await res.json()).error).toMatch(/not open/i);
   });
 
-  it("does not blanket-reject ko_active — the re-open window lets R16+ through the room gate", async () => {
-    // ko_active used to 403 the whole POST; now the per-match deadline decides,
-    // so an R16 row is no longer rejected by the room-status gate (clock-robust:
-    // assert it's not the 403 'not open' rejection rather than a timing-dependent 200).
-    mockDb.room.findUnique.mockResolvedValue({ status: "ko_active" });
-    mockDb.match.findMany.mockResolvedValue([
-      { id: "m1", kickoff: FUTURE, status: "scheduled", round: "R16" },
-    ]);
+  it("admin override: room creator can edit a member's bracket in ko_active, bypassing the lock", async () => {
+    mockDb.room.findUnique.mockResolvedValue({ status: "ko_active", creatorId: "u1" }); // u1 is creator
     const res = await POST(
-      makePostRequest({ predictions: [{ matchId: "m1", homeScore: 2, awayScore: 1 }] }),
+      makePostRequest({ targetUserId: "u2", predictions: [{ matchId: "m1", homeScore: 2, awayScore: 1 }] }),
       { params: PARAMS }
     );
-    expect(res.status).not.toBe(403);
+    expect(res.status).toBe(200);
+    // Upsert is written for the TARGET member, not the admin.
+    expect(mockDb.kOPrediction.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { userId_matchId_roomId: { userId: "u2", matchId: "m1", roomId: "r1" } },
+      }),
+    );
+  });
+
+  it("non-admin cannot use targetUserId to bypass the lock (still 403 in ko_active)", async () => {
+    mockDb.room.findUnique.mockResolvedValue({ status: "ko_active", creatorId: "someoneElse" });
+    const res = await POST(
+      makePostRequest({ targetUserId: "u2", predictions: [{ matchId: "m1", homeScore: 2, awayScore: 1 }] }),
+      { params: PARAMS }
+    );
+    expect(res.status).toBe(403);
   });
 
   it("returns 400 when predictions array is empty", async () => {
@@ -256,9 +265,9 @@ describe("POST /api/groups/[roomId]/knockout", () => {
     expect(res.status).toBe(400);
   });
 
-  it("rejects an R32 prediction whose kickoff has already passed (R32 stays fixed)", async () => {
+  it("rejects prediction for a match whose kickoff has already passed", async () => {
     mockDb.match.findMany.mockResolvedValue([
-      { id: "m1", kickoff: PAST, status: "scheduled", round: "R32" },
+      { id: "m1", kickoff: PAST, status: "scheduled" },
     ]);
     const res = await POST(
       makePostRequest({ predictions: [{ matchId: "m1", homeScore: 1, awayScore: 0 }] }),
@@ -383,8 +392,8 @@ describe("POST /api/groups/[roomId]/knockout", () => {
 
   it("saves multiple valid predictions and returns correct count", async () => {
     mockDb.match.findMany.mockResolvedValue([
-      { id: "m1", kickoff: FUTURE, status: "scheduled" },
-      { id: "m2", kickoff: FUTURE, status: "scheduled" },
+      { id: "m1", kickoff: FUTURE, status: "scheduled", round: "R32" },
+      { id: "m2", kickoff: FUTURE, status: "scheduled", round: "R32" },
     ]);
     const res = await POST(
       makePostRequest({
