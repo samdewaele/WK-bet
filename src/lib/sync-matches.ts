@@ -322,19 +322,6 @@ export async function syncMatches(): Promise<SyncResult> {
     const storeHome = matchOrientation === "reversed" ? apiAway : apiHome;
     const storeAway = matchOrientation === "reversed" ? apiHome : apiAway;
 
-    const unchanged =
-      dbMatch.status === apiStatus &&
-      dbMatch.homeScore === storeHome &&
-      dbMatch.awayScore === storeAway;
-    if (unchanged) continue;
-
-    const wasFinished = dbMatch.status === "finished";
-    const nowFinished = apiStatus === "finished";
-    // Also rescore if the match was already finished but scores changed — this
-    // catches the case where sim data left a "finished" match with wrong scores
-    // that the stale reset pass didn't clear (e.g. first sync after a new sim run).
-    const scoresChanged = dbMatch.homeScore !== storeHome || dbMatch.awayScore !== storeAway;
-
     const KO_ROUND_NAMES = ["R32", "R16", "QF", "SF", "3rd", "Final"];
     const isKO = KO_ROUND_NAMES.includes(dbMatch.round);
     // The shootout winner (DB orientation) for a KO match level after ET. Only
@@ -353,6 +340,25 @@ export async function syncMatches(): Promise<SyncResult> {
     const hasShootout = !!koPenaltyWinner && pens != null && pens.home != null && pens.away != null;
     const koPenaltyHome = hasShootout ? (matchOrientation === "reversed" ? pens!.away : pens!.home) : null;
     const koPenaltyAway = hasShootout ? (matchOrientation === "reversed" ? pens!.home : pens!.away) : null;
+
+    // Include penalty fields in the unchanged check so a match whose score is
+    // already correct but is missing the shootout data (e.g. synced before the
+    // penalty columns existed) still gets updated.
+    const unchanged =
+      dbMatch.status === apiStatus &&
+      dbMatch.homeScore === storeHome &&
+      dbMatch.awayScore === storeAway &&
+      (dbMatch.penaltyWinner ?? null) === (koPenaltyWinner ?? null) &&
+      (dbMatch.penaltyHome ?? null) === (koPenaltyHome ?? null) &&
+      (dbMatch.penaltyAway ?? null) === (koPenaltyAway ?? null);
+    if (unchanged) continue;
+
+    const wasFinished = dbMatch.status === "finished";
+    const nowFinished = apiStatus === "finished";
+    // Also rescore if the match was already finished but scores changed — this
+    // catches the case where sim data left a "finished" match with wrong scores
+    // that the stale reset pass didn't clear (e.g. first sync after a new sim run).
+    const scoresChanged = dbMatch.homeScore !== storeHome || dbMatch.awayScore !== storeAway;
 
     await db.match.update({
       where: { id: dbMatch.id },

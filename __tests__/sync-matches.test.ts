@@ -328,6 +328,32 @@ describe("2. Match update logic", () => {
     expect(mockDb.match.update).not.toHaveBeenCalled();
   });
 
+  it("backfills the penalty shootout score on a KO match whose regulation score is already correct", async () => {
+    // football-data folds the shootout into fullTime: a 1-1 won 3-2 on pens is
+    // reported as fullTime 3-4 + penalties 2-3. The DB already holds the corrected
+    // regulation score (1-1) from an earlier sync but has no shootout score yet,
+    // so the score is "unchanged" — it must still get the penalty score written.
+    mockFetch.mockResolvedValue([
+      apiGroupMatch({
+        id: 5001,
+        stage: "LAST_32",
+        status: "FINISHED",
+        utcDate: kickoff.toISOString(),
+        score: { winner: "AWAY_TEAM", fullTime: { home: 3, away: 4 }, penalties: { home: 2, away: 3 } },
+      }),
+    ] as any);
+    mockDb.match.findMany.mockResolvedValue([
+      dbMatch({ kickoff, status: "finished", round: "R32", homeScore: 1, awayScore: 1, penaltyWinner: "away" }),
+    ]);
+
+    await syncMatches();
+
+    expect(mockDb.match.update).toHaveBeenCalledWith({
+      where: { id: "db-match-1" },
+      data: expect.objectContaining({ penaltyHome: 2, penaltyAway: 3, penaltyWinner: "away" }),
+    });
+  });
+
   it("skips a match when no DB match has the same home+away team pair", async () => {
     mockDb.match.findMany.mockResolvedValue([
       // API has Brazil vs Germany; DB only has France vs Germany — home team differs
