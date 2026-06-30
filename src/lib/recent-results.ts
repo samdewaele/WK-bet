@@ -5,6 +5,8 @@ export type RecentMatch = {
   kickoff: string;
   homeScore: number | null;
   awayScore: number | null;
+  penaltyHome?: number | null;
+  penaltyAway?: number | null;
   status: string;
   homeTeam: { id: string; name: string; flag: string } | null;
   awayTeam: { id: string; name: string; flag: string } | null;

@@ -25,6 +25,8 @@ export async function GET() {
       kickoff: m.kickoff.toISOString(),
       homeScore: m.homeScore,
       awayScore: m.awayScore,
+      penaltyHome: m.penaltyHome,
+      penaltyAway: m.penaltyAway,
       status: m.status,
       homeTeam: m.homeTeam,
       awayTeam: m.awayTeam,

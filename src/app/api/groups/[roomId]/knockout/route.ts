@@ -114,6 +114,8 @@ export async function GET(
           kickoff: m.kickoff.toISOString(),
           homeScore: sim?.homeScore ?? m.homeScore,
           awayScore: sim?.awayScore ?? m.awayScore,
+          penaltyHome: m.penaltyHome,
+          penaltyAway: m.penaltyAway,
           status: simFinished ? "finished" : m.status,
           homeTeam: sim?.homeTeam ?? m.homeTeam,
           awayTeam: sim?.awayTeam ?? m.awayTeam,

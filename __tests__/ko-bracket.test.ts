@@ -11,6 +11,7 @@ import {
   computeBracketLayout,
   computeConnectors,
   formatKickoff,
+  formatPenalties,
   KO_TBD_ISO,
   NEXT_ROUND_SLOT,
 } from "@/lib/ko-bracket";
@@ -37,6 +38,14 @@ describe("KO bracket topology", () => {
     const real = formatKickoff("2026-07-14T19:00:00.000Z");
     expect(real).not.toBe("TBD");
     expect(real).toMatch(/Jul/);
+  });
+
+  it("formatPenalties renders the shootout score or null", () => {
+    expect(formatPenalties(3, 2)).toBe("3-2 pens");
+    expect(formatPenalties(0, 0)).toBe("0-0 pens"); // unusual but valid input
+    expect(formatPenalties(null, 2)).toBeNull();
+    expect(formatPenalties(3, null)).toBeNull();
+    expect(formatPenalties(undefined, undefined)).toBeNull();
   });
 
   it("every BRACKET_PATH feeder references a strictly earlier match", () => {

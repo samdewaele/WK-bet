@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import TeamFlag from "@/components/TeamFlag";
 import { filterRecentResults, filterLiveMatches, type RecentMatch } from "@/lib/recent-results";
+import { formatPenalties } from "@/lib/ko-bracket";
 import { formatDate } from "@/lib/format-date";
 
 const ROUND_LABEL: Record<string, string> = {
@@ -14,6 +15,7 @@ const POLL_IDLE_MS = 60_000; // no live matches — check once a minute
 
 function MatchRow({ m, live = false }: { m: RecentMatch; live?: boolean }) {
   const label = m.round === "Group" ? `Group ${m.group}` : (ROUND_LABEL[m.round] ?? m.round);
+  const pens = formatPenalties(m.penaltyHome, m.penaltyAway);
   return (
     <div className="flex items-center gap-2 text-sm">
       <div className="shrink-0 w-16">
@@ -24,10 +26,13 @@ function MatchRow({ m, live = false }: { m: RecentMatch; live?: boolean }) {
         <span className="text-gray-300 truncate text-right">{m.homeTeam!.name}</span>
         <TeamFlag flag={m.homeTeam!.flag} name={m.homeTeam!.name} size={14} />
       </div>
-      <div className={`font-mono font-bold px-2 py-0.5 rounded text-xs tabular-nums shrink-0 ${
-        live ? "text-green-400 bg-green-950 border border-green-800" : "text-white bg-gray-800"
-      }`}>
-        {m.homeScore ?? 0} – {m.awayScore ?? 0}
+      <div className="shrink-0 flex flex-col items-center">
+        <div className={`font-mono font-bold px-2 py-0.5 rounded text-xs tabular-nums ${
+          live ? "text-green-400 bg-green-950 border border-green-800" : "text-white bg-gray-800"
+        }`}>
+          {m.homeScore ?? 0} – {m.awayScore ?? 0}
+        </div>
+        {pens && <div className="text-[10px] text-amber-400/80 mt-0.5 whitespace-nowrap">{pens}</div>}
       </div>
       <div className="flex-1 flex items-center gap-1.5 min-w-0">
         <TeamFlag flag={m.awayTeam!.flag} name={m.awayTeam!.name} size={14} />

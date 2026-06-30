@@ -92,6 +92,8 @@ export async function GET(
                 status: true,
                 homeScore: true,
                 awayScore: true,
+                penaltyHome: true,
+                penaltyAway: true,
                 homeTeam: { select: { id: true, name: true, flag: true } },
                 awayTeam: { select: { id: true, name: true, flag: true } },
               },
@@ -165,6 +167,8 @@ export async function GET(
         awayTeam: match.awayTeam,
         homeScore: match.homeScore,
         awayScore: match.awayScore,
+        penaltyHome: match.penaltyHome,
+        penaltyAway: match.penaltyAway,
       };
     }
     const simFinished = sim.homeScore !== null && sim.awayScore !== null;
@@ -175,6 +179,8 @@ export async function GET(
       awayTeam: sim.awayTeamId ? resolve(sim.awayTeamId) : match.awayTeam,
       homeScore: sim.homeScore ?? match.homeScore,
       awayScore: sim.awayScore ?? match.awayScore,
+      penaltyHome: match.penaltyHome,
+      penaltyAway: match.penaltyAway,
     };
   };
 

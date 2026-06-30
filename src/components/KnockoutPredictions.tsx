@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import TeamFlag from "@/components/TeamFlag";
 import KnockoutBracket from "@/components/KnockoutBracket";
-import { BRACKET_PATH, R32_SOURCE_LABELS, formatKickoff } from "@/lib/ko-bracket";
+import { BRACKET_PATH, R32_SOURCE_LABELS, formatKickoff, formatPenalties } from "@/lib/ko-bracket";
 import { koScheduledKickoff } from "@/lib/ko-schedule";
 
 export type Team = {
@@ -20,6 +20,8 @@ export type Match = {
   kickoff: string;
   homeScore: number | null;
   awayScore: number | null;
+  penaltyHome?: number | null;
+  penaltyAway?: number | null;
   status: string;
   homeTeam: Team | null;
   awayTeam: Team | null;
@@ -462,18 +464,25 @@ export default function KnockoutPredictions({ roomId, roomStatus, simulationMode
         {(hasActualResult || isLive) && (
           <div className="flex items-center gap-3 w-full">
             {renderTeamSlot(displayHome, "home", homeLabel)}
-            <div className="flex items-center gap-2">
-              <div className={`w-10 h-10 flex items-center justify-center rounded-lg font-bold text-lg ${
-                isLive ? "bg-green-900/40 text-green-300" : "bg-gray-800 text-white"
-              }`}>
-                {match.homeScore ?? "—"}
+            <div className="flex flex-col items-center">
+              <div className="flex items-center gap-2">
+                <div className={`w-10 h-10 flex items-center justify-center rounded-lg font-bold text-lg ${
+                  isLive ? "bg-green-900/40 text-green-300" : "bg-gray-800 text-white"
+                }`}>
+                  {match.homeScore ?? "—"}
+                </div>
+                <span className="text-gray-400 font-bold">-</span>
+                <div className={`w-10 h-10 flex items-center justify-center rounded-lg font-bold text-lg ${
+                  isLive ? "bg-green-900/40 text-green-300" : "bg-gray-800 text-white"
+                }`}>
+                  {match.awayScore ?? "—"}
+                </div>
               </div>
-              <span className="text-gray-400 font-bold">-</span>
-              <div className={`w-10 h-10 flex items-center justify-center rounded-lg font-bold text-lg ${
-                isLive ? "bg-green-900/40 text-green-300" : "bg-gray-800 text-white"
-              }`}>
-                {match.awayScore ?? "—"}
-              </div>
+              {formatPenalties(match.penaltyHome, match.penaltyAway) && (
+                <div className="text-[11px] text-amber-400/90 mt-1 whitespace-nowrap">
+                  {formatPenalties(match.penaltyHome, match.penaltyAway)}
+                </div>
+              )}
             </div>
             {renderTeamSlot(displayAway, "away", awayLabel)}
           </div>

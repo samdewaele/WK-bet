@@ -7,6 +7,7 @@ import {
   computeBracketLayout,
   computeConnectors,
   formatKickoff,
+  formatPenalties,
   R32_SOURCE_LABELS,
   BRACKET_LAYOUT,
   type PositionedTile,
@@ -250,7 +251,14 @@ function BracketTile({
           </span>
           <span>
             {live && <span className="text-green-400">● LIVE</span>}
-            {finished && <span className="text-gray-400">FT {match.homeScore}–{match.awayScore}</span>}
+            {finished && (
+              <span className="text-gray-400">
+                FT {match.homeScore}–{match.awayScore}
+                {formatPenalties(match.penaltyHome, match.penaltyAway) && (
+                  <span className="ml-1 text-amber-300">({formatPenalties(match.penaltyHome, match.penaltyAway)})</span>
+                )}
+              </span>
+            )}
             {!finished && !live && status === "saving" && <span className="text-gray-400">…</span>}
             {!finished && !live && status === "saved" && <span className="text-green-400">✓</span>}
             {!finished && !live && status === "error" && <span className="text-red-400">!</span>}

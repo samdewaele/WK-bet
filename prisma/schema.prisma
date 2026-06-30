@@ -124,6 +124,9 @@ model Match {
   // ("home"/"away"), from football-data's score.winner. Authoritative for
   // bracket propagation and team-aware scoring (NULL for decisive results).
   penaltyWinner String?
+  // The penalty shootout score (e.g. 3-2), shown alongside the level result.
+  penaltyHome   Int?
+  penaltyAway   Int?
   status        String         @default("scheduled")
   predictions   Prediction[]
   koPredictions KOPrediction[]

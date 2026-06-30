@@ -347,6 +347,13 @@ export async function syncMatches(): Promise<SyncResult> {
     const koPenaltyWinner =
       isKO && storeHome !== null && storeAway !== null && storeHome === storeAway ? dbWin : null;
 
+    // Penalty shootout score (DB orientation) — kept so the result can be shown
+    // as e.g. "1-1 (3-2 pens)". Null when the match wasn't decided on penalties.
+    const pens = api.score.penalties;
+    const hasShootout = !!koPenaltyWinner && pens != null && pens.home != null && pens.away != null;
+    const koPenaltyHome = hasShootout ? (matchOrientation === "reversed" ? pens!.away : pens!.home) : null;
+    const koPenaltyAway = hasShootout ? (matchOrientation === "reversed" ? pens!.home : pens!.away) : null;
+
     await db.match.update({
       where: { id: dbMatch.id },
       data: {
@@ -358,7 +365,7 @@ export async function syncMatches(): Promise<SyncResult> {
         ...(api.group && { group: api.group.replace(/^GROUP_/, "") }),
         ...(storeHome !== null && { homeScore: storeHome }),
         ...(storeAway !== null && { awayScore: storeAway }),
-        ...(isKO && { penaltyWinner: koPenaltyWinner }),
+        ...(isKO && { penaltyWinner: koPenaltyWinner, penaltyHome: koPenaltyHome, penaltyAway: koPenaltyAway }),
       },
     });
     updated++;

@@ -13,6 +13,19 @@ export type BracketSide = "winner" | "loser";
 // rather than a bogus "31 Dec" so an unresolved slot never reads as a real time.
 export const KO_TBD_ISO = "2026-12-31T00:00:00.000Z";
 
+/**
+ * The penalty-shootout suffix for a level KO result, e.g. "3-2 pens" — or null
+ * when the match wasn't decided on penalties. Shown next to the regulation score
+ * so a 1-1 reads as "1-1 (3-2 pens)".
+ */
+export function formatPenalties(
+  penaltyHome: number | null | undefined,
+  penaltyAway: number | null | undefined,
+): string | null {
+  if (penaltyHome == null || penaltyAway == null) return null;
+  return `${penaltyHome}-${penaltyAway} pens`;
+}
+
 /** Compact, locale-formatted kickoff for a bracket tile ("14 Jul, 21:00"). */
 export function formatKickoff(iso: string): string {
   const d = new Date(iso);

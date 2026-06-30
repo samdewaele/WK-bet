@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import TeamFlag from "@/components/TeamFlag";
-import { formatKickoff } from "@/lib/ko-bracket";
+import { formatKickoff, formatPenalties } from "@/lib/ko-bracket";
 import { koScheduledKickoff } from "@/lib/ko-schedule";
 
 type Team = { id: string; name: string; flag: string };
@@ -28,6 +28,8 @@ type KORow = {
     awayTeam: Team | null;
     homeScore: number | null;
     awayScore: number | null;
+    penaltyHome?: number | null;
+    penaltyAway?: number | null;
   };
 };
 
@@ -270,6 +272,9 @@ export default function SharedPredictions({ roomId }: { roomId: string }) {
                       {finished && (
                         <span className="text-xs font-bold bg-gray-800 text-white px-2 py-1 rounded">
                           {km.match.homeScore}–{km.match.awayScore} FT
+                          {formatPenalties(km.match.penaltyHome, km.match.penaltyAway) && (
+                            <span className="ml-1 text-amber-300">({formatPenalties(km.match.penaltyHome, km.match.penaltyAway)})</span>
+                          )}
                         </span>
                       )}
                       {finished && (data.koMatchUberPot?.[km.matchId] ?? 0) > 0 && (
