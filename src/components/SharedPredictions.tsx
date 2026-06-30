@@ -21,6 +21,10 @@ type KORow = {
   awayScore: number;
   penaltyWinner: string | null;
   earnedAmount: number | null;
+  // The teams THIS player predicted into the slot (their own bracket), which
+  // may differ from the real matchup shown in the card header.
+  predictedHomeTeam?: Team | null;
+  predictedAwayTeam?: Team | null;
   match: {
     kickoff: string;
     status: string;
@@ -258,6 +262,7 @@ export default function SharedPredictions({ roomId }: { roomId: string }) {
                       <span className="text-gray-500">{ROUND_LABELS[km.round] ?? km.round}</span>
                       {/* Date from the official static schedule (team-independent), same as the bracket. */}
                       <span className="text-gray-600 text-xs">{formatKickoff(koScheduledKickoff(km.matchNumber) ?? km.match.kickoff)}</span>
+                      <span className="text-gray-600 text-xs uppercase tracking-wide">Actual</span>
                       <span className="inline-flex items-center gap-1.5 text-gray-200">
                         {km.match.homeTeam && <TeamFlag flag={km.match.homeTeam.flag} name={km.match.homeTeam.name} size={18} />}
                         {km.match.homeTeam?.name ?? "TBD"}
@@ -288,24 +293,43 @@ export default function SharedPredictions({ roomId }: { roomId: string }) {
                     <tbody>
                       {km.picks.map(({ userId, row }) => {
                         const won = (row.earnedAmount ?? 0) > 0;
+                        // Which team this player predicted to win the slot (penalties
+                        // break a level score), so we can emphasise it.
+                        const winSide =
+                          row.homeScore > row.awayScore ? "home"
+                          : row.awayScore > row.homeScore ? "away"
+                          : row.penaltyWinner === "home" || row.penaltyWinner === "away"
+                            ? row.penaltyWinner : null;
+                        const predTeam = (t: Team | null | undefined, side: "home" | "away") => (
+                          <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
+                            {t && <TeamFlag flag={t.flag} name={t.name} size={16} />}
+                            <span className={winSide === side ? "text-white font-semibold" : "text-gray-400"}>
+                              {t?.name ?? "TBD"}
+                            </span>
+                          </span>
+                        );
                         return (
                           <tr key={userId} className={`border-t border-gray-800 ${won ? "bg-amber-400/5" : ""}`}>
-                            <td className="px-2 py-1.5 text-white font-medium whitespace-nowrap">
+                            <td className="px-2 py-1.5 text-white font-medium whitespace-nowrap align-top">
                               {won && <span className="mr-1">🏆</span>}
                               {memberName(userId)}
                             </td>
-                            <td className="px-2 py-1.5 text-center font-bold text-white whitespace-nowrap">
-                              {row.homeScore}–{row.awayScore}
+                            <td className="px-2 py-1.5">
+                              <div className="flex items-center justify-center gap-2 whitespace-nowrap">
+                                {predTeam(row.predictedHomeTeam, "home")}
+                                <span className="font-bold text-white">{row.homeScore}–{row.awayScore}</span>
+                                {predTeam(row.predictedAwayTeam, "away")}
+                              </div>
                               {row.homeScore === row.awayScore && row.penaltyWinner && (
-                                <div className="text-[10px] font-normal text-amber-400/80">
+                                <div className="text-[10px] font-normal text-amber-400/80 text-center mt-0.5">
                                   pens:{" "}
                                   {row.penaltyWinner === "home"
-                                    ? km.match.homeTeam?.name ?? "Home"
-                                    : km.match.awayTeam?.name ?? "Away"}
+                                    ? row.predictedHomeTeam?.name ?? "Home"
+                                    : row.predictedAwayTeam?.name ?? "Away"}
                                 </div>
                               )}
                             </td>
-                            <td className="px-2 py-1.5 text-right">{earnedBadge(row.earnedAmount)}</td>
+                            <td className="px-2 py-1.5 text-right align-top">{earnedBadge(row.earnedAmount)}</td>
                           </tr>
                         );
                       })}

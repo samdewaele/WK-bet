@@ -97,6 +97,11 @@ it("reveals KO predictions + earned money from ko_active onwards", async () => {
   expect(body.members[0].knockout).toHaveLength(1);
   expect(body.members[0].knockout[0].round).toBe("R32");
   expect(body.members[0].knockout[0].earnedAmount).toBe(80);
+  // The player's predicted teams for the slot (their own bracket) are returned
+  // so the shared view shows what they actually bet, not just the real matchup.
+  // For an R32 match the predicted teams are seeded from the real R32 teams.
+  expect(body.members[0].knockout[0].predictedHomeTeam.name).toBe("Mexico");
+  expect(body.members[0].knockout[0].predictedAwayTeam.name).toBe("Canada");
 });
 
 it("includes Uber Pot bets with winner + prize once settled", async () => {

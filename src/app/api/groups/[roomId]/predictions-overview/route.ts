@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { computeUberPotResults } from "@/lib/uber-pot";
 import { requireRoomAccess } from "@/lib/room-auth";
 import { calculatePot, KO_MATCH_WEIGHT, type KORound } from "@/lib/pot";
+import { buildPlayerBracket } from "@/lib/ko-seeding";
 
 const WC_GROUPS = ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L"];
 
@@ -198,6 +199,34 @@ export async function GET(
     koByUser.set(p.userId, list);
   }
 
+  // Each player bet their OWN bracket, so for a KO slot we show the teams THAT
+  // player predicted into it (not the real matchup). Rebuild every player's
+  // bracket from their picks, starting from the real R32 teams (sim overlay in
+  // simulation rooms), and resolve the predicted home/away team per match.
+  const koMatchById = new Map<string, { id: string; matchNumber: number; homeTeamId: string | null; awayTeamId: string | null }>();
+  for (const p of koPredictions) {
+    if (koMatchById.has(p.matchId)) continue;
+    const sim = simOverlay.get(p.matchId);
+    koMatchById.set(p.matchId, {
+      id: p.matchId,
+      matchNumber: p.match.matchNumber,
+      homeTeamId: (sim?.homeTeamId ?? p.match.homeTeam?.id) ?? null,
+      awayTeamId: (sim?.awayTeamId ?? p.match.awayTeam?.id) ?? null,
+    });
+  }
+  const koMatchesInfo = [...koMatchById.values()];
+  const bracketByUser = new Map<string, ReturnType<typeof buildPlayerBracket>>();
+  for (const [userId, preds] of koByUser) {
+    bracketByUser.set(
+      userId,
+      buildPlayerBracket(
+        preds.map((p) => ({ matchId: p.matchId, homeScore: p.homeScore, awayScore: p.awayScore, penaltyWinner: p.penaltyWinner })),
+        koMatchesInfo,
+      ),
+    );
+  }
+  const predictedTeam = (id: string | null | undefined) => (id ? resolve(id) : null);
+
   return NextResponse.json({
     revealKO,
     groupVisibility,
@@ -213,16 +242,22 @@ export async function GET(
         earnedAmount: g.earnedAmount,
       })),
       knockout: revealKO
-        ? (koByUser.get(m.userId) ?? []).map((p) => ({
-            matchId: p.matchId,
-            round: p.match.round,
-            matchNumber: p.match.matchNumber,
-            homeScore: p.homeScore,
-            awayScore: p.awayScore,
-            penaltyWinner: p.penaltyWinner,
-            earnedAmount: p.earnedAmount,
-            match: overlayMatch(p.matchId, p.match),
-          }))
+        ? (koByUser.get(m.userId) ?? []).map((p) => {
+            const slot = bracketByUser.get(m.userId)?.get(p.matchId);
+            return {
+              matchId: p.matchId,
+              round: p.match.round,
+              matchNumber: p.match.matchNumber,
+              homeScore: p.homeScore,
+              awayScore: p.awayScore,
+              penaltyWinner: p.penaltyWinner,
+              earnedAmount: p.earnedAmount,
+              // The teams THIS player predicted into the slot (their own bracket).
+              predictedHomeTeam: predictedTeam(slot?.homeTeamId),
+              predictedAwayTeam: predictedTeam(slot?.awayTeamId),
+              match: overlayMatch(p.matchId, p.match),
+            };
+          })
         : null,
     })),
     uberPot: {
