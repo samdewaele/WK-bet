@@ -1,5 +1,5 @@
 import { db } from "@/lib/db";
-import { fetchWCMatches, mapStatus, winnerSide, teamNameMatches } from "@/lib/football-data";
+import { fetchWCMatches, mapStatus, winnerSide, regulationScore, teamNameMatches } from "@/lib/football-data";
 import { calculatePoints, type Round } from "@/lib/points";
 import { checkAndSendRoundNotifications, checkAndSendIncompleteReminders } from "@/lib/notifications";
 import { computeGroupStandings, populateR32Bracket, populateR32FromApi, populateNextRoundSlot, repropagateKOBracket } from "@/lib/ko-seeding";
@@ -285,8 +285,12 @@ export async function syncMatches(): Promise<SyncResult> {
   for (const api of actionable) {
     const apiKickoff = new Date(api.utcDate).getTime();
     const apiStatus = mapStatus(api.status);
-    const apiHome = api.score.fullTime.home;
-    const apiAway = api.score.fullTime.away;
+    // Use the regulation score (shootout goals stripped out of fullTime) — a KO
+    // match that went to penalties is stored as its real level score (e.g. 1-1),
+    // with the shootout winner captured separately in penaltyWinner below.
+    const reg = regulationScore(api.score);
+    const apiHome = reg.home;
+    const apiAway = reg.away;
 
     // Pass 1: exact fdMatchId match — avoids being tricked by KO placeholders
     // that share team fdIds with a group-stage result when dbMatches.find()

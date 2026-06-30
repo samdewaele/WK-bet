@@ -23,9 +23,34 @@ export type FDMatch = {
   awayTeam: FDTeam;
   score: {
     winner: "HOME_TEAM" | "AWAY_TEAM" | "DRAW" | null;
+    duration?: string; // "REGULAR" | "EXTRA_TIME" | "PENALTY_SHOOTOUT"
+    // For a penalty shootout, football-data folds the shootout into fullTime
+    // (e.g. a 1-1 won 3-2 on pens is reported as fullTime 4-3) and also exposes
+    // the shootout here. We subtract it back out to recover the real result.
     fullTime: { home: number | null; away: number | null };
+    penalties?: { home: number | null; away: number | null } | null;
   };
 };
+
+/**
+ * The real match score (regulation + extra time, EXCLUDING the penalty shootout).
+ * football-data adds shootout goals into fullTime for KO matches, so a 1-1 that
+ * went to penalties shows up as e.g. 4-3 — we subtract the shootout back out.
+ * The winner of a level score is then determined separately via score.winner.
+ */
+export function regulationScore(score: FDMatch["score"]): { home: number | null; away: number | null } {
+  const { fullTime, penalties } = score;
+  if (
+    penalties &&
+    penalties.home != null &&
+    penalties.away != null &&
+    fullTime.home != null &&
+    fullTime.away != null
+  ) {
+    return { home: fullTime.home - penalties.home, away: fullTime.away - penalties.away };
+  }
+  return { home: fullTime.home, away: fullTime.away };
+}
 
 export async function fetchWCMatches(): Promise<FDMatch[]> {
   const apiKey = process.env.FOOTBALL_DATA_API_KEY;
