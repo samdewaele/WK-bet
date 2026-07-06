@@ -2019,7 +2019,7 @@ describe("15. Match table as pure API mirror", () => {
           status: "scheduled",
           homeScore: null,
           awayScore: null,
-          kickoff: new Date("2026-07-04T19:00:00.000Z"), // real future KO date
+          kickoff: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // real future KO date
           homeTeam: null,
           awayTeam: null,
           predictions: [],
