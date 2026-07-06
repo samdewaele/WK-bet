@@ -82,6 +82,9 @@ export default function SharedPredictions({ roomId }: { roomId: string }) {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState<"groups" | "ko" | "uber">("groups");
+  // Explicit open/closed overrides per KO round; unset rounds fall back to the
+  // default (only the first available round is open on load).
+  const [openRounds, setOpenRounds] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     let active = true;
@@ -150,6 +153,25 @@ export default function SharedPredictions({ roomId }: { roomId: string }) {
         ROUND_ORDER.indexOf(a.round) - ROUND_ORDER.indexOf(b.round) || a.matchNumber - b.matchNumber,
     );
   })();
+
+  // Group the (already round-ordered) KO matches into collapsible sections, one
+  // per round, so the Knockout picks view isn't one long scroll.
+  const koRounds = (() => {
+    const groups: { round: string; matches: typeof koMatches }[] = [];
+    for (const km of koMatches) {
+      let g = groups.find((x) => x.round === km.round);
+      if (!g) {
+        g = { round: km.round, matches: [] };
+        groups.push(g);
+      }
+      g.matches.push(km);
+    }
+    return groups;
+  })();
+  const firstKORound = koRounds[0]?.round;
+  const isRoundOpen = (round: string) => openRounds[round] ?? round === firstKORound;
+  const toggleRound = (round: string) =>
+    setOpenRounds((prev) => ({ ...prev, [round]: !isRoundOpen(round) }));
 
   const tabBtn = (key: typeof view, label: string) => (
     <button
@@ -253,13 +275,31 @@ export default function SharedPredictions({ roomId }: { roomId: string }) {
           {koMatches.length === 0 ? (
             <p className="text-sm text-gray-500">No knockout predictions submitted yet.</p>
           ) : (
-            koMatches.map((km) => {
-              const finished = km.match.status === "finished" && km.match.homeScore != null && km.match.awayScore != null;
+            koRounds.map((group) => {
+              const open = isRoundOpen(group.round);
               return (
+                <div key={group.round} className="bg-gray-900/40 border border-gray-800 rounded-xl overflow-hidden">
+                  <button
+                    onClick={() => toggleRound(group.round)}
+                    aria-expanded={open}
+                    className="w-full flex items-center justify-between gap-3 px-4 py-3 text-left hover:bg-gray-800/40 transition-colors"
+                  >
+                    <span className="flex items-center gap-2">
+                      <span className={`text-gray-500 text-xs transition-transform ${open ? "rotate-90" : ""}`}>▶</span>
+                      <span className="text-sm font-bold text-white">{ROUND_LABELS[group.round] ?? group.round}</span>
+                    </span>
+                    <span className="text-xs text-gray-500">
+                      {group.matches.length} match{group.matches.length === 1 ? "" : "es"}
+                    </span>
+                  </button>
+                  {open && (
+                    <div className="space-y-3 px-3 pb-3">
+                      {group.matches.map((km) => {
+                        const finished = km.match.status === "finished" && km.match.homeScore != null && km.match.awayScore != null;
+                        return (
                 <div key={km.matchNumber} className="bg-gray-900 border border-gray-800 rounded-xl p-4">
                   <div className="flex items-center justify-between mb-3">
                     <div className="flex items-center gap-2 text-sm">
-                      <span className="text-gray-500">{ROUND_LABELS[km.round] ?? km.round}</span>
                       {/* Date from the official static schedule (team-independent), same as the bracket. */}
                       <span className="text-gray-600 text-xs">{formatKickoff(koScheduledKickoff(km.matchNumber) ?? km.match.kickoff)}</span>
                       <span className="text-gray-600 text-xs uppercase tracking-wide">Actual</span>
@@ -335,6 +375,11 @@ export default function SharedPredictions({ roomId }: { roomId: string }) {
                       })}
                     </tbody>
                   </table>
+                </div>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
               );
             })
