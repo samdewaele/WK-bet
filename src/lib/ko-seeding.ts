@@ -503,36 +503,83 @@ export async function resetKOBracket(): Promise<void> {
 
 /**
  * Rebuild the R16→Final team slots from scratch, authoritatively, using the
- * current corrected tree (NEXT_ROUND_SLOT). Clears every downstream slot, then
- * re-propagates ONLY from genuinely finished KO matches in bracket order. This
- * heals slots left holding stale/wrong teams by the old (buggy) propagation: a
- * round that hasn't been decided yet correctly ends up empty (TBD) rather than
+ * current corrected tree (NEXT_ROUND_SLOT). The R32 teams are the fixed base
+ * (seeded from group qualifiers / the real draw); every downstream slot is
+ * recomputed purely from finished results, walking the bracket bottom-up. This
+ * heals slots left holding stale/wrong teams by the old propagation: a round
+ * that hasn't been decided yet correctly ends up empty (TBD) rather than
  * showing phantom teams. Real tournament only — simulation overlays its own
  * bracket via SimResult.
+ *
+ * Why not reset-then-read: an earlier version cleared the downstream slots and
+ * then re-queried finished matches filtered on `homeTeamId != null`. That query
+ * ran AFTER the reset, so it silently excluded every just-cleared R16/QF/SF row
+ * and only ever propagated R32→R16 — leaving the QF (and beyond) stuck at TBD
+ * even once the R16 was complete. Propagating from an in-memory snapshot keeps a
+ * match's recomputed teams available to the round it feeds.
  */
 export async function repropagateKOBracket(): Promise<void> {
-  await resetKOBracket();
-  const finished = await db.match.findMany({
-    where: {
-      round: { in: ["R32", "R16", "QF", "SF"] },
-      status: "finished",
-      homeTeamId: { not: null },
-      awayTeamId: { not: null },
-      homeScore: { not: null },
-      awayScore: { not: null },
-    },
+  const koMatches = await db.match.findMany({
+    where: { round: { in: ["R32", "R16", "QF", "SF", "3rd", "Final"] } },
     orderBy: { matchNumber: "asc" },
-    select: { matchNumber: true, homeTeamId: true, awayTeamId: true, homeScore: true, awayScore: true, penaltyWinner: true },
+    select: {
+      id: true, matchNumber: true, round: true, status: true,
+      homeTeamId: true, awayTeamId: true, homeScore: true, awayScore: true, penaltyWinner: true,
+    },
   });
-  for (const m of finished) {
-    if (m.matchNumber == null || m.homeScore == null || m.awayScore == null) continue;
+
+  // R32 slots are trusted as-is; everything downstream starts blank and is filled
+  // only via propagation, so an undecided round stays TBD instead of showing
+  // phantom teams left over from a wrong earlier binding.
+  const slots = new Map<number, { home: string | null; away: string | null }>();
+  for (const m of koMatches) {
+    if (m.matchNumber == null) continue;
+    slots.set(
+      m.matchNumber,
+      m.round === "R32" ? { home: m.homeTeamId, away: m.awayTeamId } : { home: null, away: null },
+    );
+  }
+
+  // Ascending matchNumber IS topological order — every feeder has a lower number
+  // than the match it feeds (73–88 R32 → 89–96 R16 → 97–100 QF → 101–102 SF →
+  // 103/104), so a match's slots are final by the time we read them here.
+  for (const m of koMatches) {
+    if (m.matchNumber == null || m.status !== "finished" || m.homeScore == null || m.awayScore == null) continue;
     // Canonical winner rule (penalties decide a level score) — shared with sync.
     const side = koWinnerSide(m.homeScore, m.awayScore, m.penaltyWinner);
     if (!side) continue; // level score with no recorded shootout winner → undecided
-    const winnerId = side === "home" ? m.homeTeamId : m.awayTeamId;
-    const loserId = side === "home" ? m.awayTeamId : m.homeTeamId;
-    if (winnerId) await populateNextRoundSlot(m.matchNumber, winnerId, loserId);
+    const cur = slots.get(m.matchNumber);
+    if (!cur) continue;
+    const winnerId = side === "home" ? cur.home : cur.away;
+    const loserId = side === "home" ? cur.away : cur.home;
+    const next = NEXT_ROUND_SLOT[m.matchNumber];
+    if (!next) continue;
+    if (winnerId) {
+      const w = slots.get(next.winner.matchNumber);
+      if (w) w[next.winner.side] = winnerId;
+    }
+    if (next.loser && loserId) {
+      const l = slots.get(next.loser.matchNumber);
+      if (l) l[next.loser.side] = loserId;
+    }
   }
+
+  // Persist the recomputed R16→Final slots. R32 is the untouched base. Only write
+  // a slot whose teams actually changed, so it's a no-op once correct and it
+  // heals a stale slot back to TBD (null) when its round is no longer decided.
+  await Promise.all(
+    koMatches
+      .filter((m) => m.round !== "R32" && m.matchNumber != null)
+      .map((m) => {
+        const s = slots.get(m.matchNumber!)!;
+        if (m.homeTeamId === s.home && m.awayTeamId === s.away) return null;
+        return db.match.update({
+          where: { id: m.id },
+          data: { homeTeamId: s.home, awayTeamId: s.away },
+        });
+      })
+      .filter((p): p is ReturnType<typeof db.match.update> => p !== null),
+  );
 }
 
 // ---------------------------------------------------------------------------
