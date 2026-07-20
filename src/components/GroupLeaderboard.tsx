@@ -1,7 +1,36 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import Image from "next/image";
+
+/**
+ * Player avatar. Loads the remote image directly (not through next/image's
+ * optimizer, which returns a broken image for these avatar hosts in this
+ * deployment) and falls back to an initial-letter badge if the URL fails —
+ * mirroring how TeamFlag degrades.
+ */
+function Avatar({ image, name }: { image: string | null; name: string | null }) {
+  const [failed, setFailed] = useState(false);
+  if (image && !failed) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={image}
+        alt={name ?? "User"}
+        width={32}
+        height={32}
+        className="w-8 h-8 rounded-full object-cover"
+        loading="lazy"
+        referrerPolicy="no-referrer"
+        onError={() => setFailed(true)}
+      />
+    );
+  }
+  return (
+    <div className="w-8 h-8 rounded-full bg-amber-400 flex items-center justify-center text-gray-900 font-bold text-xs">
+      {name?.[0]?.toUpperCase() ?? "?"}
+    </div>
+  );
+}
 
 type LeaderboardEntry = {
   rank: number;
@@ -196,19 +225,7 @@ export default function GroupLeaderboard({ roomId, currentUserId, totalPot, room
                     </td>
                     <td className="py-4 pr-4">
                       <div className="flex items-center gap-3">
-                        {entry.image ? (
-                          <Image
-                            src={entry.image}
-                            alt={entry.name ?? "User"}
-                            width={32}
-                            height={32}
-                            className="rounded-full"
-                          />
-                        ) : (
-                          <div className="w-8 h-8 rounded-full bg-amber-400 flex items-center justify-center text-gray-900 font-bold text-xs">
-                            {entry.name?.[0]?.toUpperCase() ?? "?"}
-                          </div>
-                        )}
+                        <Avatar image={entry.image} name={entry.name} />
                         <span className={`font-medium ${isCurrentUser ? "text-amber-400" : "text-white"}`}>
                           {entry.name ?? "Unknown"}
                           {isCurrentUser && <span className="text-xs text-gray-500 ml-1">(you)</span>}
