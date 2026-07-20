@@ -8,6 +8,7 @@ type Entry = {
   userName: string | null;
   userImage: string | null;
   answer: string;
+  isWinner?: boolean;
 };
 
 type UberBet = {
@@ -16,6 +17,7 @@ type UberBet = {
   description: string | null;
   status: "proposed" | "open" | "settled";
   winnerEntryId: string | null;
+  winnerEntryIds?: string[];
   prize?: number | null;
   createdAt: string;
   proposedByUserId: string | null;
@@ -61,9 +63,9 @@ export default function SideBetsPanel({ roomId, currentUserId, isManager, tourna
   const [newDesc, setNewDesc] = useState("");
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState("");
-  const [pendingSettle, setPendingSettle] = useState<{
-    betId: string; entryId: string; entryAnswer: string; entryName: string;
-  } | null>(null);
+  // Winners the manager has selected while settling a bet (betId → set of entry
+  // ids). Supports ties: several entries can be marked before confirming.
+  const [winnerDrafts, setWinnerDrafts] = useState<Record<string, Set<string>>>({});
   const [editingBetId, setEditingBetId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState("");
   const [editDesc, setEditDesc] = useState("");
@@ -115,6 +117,30 @@ export default function SideBetsPanel({ roomId, currentUserId, isManager, tourna
     } finally {
       setActing((p) => ({ ...p, [betId]: false }));
     }
+  }
+
+  function toggleWinner(betId: string, entryId: string) {
+    setWinnerDrafts((prev) => {
+      const next = new Set(prev[betId] ?? []);
+      if (next.has(entryId)) next.delete(entryId);
+      else next.add(entryId);
+      return { ...prev, [betId]: next };
+    });
+  }
+
+  function clearWinnerDraft(betId: string) {
+    setWinnerDrafts((prev) => {
+      const next = { ...prev };
+      delete next[betId];
+      return next;
+    });
+  }
+
+  async function handleSettle(betId: string) {
+    const ids = [...(winnerDrafts[betId] ?? [])];
+    if (ids.length === 0) return;
+    await handlePatch({ sideBetId: betId, winnerEntryIds: ids }, betId);
+    clearWinnerDraft(betId);
   }
 
   function startEdit(bet: UberBet) {
@@ -210,7 +236,11 @@ export default function SideBetsPanel({ roomId, currentUserId, isManager, tourna
         const isSettled = bet.status === "settled";
         const isProposed = bet.status === "proposed";
         const isOpen = bet.status === "open";
-        const winnerEntry = bet.entries.find((e) => e.id === bet.winnerEntryId);
+        const winnerIds = new Set(
+          bet.winnerEntryIds ?? (bet.winnerEntryId ? [bet.winnerEntryId] : []),
+        );
+        const winnerEntries = bet.entries.filter((e) => e.isWinner || winnerIds.has(e.id));
+        const draft = winnerDrafts[bet.id] ?? new Set<string>();
         const isActing = acting[bet.id];
         const otherEntryCount = bet.entryCount - (myEntry ? 1 : 0);
 
@@ -319,18 +349,18 @@ export default function SideBetsPanel({ roomId, currentUserId, isManager, tourna
               </div>
             )}
 
-            {/* Settled winner banner */}
-            {isSettled && winnerEntry && (
+            {/* Settled winner banner — may list several winners on a tie */}
+            {isSettled && winnerEntries.length > 0 && (
               <div className="bg-green-500/10 border border-green-500/20 rounded-lg p-3 mb-4 text-sm flex items-center justify-between gap-2">
                 <span>
-                  <span className="text-gray-400">Winner: </span>
+                  <span className="text-gray-400">{winnerEntries.length > 1 ? "Winners: " : "Winner: "}</span>
                   <span className="text-green-400 font-semibold">
-                    {winnerEntry.userName ?? "Unknown"} — &quot;{winnerEntry.answer}&quot;
+                    {winnerEntries.map((w) => `${w.userName ?? "Unknown"} — "${w.answer}"`).join(", ")}
                   </span>
                 </span>
                 {bet.prize != null && (
                   <span className="shrink-0 text-xs font-bold bg-amber-400/20 text-amber-300 px-2 py-1 rounded-full">
-                    won €{bet.prize.toFixed(2)}
+                    {winnerEntries.length > 1 ? "each won" : "won"} €{bet.prize.toFixed(2)}
                   </span>
                 )}
               </div>
@@ -374,25 +404,34 @@ export default function SideBetsPanel({ roomId, currentUserId, isManager, tourna
                 </div>
                 {isManager && isOpen && (
                   <p className="text-xs text-blue-400/70 mb-2">
-                    Click <strong>Set winner</strong> next to the correct entry to settle this bet.
+                    Select the winning entr{draft.size === 1 ? "y" : "ies"} — pick more than one for a tie — then confirm below.
                   </p>
                 )}
                 <div className="space-y-1.5">
                   {bet.entries.map((entry) => {
-                    const isWinner = entry.id === bet.winnerEntryId;
-                    const isPending = pendingSettle?.betId === bet.id && pendingSettle?.entryId === entry.id;
+                    const isWinner = entry.isWinner || winnerIds.has(entry.id);
+                    const isSelectable = isManager && isOpen;
+                    const isSelected = draft.has(entry.id);
                     return (
                       <div
                         key={entry.id}
+                        onClick={isSelectable ? () => toggleWinner(bet.id, entry.id) : undefined}
                         className={`flex items-center justify-between text-sm rounded-lg px-3 py-2.5 ${
+                          isSelectable ? "cursor-pointer" : ""
+                        } ${
                           isWinner
                             ? "bg-green-500/10 border border-green-500/30"
-                            : isPending
-                              ? "bg-amber-500/10 border border-amber-500/30"
+                            : isSelected
+                              ? "bg-amber-500/10 border border-amber-500/40"
                               : "bg-gray-800"
                         }`}
                       >
                         <span className="text-gray-300 flex-1 min-w-0 mr-2">
+                          {isSelectable && (
+                            <span className={`mr-2 inline-flex items-center justify-center w-4 h-4 rounded border text-[10px] align-middle ${
+                              isSelected ? "bg-amber-400 border-amber-400 text-gray-900" : "border-gray-600 text-transparent"
+                            }`}>✓</span>
+                          )}
                           <span className="font-medium text-white">{entry.userName ?? "?"}</span>
                           {entry.userId === currentUserId && (
                             <span className="text-amber-400 ml-1 text-xs">(you)</span>
@@ -400,42 +439,32 @@ export default function SideBetsPanel({ roomId, currentUserId, isManager, tourna
                           {isWinner && <span className="ml-1.5 text-green-400 text-xs font-semibold">🏆 Winner</span>}
                           <span className="text-gray-400">: {entry.answer}</span>
                         </span>
-                        {isManager && isOpen && !isPending && (
-                          <button
-                            onClick={() => setPendingSettle({
-                              betId: bet.id, entryId: entry.id,
-                              entryAnswer: entry.answer, entryName: entry.userName ?? "?",
-                            })}
-                            className="text-xs bg-gray-700 hover:bg-green-700 text-gray-300 hover:text-white px-2.5 py-1 rounded-lg transition-colors shrink-0 border border-gray-600 hover:border-green-600"
-                          >
-                            Set winner
-                          </button>
-                        )}
-                        {isManager && isOpen && isPending && (
-                          <div className="flex items-center gap-1.5 shrink-0">
-                            <span className="text-xs text-amber-300">Confirm?</span>
-                            <button
-                              onClick={async () => {
-                                setPendingSettle(null);
-                                await handlePatch({ sideBetId: bet.id, winnerEntryId: entry.id }, bet.id);
-                              }}
-                              disabled={isActing}
-                              className="text-xs bg-green-700 hover:bg-green-600 disabled:opacity-40 text-white px-2.5 py-1 rounded-lg transition-colors font-semibold"
-                            >
-                              {isActing ? "…" : "Yes, winner"}
-                            </button>
-                            <button
-                              onClick={() => setPendingSettle(null)}
-                              className="text-xs bg-gray-700 hover:bg-gray-600 text-gray-400 px-2 py-1 rounded-lg transition-colors"
-                            >
-                              Cancel
-                            </button>
-                          </div>
-                        )}
                       </div>
                     );
                   })}
                 </div>
+                {/* Settle bar — confirm the selected winner(s) */}
+                {isManager && isOpen && draft.size > 0 && (
+                  <div className="flex items-center gap-2 mt-3">
+                    <button
+                      onClick={() => handleSettle(bet.id)}
+                      disabled={isActing}
+                      className="text-xs bg-green-700 hover:bg-green-600 disabled:opacity-40 text-white font-semibold px-3 py-1.5 rounded-lg transition-colors"
+                    >
+                      {isActing ? "Settling…" : `Settle with ${draft.size} winner${draft.size === 1 ? "" : "s"}`}
+                    </button>
+                    <button
+                      onClick={() => clearWinnerDraft(bet.id)}
+                      disabled={isActing}
+                      className="text-xs text-gray-400 hover:text-white px-2 py-1.5 rounded-lg transition-colors"
+                    >
+                      Clear
+                    </button>
+                    {draft.size > 1 && (
+                      <span className="text-xs text-gray-500">Tie — the bet&apos;s prize is split equally.</span>
+                    )}
+                  </div>
+                )}
               </div>
             )}
           </div>

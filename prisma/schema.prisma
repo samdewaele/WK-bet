@@ -229,6 +229,11 @@ model SideBetEntry {
   sideBetId String
   userId    String
   answer    String
+  // A settled bet can have more than one winning entry (a tie); each winner
+  // splits that bet's share of the Uber Pot. SideBet.winnerEntryId is kept as
+  // the "primary" winner for backward compatibility, but this flag is the
+  // source of truth for who gets paid.
+  isWinner  Boolean  @default(false)
   sideBet   SideBet  @relation(fields: [sideBetId], references: [id], onDelete: Cascade)
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   createdAt DateTime @default(now())

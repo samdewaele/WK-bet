@@ -267,14 +267,20 @@ export async function GET(
         .filter((sb) => sb.status !== "proposed")
         .map((sb) => {
           const result = uber.byBet.get(sb.id);
+          const winnerEntryIds = result?.winnerEntryIds ?? (sb.winnerEntryId ? [sb.winnerEntryId] : []);
           return {
             id: sb.id,
             title: sb.title,
             description: sb.description,
             status: sb.status,
+            // All winning entries/users (a tie can have several); singular fields
+            // kept for backward compatibility.
             winnerEntryId: sb.winnerEntryId,
+            winnerEntryIds,
             winnerUserId: result?.winnerUserId ?? null,
-            prize: sb.status === "settled" ? (result?.prize ?? 0) : null,
+            winnerUserIds: result?.winnerUserIds ?? [],
+            // Per-winner payout (the bet's share split across tied winners).
+            prize: sb.status === "settled" ? (result?.prizePerWinner ?? 0) : null,
             entries: sb.entries.map((e) => ({
               entryId: e.id,
               userId: e.userId,

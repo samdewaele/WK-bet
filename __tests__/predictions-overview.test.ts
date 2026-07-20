@@ -120,7 +120,10 @@ it("includes Uber Pot bets with winner + prize once settled", async () => {
   ]);
   mockUber.mockResolvedValue({
     uberPot: 40, accumulatedUberPot: 40, prizePerSettledBet: 40, settledCount: 1,
-    byBet: new Map([["b1", { winnerEntryId: "e1", winnerUserId: "u1", prize: 40 }]]),
+    byBet: new Map([["b1", {
+      winnerEntryIds: ["e1"], winnerUserIds: ["u1"], winnerEntryId: "e1", winnerUserId: "u1",
+      betShare: 40, prizePerWinner: 40, prize: 40,
+    }]]),
     byUser: new Map([["u1", 40]]),
   });
 

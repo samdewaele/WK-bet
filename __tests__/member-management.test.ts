@@ -15,7 +15,7 @@ vi.mock("@/lib/db", () => ({
     prediction: { deleteMany: vi.fn() },
     kOPrediction: { deleteMany: vi.fn() },
     groupStandingPrediction: { deleteMany: vi.fn() },
-    sideBet: { updateMany: vi.fn() },
+    sideBet: { updateMany: vi.fn(), findMany: vi.fn(), update: vi.fn() },
     sideBetEntry: { findMany: vi.fn(), deleteMany: vi.fn() },
     p2PSideBet: { updateMany: vi.fn() },
   },
@@ -120,6 +120,35 @@ describe("DELETE /api/groups/[roomId]/members/[targetUserId]", () => {
     const res = await DELETE({} as Request, { params: PARAMS("u2") });
     expect(res.status).toBe(200);
     expect(mockDb.roomMember.delete).toHaveBeenCalled();
+  });
+
+  it("re-opens a settled bet when the removed member was its SOLE winner", async () => {
+    mockAuth.mockResolvedValue({ user: { id: "u1" } } as never);
+    mockDb.room.findUnique.mockResolvedValue(baseRoom);
+    mockDb.sideBetEntry.findMany.mockResolvedValue([{ sideBetId: "b1" }]);
+    mockDb.sideBet.findMany.mockResolvedValue([
+      { id: "b1", winnerEntryId: "e-u2", entries: [{ id: "e-u2", userId: "u2" }] },
+    ]);
+    await DELETE({} as Request, { params: PARAMS("u2") });
+    expect(mockDb.sideBet.update).toHaveBeenCalledWith({
+      where: { id: "b1" },
+      data: { winnerEntryId: null, status: "open" },
+    });
+  });
+
+  it("keeps a tied bet settled and promotes a survivor when a co-winner is removed", async () => {
+    mockAuth.mockResolvedValue({ user: { id: "u1" } } as never);
+    mockDb.room.findUnique.mockResolvedValue(baseRoom);
+    mockDb.sideBetEntry.findMany.mockResolvedValue([{ sideBetId: "b1" }]);
+    // u2 was the primary winner but u3 also won the tie → stay settled, promote u3.
+    mockDb.sideBet.findMany.mockResolvedValue([
+      { id: "b1", winnerEntryId: "e-u2", entries: [{ id: "e-u2", userId: "u2" }, { id: "e-u3", userId: "u3" }] },
+    ]);
+    await DELETE({} as Request, { params: PARAMS("u2") });
+    expect(mockDb.sideBet.update).toHaveBeenCalledWith({
+      where: { id: "b1" },
+      data: { winnerEntryId: "e-u3" },
+    });
   });
 
   it("cascades predictions and side bet data on removal", async () => {

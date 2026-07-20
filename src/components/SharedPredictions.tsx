@@ -52,6 +52,7 @@ type UberBet = {
   description: string | null;
   status: "open" | "settled";
   winnerEntryId: string | null;
+  winnerEntryIds?: string[];
   winnerUserId: string | null;
   prize: number | null;
   entries: UberEntry[];
@@ -401,6 +402,7 @@ export default function SharedPredictions({ roomId }: { roomId: string }) {
           )}
           {data.uberPot.bets.map((bet) => {
             const settled = bet.status === "settled";
+            const winnerIds = new Set(bet.winnerEntryIds ?? (bet.winnerEntryId ? [bet.winnerEntryId] : []));
             return (
               <div key={bet.id} className="bg-gray-900 border border-gray-800 rounded-xl p-4">
                 <div className="flex items-center justify-between mb-1">
@@ -420,7 +422,7 @@ export default function SharedPredictions({ roomId }: { roomId: string }) {
                   <table className="w-full text-xs mt-2">
                     <tbody>
                       {bet.entries.map((e) => {
-                        const won = settled && e.entryId === bet.winnerEntryId;
+                        const won = settled && winnerIds.has(e.entryId);
                         return (
                           <tr key={e.entryId} className={`border-t border-gray-800 ${won ? "bg-amber-400/5" : ""}`}>
                             <td className="px-2 py-1.5 text-white font-medium whitespace-nowrap">

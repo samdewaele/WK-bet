@@ -11,7 +11,9 @@ vi.mock("@/lib/db", () => ({
   db: {
     room: { findUnique: vi.fn() },
     sideBet: { findFirst: vi.fn(), update: vi.fn(), delete: vi.fn() },
-    sideBetEntry: { findUnique: vi.fn(), deleteMany: vi.fn() },
+    sideBetEntry: { findUnique: vi.fn(), findMany: vi.fn(), deleteMany: vi.fn(), updateMany: vi.fn() },
+    // Settle runs the winner flag updates + status change in one transaction.
+    $transaction: vi.fn((ops: unknown[]) => Promise.all(ops as Promise<unknown>[])),
   },
 }));
 
@@ -301,11 +303,31 @@ describe("edit", () => {
 
 describe("settle (set winner)", () => {
   it("manager can settle an open bet by picking a winner entry", async () => {
-    mockDb.sideBetEntry.findUnique.mockResolvedValue({ id: "e1", sideBetId: "sb1" });
-    mockDb.sideBet.update.mockResolvedValue({ id: "sb1", status: "settled", winnerEntryId: "e1" });
+    mockDb.sideBetEntry.findMany.mockResolvedValue([{ id: "e1", sideBetId: "sb1" }]);
     const res = await PATCH(req({ sideBetId: "sb1", winnerEntryId: "e1" }), PARAMS);
     expect(res.status).toBe(200);
-    expect(await res.json()).toMatchObject({ status: "settled", winnerEntryId: "e1" });
+    expect(await res.json()).toMatchObject({ status: "settled", winnerEntryId: "e1", winnerEntryIds: ["e1"] });
+    // Winners flagged + bet marked settled inside one transaction.
+    expect(mockDb.$transaction).toHaveBeenCalledOnce();
+    expect(mockDb.sideBetEntry.updateMany).toHaveBeenCalledWith({ where: { id: { in: ["e1"] } }, data: { isWinner: true } });
+  });
+
+  it("manager can settle with multiple winners on a tie", async () => {
+    mockDb.sideBetEntry.findMany.mockResolvedValue([
+      { id: "e1", sideBetId: "sb1" },
+      { id: "e2", sideBetId: "sb1" },
+    ]);
+    const res = await PATCH(req({ sideBetId: "sb1", winnerEntryIds: ["e1", "e2"] }), PARAMS);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ status: "settled", winnerEntryId: "e1", winnerEntryIds: ["e1", "e2"] });
+    expect(mockDb.sideBetEntry.updateMany).toHaveBeenCalledWith({ where: { id: { in: ["e1", "e2"] } }, data: { isWinner: true } });
+  });
+
+  it("de-duplicates repeated winner ids", async () => {
+    mockDb.sideBetEntry.findMany.mockResolvedValue([{ id: "e1", sideBetId: "sb1" }]);
+    const res = await PATCH(req({ sideBetId: "sb1", winnerEntryIds: ["e1", "e1"] }), PARAMS);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ winnerEntryIds: ["e1"] });
   });
 
   it("non-manager cannot settle", async () => {
@@ -329,14 +351,14 @@ describe("settle (set winner)", () => {
     expect((await res.json()).error).toMatch(/proposal/i);
   });
 
-  it("returns 404 if winner entry does not belong to this bet", async () => {
-    mockDb.sideBetEntry.findUnique.mockResolvedValue({ id: "e1", sideBetId: "other-bet" });
+  it("returns 404 if a winner entry does not belong to this bet", async () => {
+    mockDb.sideBetEntry.findMany.mockResolvedValue([{ id: "e1", sideBetId: "other-bet" }]);
     const res = await PATCH(req({ sideBetId: "sb1", winnerEntryId: "e1" }), PARAMS);
     expect(res.status).toBe(404);
   });
 
-  it("returns 404 if winner entry does not exist", async () => {
-    mockDb.sideBetEntry.findUnique.mockResolvedValue(null);
+  it("returns 404 if a winner entry does not exist", async () => {
+    mockDb.sideBetEntry.findMany.mockResolvedValue([]);
     const res = await PATCH(req({ sideBetId: "sb1", winnerEntryId: "ghost" }), PARAMS);
     expect(res.status).toBe(404);
   });

@@ -44,14 +44,20 @@ export async function GET(_req: Request, { params }: Params) {
       const revealAll = locked || sb.status === "settled";
       const visibleEntries = revealAll ? sb.entries : myEntry ? [myEntry] : [];
 
+      const result = uber.byBet.get(sb.id);
+      const winnerEntryIds = result?.winnerEntryIds ?? (sb.winnerEntryId ? [sb.winnerEntryId] : []);
       return {
         id: sb.id,
         title: sb.title,
         description: sb.description,
         status: sb.status,
         winnerEntryId: sb.winnerEntryId,
-        // Money the winner won — only known once the bet is settled.
-        prize: sb.status === "settled" ? (uber.byBet.get(sb.id)?.prize ?? 0) : null,
+        // All winning entries (a tie can have several). Legacy single-winner
+        // clients keep reading winnerEntryId.
+        winnerEntryIds,
+        // Money EACH winner won — only known once the bet is settled. On a tie
+        // the bet's share is split, so this is the per-winner amount.
+        prize: sb.status === "settled" ? (result?.prizePerWinner ?? 0) : null,
         createdAt: sb.createdAt.toISOString(),
         proposedByUserId: sb.proposedByUserId,
         proposedByName: sb.proposedBy?.name ?? null,
@@ -63,6 +69,7 @@ export async function GET(_req: Request, { params }: Params) {
           userName: e.user.name,
           userImage: e.user.image,
           answer: e.answer,
+          isWinner: e.isWinner,
         })),
       };
   });
@@ -120,6 +127,7 @@ export async function POST(req: NextRequest, { params }: Params) {
     description: sideBet.description,
     status: sideBet.status,
     winnerEntryId: null,
+    winnerEntryIds: [],
     createdAt: sideBet.createdAt.toISOString(),
     proposedByUserId: sideBet.proposedByUserId,
     proposedByName: sideBet.proposedBy?.name ?? null,
@@ -139,7 +147,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   const ctx = await resolveRoom(roomId, userId, session.user.role ?? "");
   if (!ctx) return NextResponse.json({ error: "Room not found" }, { status: 404 });
 
-  let body: { sideBetId?: string; action?: "accept" | "reject" | "cancel" | "edit"; winnerEntryId?: string; title?: string; description?: string };
+  let body: { sideBetId?: string; action?: "accept" | "reject" | "cancel" | "edit"; winnerEntryId?: string; winnerEntryIds?: string[]; title?: string; description?: string };
   try { body = await req.json(); } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
@@ -200,18 +208,33 @@ export async function PATCH(req: NextRequest, { params }: Params) {
 
   if (!ctx.isManager) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
-  if (body.winnerEntryId) {
+  // Settle: one or more winning entries (a tie can have several). Accepts the
+  // new winnerEntryIds array or the legacy single winnerEntryId.
+  const winnerIds = [
+    ...new Set(
+      (body.winnerEntryIds ?? (body.winnerEntryId ? [body.winnerEntryId] : [])).filter(
+        (id): id is string => typeof id === "string" && id.length > 0,
+      ),
+    ),
+  ];
+  if (winnerIds.length > 0) {
     if (sideBet.status === "settled") return NextResponse.json({ error: "Already settled" }, { status: 400 });
     if (sideBet.status === "proposed") return NextResponse.json({ error: "Accept the proposal first" }, { status: 400 });
-    const entry = await db.sideBetEntry.findUnique({ where: { id: body.winnerEntryId } });
-    if (!entry || entry.sideBetId !== body.sideBetId) {
+    const entries = await db.sideBetEntry.findMany({ where: { id: { in: winnerIds } } });
+    if (entries.length !== winnerIds.length || entries.some((e) => e.sideBetId !== body.sideBetId)) {
       return NextResponse.json({ error: "Winner entry not found" }, { status: 404 });
     }
-    const updated = await db.sideBet.update({
-      where: { id: body.sideBetId },
-      data: { status: "settled", winnerEntryId: body.winnerEntryId },
-    });
-    return NextResponse.json({ id: updated.id, status: updated.status, winnerEntryId: updated.winnerEntryId });
+    // Flag the winning entries (and clear any others on this bet), then settle.
+    // winnerEntryId keeps the first winner for single-winner callers.
+    await db.$transaction([
+      db.sideBetEntry.updateMany({ where: { sideBetId: body.sideBetId }, data: { isWinner: false } }),
+      db.sideBetEntry.updateMany({ where: { id: { in: winnerIds } }, data: { isWinner: true } }),
+      db.sideBet.update({
+        where: { id: body.sideBetId },
+        data: { status: "settled", winnerEntryId: winnerIds[0] },
+      }),
+    ]);
+    return NextResponse.json({ id: body.sideBetId, status: "settled", winnerEntryId: winnerIds[0], winnerEntryIds: winnerIds });
   }
 
   return NextResponse.json({ error: "No valid action" }, { status: 400 });

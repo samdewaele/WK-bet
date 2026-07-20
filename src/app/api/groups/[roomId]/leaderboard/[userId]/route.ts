@@ -16,7 +16,7 @@ export async function GET(
     include: {
       members: { select: { userId: true, excludedFromPot: true } },
       sideBets: {
-        include: { entries: { select: { id: true, userId: true } } },
+        include: { entries: { select: { id: true, userId: true, isWinner: true } } },
       },
     },
   });
@@ -67,11 +67,17 @@ export async function GET(
   const prizeEach = prizePerSideBet(uberPot, settledSideBets.length);
 
   const sideBetWins = settledSideBets
-    .filter((sb) => {
-      if (!sb.winnerEntryId) return false;
-      return sb.entries.find((e) => e.id === sb.winnerEntryId)?.userId === targetUserId;
+    .map((sb) => {
+      // A bet can have several winners (a tie); each gets an equal split.
+      let winners = sb.entries.filter((e) => e.isWinner);
+      if (winners.length === 0 && sb.winnerEntryId) {
+        const legacy = sb.entries.find((e) => e.id === sb.winnerEntryId);
+        if (legacy) winners = [legacy];
+      }
+      if (!winners.some((w) => w.userId === targetUserId)) return null;
+      return { betTitle: sb.title, earnedAmount: prizeEach / winners.length };
     })
-    .map((sb) => ({ betTitle: sb.title, earnedAmount: prizeEach }));
+    .filter((w): w is { betTitle: string; earnedAmount: number } => w !== null);
 
   const toCents = (v: number) => Math.round(v * 100);
   const fromCents = (c: number) => c / 100;

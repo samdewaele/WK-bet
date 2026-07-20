@@ -88,18 +88,34 @@ export async function DELETE(_req: Request, { params }: Params) {
   await db.kOPrediction.deleteMany({ where: { userId: targetUserId, roomId } });
   await db.groupStandingPrediction.deleteMany({ where: { userId: targetUserId, roomId } });
 
-  // Before deleting entries: un-settle any side bet whose winner was this member
-  // (so the prize doesn't silently vanish from the leaderboard)
-  const memberEntries = await db.sideBetEntry.findMany({
-    where: { userId: targetUserId, sideBet: { roomId } },
-    select: { id: true },
+  // Before deleting entries: reconcile any side bet this member won. A bet can
+  // have several winners (a tie) — only un-settle it when this member was the
+  // SOLE winner; otherwise keep it settled with the remaining winners (and
+  // promote a new primary winner if this member held that slot). This stops the
+  // prize silently vanishing while not wrongly re-opening a still-decided tie.
+  const wonEntries = await db.sideBetEntry.findMany({
+    where: { userId: targetUserId, isWinner: true, sideBet: { roomId } },
+    select: { sideBetId: true },
   });
-  if (memberEntries.length > 0) {
-    const entryIds = memberEntries.map((e) => e.id);
-    await db.sideBet.updateMany({
-      where: { roomId, winnerEntryId: { in: entryIds } },
-      data: { winnerEntryId: null, status: "open" },
+  if (wonEntries.length > 0) {
+    const betIds = [...new Set(wonEntries.map((e) => e.sideBetId))];
+    const affectedBets = await db.sideBet.findMany({
+      where: { id: { in: betIds } },
+      select: {
+        id: true,
+        winnerEntryId: true,
+        entries: { where: { isWinner: true }, select: { id: true, userId: true } },
+      },
     });
+    for (const bet of affectedBets) {
+      const remaining = bet.entries.filter((e) => e.userId !== targetUserId);
+      if (remaining.length === 0) {
+        await db.sideBet.update({ where: { id: bet.id }, data: { winnerEntryId: null, status: "open" } });
+      } else if (!remaining.some((e) => e.id === bet.winnerEntryId)) {
+        // The removed member held the primary winner slot — promote a survivor.
+        await db.sideBet.update({ where: { id: bet.id }, data: { winnerEntryId: remaining[0].id } });
+      }
+    }
   }
   await db.sideBetEntry.deleteMany({ where: { userId: targetUserId, sideBet: { roomId } } });
 

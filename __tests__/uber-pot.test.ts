@@ -18,7 +18,7 @@ const mockDb = db as any;
 function room(opts: {
   fee?: number;
   members?: { userId: string; excludedFromPot?: boolean }[];
-  sideBets?: { id: string; status: string; winnerEntryId: string | null; entries: { id: string; userId: string }[] }[];
+  sideBets?: { id: string; status: string; winnerEntryId: string | null; entries: { id: string; userId: string; isWinner?: boolean }[] }[];
 }) {
   return {
     entryFee: opts.fee ?? 10,
@@ -63,9 +63,38 @@ describe("computeUberPotResults", () => {
     expect(r.uberPot).toBe(40);
     expect(r.settledCount).toBe(2);
     expect(r.prizePerSettledBet).toBe(20);
-    expect(r.byBet.get("b1")).toEqual({ winnerEntryId: "e1", winnerUserId: "u1", prize: 20 });
+    expect(r.byBet.get("b1")).toMatchObject({
+      winnerEntryIds: ["e1"], winnerUserIds: ["u1"], winnerEntryId: "e1", winnerUserId: "u1",
+      betShare: 20, prizePerWinner: 20, prize: 20,
+    });
     expect(r.byUser.get("u1")).toBe(20);
     expect(r.byUser.get("u2")).toBe(20);
+  });
+
+  it("splits a single bet's share equally across tied winners", async () => {
+    mockDb.room.findUnique.mockResolvedValue(
+      room({
+        fee: 10, // totalPot 40 → single settled bet gets the whole 40
+        sideBets: [
+          {
+            id: "b1", status: "settled", winnerEntryId: "e1",
+            entries: [
+              { id: "e1", userId: "u1", isWinner: true },
+              { id: "e2", userId: "u2", isWinner: true },
+              { id: "e3", userId: "u3", isWinner: false },
+            ],
+          },
+        ],
+      }),
+    );
+    const r = await computeUberPotResults("r1");
+    const b1 = r.byBet.get("b1")!;
+    expect(b1.winnerUserIds).toEqual(["u1", "u2"]);
+    expect(b1.betShare).toBe(40);
+    expect(b1.prizePerWinner).toBe(20); // 40 split two ways
+    expect(r.byUser.get("u1")).toBe(20);
+    expect(r.byUser.get("u2")).toBe(20);
+    expect(r.byUser.has("u3")).toBe(false);
   });
 
   it("ignores open/proposed bets when dividing the pot", async () => {

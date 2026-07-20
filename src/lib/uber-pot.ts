@@ -2,11 +2,24 @@ import { db } from "@/lib/db";
 import { calculatePot, prizePerSideBet, KO_MATCH_WEIGHT, type KORound } from "@/lib/pot";
 
 /**
- * Per-bet settlement result: which entry won and how much that entry earned.
+ * Per-bet settlement result: which entries won and how much each one earned.
+ *
+ * A bet can have several winners (a tie). The bet's equal share of the Uber Pot
+ * (`betShare`) is split evenly across them, so `prizePerWinner` is what each
+ * individual winner actually receives. `winnerEntryId`/`winnerUserId` expose the
+ * first winner for single-winner callers that haven't been updated.
  */
 export type BetResult = {
+  winnerEntryIds: string[];
+  winnerUserIds: string[];
+  /** Convenience: the first winner (or null). */
   winnerEntryId: string | null;
   winnerUserId: string | null;
+  /** This bet's total share of the Uber Pot (split across all winners). */
+  betShare: number;
+  /** What each winner of this bet receives (betShare / winnerCount). */
+  prizePerWinner: number;
+  /** @deprecated alias of prizePerWinner, kept for existing callers. */
   prize: number;
 };
 
@@ -54,7 +67,7 @@ export async function computeUberPotResults(roomId: string): Promise<UberPotResu
     where: { id: roomId },
     include: {
       members: { select: { userId: true, excludedFromPot: true } },
-      sideBets: { include: { entries: { select: { id: true, userId: true } } } },
+      sideBets: { include: { entries: { select: { id: true, userId: true, isWinner: true } } } },
     },
   });
   if (!room) return empty;
@@ -111,13 +124,25 @@ export async function computeUberPotResults(roomId: string): Promise<UberPotResu
   const byBet = new Map<string, BetResult>();
   const byUser = new Map<string, number>();
   for (const sb of settled) {
-    const winnerEntry = sb.winnerEntryId
-      ? sb.entries.find((e) => e.id === sb.winnerEntryId)
-      : undefined;
-    const winnerUserId = winnerEntry?.userId ?? null;
-    byBet.set(sb.id, { winnerEntryId: sb.winnerEntryId, winnerUserId, prize: prizeEach });
-    if (winnerUserId) {
-      byUser.set(winnerUserId, (byUser.get(winnerUserId) ?? 0) + prizeEach);
+    // Winners are the flagged entries; fall back to the legacy single
+    // winnerEntryId for rows predating the isWinner flag.
+    let winners = sb.entries.filter((e) => e.isWinner);
+    if (winners.length === 0 && sb.winnerEntryId) {
+      const legacy = sb.entries.find((e) => e.id === sb.winnerEntryId);
+      if (legacy) winners = [legacy];
+    }
+    const prizePerWinner = winners.length > 0 ? prizeEach / winners.length : 0;
+    byBet.set(sb.id, {
+      winnerEntryIds: winners.map((w) => w.id),
+      winnerUserIds: winners.map((w) => w.userId),
+      winnerEntryId: winners[0]?.id ?? null,
+      winnerUserId: winners[0]?.userId ?? null,
+      betShare: prizeEach,
+      prizePerWinner,
+      prize: prizePerWinner,
+    });
+    for (const w of winners) {
+      byUser.set(w.userId, (byUser.get(w.userId) ?? 0) + prizePerWinner);
     }
   }
 
